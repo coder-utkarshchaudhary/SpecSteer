@@ -1,0 +1,9 @@
+# Environment
+.venv
+
+# Cache files
+__pycache__
+
+# Data and model weights:
+data/
+model/
