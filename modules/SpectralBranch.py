@@ -1,5 +1,6 @@
 from torch import nn
 from torch.nn import Conv1d, ConvTranspose1d
+import torch
 
 from utils.config import settings
 
@@ -27,14 +28,16 @@ class Encoder(nn.Module):
         self.conv1D_block = nn.Sequential(*conv1d_layers)
         
         self.flatten = nn.Flatten()
-        
-        self.linear = nn.LazyLinear(settings.spectral_latent_dim)
+
+        # FIX: emit 2*spectral_latent_dim so reparameterize's chunk(2, dim=1)
+        # yields (B, spectral_latent_dim, H, W) for mu and logvar respectively.
+        self.linear = nn.LazyLinear(2 * settings.spectral_latent_dim)
 
     def forward(self, x):
         """
         x: (B, H, W, C)
         returns:
-            (B, spectral_latent_dim, H, W)
+            (B, 2*spectral_latent_dim, H, W)  — mu and logvar concatenated along the channel dim (dim=1). Caller should pass to reparameterize.
         """
         batch, h, w, c = x.shape
         assert h == settings.input_height, f"SPECTRAL ENCODER: Mismatch in height. Expected: {settings.input_height} found: {h}."
@@ -47,19 +50,19 @@ class Encoder(nn.Module):
 
         x = self.conv1D_block(x)
         # (B*H*W, final_conv_c, final_conv_l)
-        
+
         x = self.flatten(x)
         # (B*H*W, final_conv_c * final_conv_l)
-        
-        x = self.linear(x)
-        # (B*H*W, spectral_latent_dim)
 
-        x = x.reshape(batch, h, w, settings.spectral_latent_dim)
-        # (B, H, W, spectral_latent_dim)
-        
-        # Permute to standard PyTorch format
+        x = self.linear(x)
+        # (B*H*W, 2*spectral_latent_dim)
+
+        x = x.reshape(batch, h, w, 2 * settings.spectral_latent_dim)
+        # (B, H, W, 2*spectral_latent_dim)
+
+        # Permute to standard PyTorch format (channels first)
         x = x.permute(0, 3, 1, 2)
-        # (B, spectral_latent_dim, H, W)
+        # (B, 2*spectral_latent_dim, H, W)
 
         return x
 
@@ -67,6 +70,8 @@ class Decoder(nn.Module):
     def __init__(self):
         super().__init__()
         
+        # FIX: in_features = spectral_latent_dim (the reparameterized z dim,
+        # *not* 2x) because decoder receives the sampled z after chunk.
         self.linear = nn.Linear(
             in_features=settings.spectral_latent_dim,
             out_features=settings.spectral_linear_expansion_dim
@@ -143,14 +148,41 @@ class SpectralEncoderDecoder(nn.Module):
         self.encoder = Encoder()
         self.decoder = Decoder()
 
+    @staticmethod
+    def reparameterize(z_map):
+        """
+        Split encoder output into mu/logvar and sample z via the
+        reparameterization trick.
+
+        Args:
+            z_map : (B, 2*spectral_latent_dim, H, W) — raw encoder output
+
+        Returns:
+            z      : (B, spectral_latent_dim, H, W)
+            mu     : (B, spectral_latent_dim, H, W)
+            logvar : (B, spectral_latent_dim, H, W)
+        """
+        mu, logvar = torch.chunk(z_map, 2, dim=1)
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        z = mu + eps * std
+        return z, mu, logvar
+
     def forward(self, x):
         """
         x: (B, H, W, C)
         returns:
-            latent: (B, spectral_latent_dim, H, W)
+            z             : (B, spectral_latent_dim, H, W)
+            mu            : (B, spectral_latent_dim, H, W)
+            logvar        : (B, spectral_latent_dim, H, W)
             reconstruction: (B, H, W, input_channels)
-        """
-        latent = self.encoder(x)
-        reconstruction = self.decoder(latent)
 
-        return latent, reconstruction
+        Note: HSI_DualStream_PI_VAE in train.py calls .encoder and .decoder
+        directly (with its own shared reparameterize).  This standalone forward
+        is provided for single-branch inference and LDM Phase-2 encoding.
+        """
+        z_map = self.encoder(x)                          # (B, 2*spectral_latent_dim, H, W)
+        z, mu, logvar = self.reparameterize(z_map)       # (B, spectral_latent_dim, H, W)
+        reconstruction = self.decoder(z)                 # (B, H, W, input_channels)
+
+        return z, mu, logvar, reconstruction
