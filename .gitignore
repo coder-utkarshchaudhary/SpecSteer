@@ -13,3 +13,6 @@ docs/
 
 # Claude skills generated files
 graphify-out/
+
+# logs
+logs/
