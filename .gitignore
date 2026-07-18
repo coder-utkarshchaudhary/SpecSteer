@@ -9,7 +9,8 @@ data/
 model/
 
 # Documents
-docs/
+docs/*.pdf
+docs/*.py
 
 # Claude skills generated files
 graphify-out/
