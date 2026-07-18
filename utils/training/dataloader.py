@@ -71,9 +71,17 @@ class HSIPatchDataset(Dataset):
         """
         Returns:
             Tensor of shape (H, W, C) == (patch_size, patch_size, input_channels)
-            dtype: float32
+            dtype: float32, values in [0, 1].
+
+        Each patch is max-normalized on the fly (patch / patch.max()) so model
+        inputs live in [0, 1] — this matches the sigmoid reconstruction head and
+        keeps the MSE term coherent across datasets with different reflectance
+        scales.
         """
-        patch: np.ndarray = np.load(self.patch_files[idx])   # (H, W, C)
+        patch: np.ndarray = np.load(self.patch_files[idx]).astype(np.float32)   # (H, W, C)
+        patch_max = float(patch.max())
+        if patch_max > 0:
+            patch = patch / patch_max
         return torch.from_numpy(patch)                         # no copy if C-contiguous
 
 

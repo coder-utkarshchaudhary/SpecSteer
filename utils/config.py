@@ -171,3 +171,28 @@ def make_settings(dataset: str) -> Settings:
     if key not in DATASETS:
         raise ValueError(f"Unknown dataset '{dataset}'. Choose from {sorted(DATASETS)}.")
     return Settings(input_channels=DATASETS[key]["input_channels"])
+
+
+def apply_dataset(dataset: str) -> Settings:
+    """
+    Reconfigure the module-global ``settings`` in place for the given dataset.
+
+    The branch modules (SpatialBranch / SpectralBranch) read attributes off the
+    shared module-global ``settings`` object at forward time, so a single process
+    can target any dataset's band count simply by mutating that global and
+    recomputing the derived spatial/spectral dims.
+
+    Call this once before building a model / dataloader for a given dataset.
+
+    Args:
+        dataset : one of "IIRS", "M3", "AVIRIS" (case-insensitive)
+
+    Returns:
+        The (mutated) module-global ``settings`` instance.
+    """
+    key = dataset.upper()
+    if key not in DATASETS:
+        raise ValueError(f"Unknown dataset '{dataset}'. Choose from {sorted(DATASETS)}.")
+    settings.input_channels = DATASETS[key]["input_channels"]
+    settings.__post_init__()   # recompute all derived spatial/spectral dims
+    return settings
