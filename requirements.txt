@@ -49,3 +49,8 @@ triton==3.7.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.7.0
+
+# Added for utils/data-server.py + utils/data-client.py (raw-cube transfer over ngrok).
+fastapi
+uvicorn[standard]
+tqdm
