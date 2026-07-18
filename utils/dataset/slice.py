@@ -1,40 +1,49 @@
 """
-Slice preprocessed HSI cubes into (patch_size x patch_size x C) patches and
-save them to disk under data/processed/.
+utils/dataset/slice.py
+-----------------------
+Slice preprocessed HSI cubes (IIRS, M3, AVIRIS) into (patch_size x
+patch_size x C) patches and save them to disk under separate per-dataset
+roots.
 
 Split strategy: **region-disjoint** along the long (H) axis of each cube.
     - Each cube is carved into 3 contiguous row-regions (train / valid / test)
-    *before* patching — no patch ever crosses a region boundary.
+      *before* patching — no patch ever crosses a region boundary.
     - Split ratios: 70 / 15 / 15 (configurable in settings).
-    - This prevents spatial autocorrelation leakage between splits (important
-    for a rigorous evaluation in the paper).
+    - This prevents spatial autocorrelation leakage between splits.
 
 Patch sampling:
     - Stride = settings.patch_stride (48 by default — 25% overlap).
     - Partial patches that would extend beyond the region boundary are dropped.
-    - Sensor width W = 250 is fixed; with patch_size=64 and stride=48:
-        column starts: 0, 48, 96, 144, 192  (5 columns per row group).
+    - Any patch whose fraction of fill/invalid pixels (per the
+        preprocessor's valid_mask) exceeds settings.fill_fraction_threshold
+        is dropped — matters most for AVIRIS (orthorectified, large
+        off-swath fill corners) and M3 (`data ignore value = -999`).
 
 Output layout:
-    data/processed/<folder_name>/<split>/patch_NNNNN.npy   (64x64x108) float32
+    data/processed/<DATASET>/<scene>/<split>/patch_NNNNN.npy   (64x64xC) float32
 
 Usage:
-    python utils/dataset/slice.py [--data-root data/original] [--out-root data/processed] [--overwrite]
+    python utils/dataset/slice.py --dataset {iirs,m3,aviris,all} [--overwrite]
+    python utils/dataset/slice.py --dataset m3 --data-root "data/original - m3" --out-root data/processed/M3
 """
 
 import argparse
-import os
 from pathlib import Path
 
 import numpy as np
 
-from utils.dataset.preprocess import preprocess_cube
-from utils.config import settings
+from utils.config import DATASETS, settings
+from utils.dataset.preprocess import (
+    AVIRISPreprocessor,
+    IIRSPreprocessor,
+    M3Preprocessor,
+)
 
 
 # ---------------------------------------------------------------------------
-# Patch extraction helpers
+# Patch extraction helpers (shared by all slicers)
 # ---------------------------------------------------------------------------
+
 def _region_bounds(H: int, ratios: tuple) -> list:
     """
     Compute (start, end) row indices for each split region.
@@ -54,172 +63,277 @@ def _region_bounds(H: int, ratios: tuple) -> list:
 
 def _extract_patches(
     cube_hwc: np.ndarray,
+    valid_mask: np.ndarray,
     row_start: int,
     row_end: int,
     patch_size: int,
     stride: int,
-) -> list:
+    fill_fraction_threshold: float,
+) -> tuple:
     """
-    Extract non-partial patches from a row region of the cube.
+    Extract non-partial patches from a row region of the cube, dropping any
+    patch whose fill fraction exceeds `fill_fraction_threshold`.
 
     Args:
-        cube_hwc  : (H, W, C) float32
-        row_start : first row of the region (inclusive)
-        row_end   : last  row of the region (exclusive)
-        patch_size: height and width of each patch
-        stride    : step size (controls overlap)
+        cube_hwc    : (H, W, C) float32
+        valid_mask  : (H, W) bool — True where the pixel is not fill/invalid
+        row_start   : first row of the region (inclusive)
+        row_end     : last  row of the region (exclusive)
+        patch_size  : height and width of each patch
+        stride      : step size (controls overlap)
+        fill_fraction_threshold : max allowed fraction of invalid pixels
 
     Returns:
-        List of (patch_size, patch_size, C) float32 arrays.
+        (patches, dropped) — list of (patch_size, patch_size, C) float32
+        arrays, and the count of patches dropped for excess fill.
     """
     H, W, C = cube_hwc.shape
     patches = []
+    dropped = 0
 
     r = row_start
     while r + patch_size <= row_end:
         c = 0
         while c + patch_size <= W:
-            patch = cube_hwc[r : r + patch_size, c : c + patch_size, :]
-            patches.append(patch.copy())
+            mask_patch = valid_mask[r : r + patch_size, c : c + patch_size]
+            fill_fraction = 1.0 - float(mask_patch.mean())
+            if fill_fraction <= fill_fraction_threshold:
+                patch = cube_hwc[r : r + patch_size, c : c + patch_size, :]
+                patches.append(patch.copy())
+            else:
+                dropped += 1
             c += stride
         r += stride
 
-    return patches
+    return patches, dropped
 
 
 # ---------------------------------------------------------------------------
-# Per-folder slice
+# Base slicer
 # ---------------------------------------------------------------------------
 
-def slice_folder(
-    folder_path: str,
-    out_root: str,
-    patch_size: int = settings.patch_size,
-    stride: int = settings.patch_stride,
-    split_ratios: tuple = settings.split_ratios,
-    overwrite: bool = False,
-) -> dict:
+class BaseHSISlicer:
     """
-    Preprocess one data folder and save all patches.
+    Shared region-split + patch + save orchestration.
 
-    Args:
-        folder_path  : path to one `data/original/<name>/` directory
-        out_root     : root for processed output (e.g. `data/processed/`)
-        patch_size   : spatial size of patches (square)
-        stride       : sampling stride
-        split_ratios : (train, valid, test) fractions
-        overwrite    : re-process even if output already exists
-
-    Returns:
-        Dict mapping split name → number of patches saved.
+    Subclasses set `dataset_name` (key into utils.config.DATASETS),
+    `preprocessor_cls`, and implement `iter_sources(raw_root)` to yield
+    (scene_name, source) pairs.
     """
-    folder_name = Path(folder_path).name
-    split_names = ("train", "valid", "test")
 
-    # Build output directories
-    out_dirs = {}
-    for split in split_names:
-        out_dir = Path(out_root) / folder_name / split
-        out_dirs[split] = out_dir
+    dataset_name: str = None
+    preprocessor_cls = None
 
-        if not overwrite and out_dir.exists() and any(out_dir.iterdir()):
-            print(f"  [skip] {folder_name}/{split} already exists (use --overwrite to redo)")
-            # Return existing counts
-            counts = {s: len(list((Path(out_root) / folder_name / s).glob("*.npy"))) for s in split_names}
-            return counts
-
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Preprocess: (C, H, W)
-    print(f"  Preprocessing {folder_name} ...")
-    cube_chw = preprocess_cube(folder_path)           # (C, H, W)
-    cube_hwc = cube_chw.transpose(1, 2, 0)            # (H, W, C) — model-ready
-
-    H, W, C = cube_hwc.shape
-    bounds = _region_bounds(H, split_ratios)
-
-    counts = {}
-    for split, (r_start, r_end) in zip(split_names, bounds):
-        patches = _extract_patches(cube_hwc, r_start, r_end, patch_size, stride)
-        out_dir = out_dirs[split]
-
-        for idx, patch in enumerate(patches):
-            # zero-padded index for lexicographic sort in the dataloader
-            fname = out_dir / f"patch_{idx:05d}.npy"
-            np.save(str(fname), patch)
-
-        counts[split] = len(patches)
-        print(
-            f"    {split}: rows [{r_start}, {r_end}) → "
-            f"{len(patches)} patches saved to {out_dir}"
+    def __init__(
+        self,
+        out_root: str = None,
+        patch_size: int = None,
+        stride: int = None,
+        split_ratios: tuple = None,
+        fill_fraction_threshold: float = None,
+        overwrite: bool = False,
+    ):
+        cfg = DATASETS[self.dataset_name]
+        self.out_root = Path(out_root) if out_root else Path(cfg["processed_root"])
+        self.patch_size = patch_size or settings.patch_size
+        self.stride = stride or settings.patch_stride
+        self.split_ratios = split_ratios or settings.split_ratios
+        self.fill_fraction_threshold = (
+            fill_fraction_threshold
+            if fill_fraction_threshold is not None
+            else settings.fill_fraction_threshold
         )
+        self.overwrite = overwrite
+        self.preprocessor = self.preprocessor_cls()
 
-    return counts
+    def iter_sources(self, raw_root: Path):
+        """Yield (scene_name, source) pairs for every acquisition under raw_root."""
+        raise NotImplementedError
+
+    def slice_source(self, scene_name: str, source) -> dict:
+        """Preprocess one source and save all of its patches. Returns per-split counts."""
+        split_names = ("train", "valid", "test")
+        out_dirs = {s: self.out_root / scene_name / s for s in split_names}
+
+        if not self.overwrite and all(d.exists() and any(d.iterdir()) for d in out_dirs.values()):
+            print(f"  [skip] {scene_name} already exists (use --overwrite to redo)")
+            return {s: len(list(out_dirs[s].glob("*.npy"))) for s in split_names}
+
+        for d in out_dirs.values():
+            d.mkdir(parents=True, exist_ok=True)
+
+        print(f"  Preprocessing {scene_name} ...")
+        cube_chw, valid_mask = self.preprocessor.preprocess(source)   # (C, H, W), (H, W)
+        cube_hwc = cube_chw.transpose(1, 2, 0)                        # (H, W, C) — model-ready
+
+        H, W, C = cube_hwc.shape
+        bounds = _region_bounds(H, self.split_ratios)
+
+        counts = {}
+        for split, (r_start, r_end) in zip(split_names, bounds):
+            patches, dropped = _extract_patches(
+                cube_hwc,
+                valid_mask,
+                r_start,
+                r_end,
+                self.patch_size,
+                self.stride,
+                self.fill_fraction_threshold,
+            )
+            out_dir = out_dirs[split]
+            for idx, patch in enumerate(patches):
+                fname = out_dir / f"patch_{idx:05d}.npy"
+                np.save(str(fname), patch)
+
+            counts[split] = len(patches)
+            print(
+                f"    {split}: rows [{r_start}, {r_end}) → {len(patches)} patches saved "
+                f"({dropped} dropped for >{self.fill_fraction_threshold:.0%} fill) to {out_dir}"
+            )
+
+        return counts
+
+    def run(self, raw_root=None, limit: int = None) -> dict:
+        """Process every source under raw_root. Returns aggregate per-split counts."""
+        raw_root = Path(raw_root) if raw_root else Path(DATASETS[self.dataset_name]["raw_root"])
+        if not raw_root.exists():
+            raise FileNotFoundError(f"raw root not found: {raw_root}")
+
+        sources = list(self.iter_sources(raw_root))
+        if limit is not None:
+            sources = sources[:limit]
+        if not sources:
+            print(f"  No sources found in {raw_root}")
+            return {"train": 0, "valid": 0, "test": 0}
+
+        total = {"train": 0, "valid": 0, "test": 0}
+        for scene_name, source in sources:
+            print(f"[{scene_name}]")
+            counts = self.slice_source(scene_name, source)
+            for split, n in counts.items():
+                total[split] += n
+        return total
+
+
+# ---------------------------------------------------------------------------
+# Per-dataset slicers
+# ---------------------------------------------------------------------------
+
+class IIRSSlicer(BaseHSISlicer):
+    """One source per acquisition sub-folder; scene name = sub-folder name."""
+
+    dataset_name = "IIRS"
+    preprocessor_cls = IIRSPreprocessor
+
+    def iter_sources(self, raw_root: Path):
+        for p in sorted(raw_root.iterdir()):
+            if p.is_dir():
+                yield p.name, p
+
+
+class M3Slicer(BaseHSISlicer):
+    """
+    One source per `*_rfl.img` file; scene name = the code between `m3g`
+    and the first `_` (e.g. `m3g20090814t021520_v01_rfl.img` → `20090814t021520`).
+    """
+
+    dataset_name = "M3"
+    preprocessor_cls = M3Preprocessor
+
+    def iter_sources(self, raw_root: Path):
+        for p in sorted(raw_root.glob("*_rfl.img")):
+            stem = p.stem
+            after_prefix = stem[len("m3g") :] if stem.startswith("m3g") else stem
+            scene = after_prefix.split("_")[0]
+            yield scene, p
+
+
+class AVIRISSlicer(BaseHSISlicer):
+    """One source per `*.nc` file; scene name = the full filename stem."""
+
+    dataset_name = "AVIRIS"
+    preprocessor_cls = AVIRISPreprocessor
+
+    def iter_sources(self, raw_root: Path):
+        for p in sorted(raw_root.glob("*.nc")):
+            yield p.stem, p
+
+
+SLICERS = {
+    "IIRS": IIRSSlicer,
+    "M3": M3Slicer,
+    "AVIRIS": AVIRISSlicer,
+}
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Slice IIRS hyperspectral cubes into patches for training."
+        description="Slice IIRS / M3 / AVIRIS hyperspectral cubes into patches for training."
+    )
+    parser.add_argument(
+        "--dataset",
+        choices=["iirs", "m3", "aviris", "all"],
+        default="all",
+        help="Which dataset to process (default: all)",
     )
     parser.add_argument(
         "--data-root",
-        default=settings.data_original_root,
-        help=f"Root directory with one sub-folder per observation (default: {settings.data_original_root})",
+        default=None,
+        help="Override the raw root (only valid together with a single --dataset).",
     )
     parser.add_argument(
         "--out-root",
-        default=settings.data_processed_root,
-        help=f"Root directory for processed patch output (default: {settings.data_processed_root})",
+        default=None,
+        help="Override the processed output root (only valid together with a single --dataset).",
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Re-process folders whose output already exists",
+        help="Re-process scenes whose output already exists",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Process only the first N sources per dataset (debug / smoke-test).",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    data_root = Path(args.data_root)
-    out_root = Path(args.out_root)
+    names = list(SLICERS) if args.dataset == "all" else [args.dataset.upper()]
 
-    if not data_root.exists():
-        raise FileNotFoundError(f"data-root not found: {data_root}")
+    if args.data_root and len(names) > 1:
+        raise SystemExit("--data-root can only be used together with a single --dataset")
+    if args.out_root and len(names) > 1:
+        raise SystemExit("--out-root can only be used together with a single --dataset")
 
-    folders = sorted([p for p in data_root.iterdir() if p.is_dir()])
-    if not folders:
-        print(f"No sub-folders found in {data_root}")
-        return
-
-    print(f"Found {len(folders)} folders in {data_root}")
-    print(f"Output root: {out_root}")
-    print(
-        f"Patch: {settings.patch_size}×{settings.patch_size}, "
-        f"stride: {settings.patch_stride}, "
-        f"split: {settings.split_ratios}"
-    )
-    print()
-
-    total = {"train": 0, "valid": 0, "test": 0}
-    for folder in folders:
-        print(f"[{folder.name}]")
-        counts = slice_folder(
-            str(folder),
-            str(out_root),
-            overwrite=args.overwrite,
+    grand_total = {"train": 0, "valid": 0, "test": 0}
+    for name in names:
+        print(f"=== {name} ===")
+        slicer = SLICERS[name](out_root=args.out_root, overwrite=args.overwrite)
+        raw_root = args.data_root or DATASETS[name]["raw_root"]
+        print(f"  raw root : {raw_root}")
+        print(f"  out  root: {slicer.out_root}")
+        print(
+            f"  patch: {slicer.patch_size}×{slicer.patch_size}, stride: {slicer.stride}, "
+            f"split: {slicer.split_ratios}, fill_threshold: {slicer.fill_fraction_threshold:.0%}"
         )
-        for split, n in counts.items():
-            total[split] += n
 
-    print()
-    print("=== Summary ===")
-    for split, n in total.items():
+        totals = slicer.run(raw_root=raw_root, limit=args.limit)
+        for split, n in totals.items():
+            grand_total[split] += n
+        print()
+
+    print("=== Summary (all datasets processed this run) ===")
+    for split, n in grand_total.items():
         print(f"  {split:6s}: {n:,} patches")
-    print(f"  total : {sum(total.values()):,} patches")
+    print(f"  total : {sum(grand_total.values()):,} patches")
 
 
 if __name__ == "__main__":

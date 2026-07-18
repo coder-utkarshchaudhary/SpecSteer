@@ -15,6 +15,10 @@ class Settings:
     With n=2 blocks and input_channels=108:
       Encoder:  108 → 54 → 27  (L);  channels  1 → 108 → 216
       Decoder:   27 → 54 → 108 (L);  channels 216 → 108 → 1
+
+    NOTE: input_channels varies per dataset (IIRS=256, M3=84, AVIRIS=424) — see
+    DATASETS / make_settings() below. Every dataset needs its own Settings
+    instance (and therefore its own model instance) since band count differs.
     """
 
     # ------------------------------------------------------------------
@@ -22,18 +26,21 @@ class Settings:
     # ------------------------------------------------------------------
     input_height: int = 64
     input_width: int = 64
-    input_channels: int = 108          # bands 7:115 of the 256-band IIRS cube
+    input_channels: int = 256          # whole-cube band count; overridden per dataset
 
     # ------------------------------------------------------------------
     # Preprocessing knobs (used by utils/dataset/preprocess.py)
     # ------------------------------------------------------------------
-    band_start: int = 7                # inclusive band index in the raw 256-band cube
-    band_end: int = 115               # exclusive
-    # Index *within the selected 108-band subset* that corresponds to ≈1500 nm.
-    # Absolute index 48 - band_start = 48 - 7 = 41 (matches file_processing.py).
-    norm_band_idx: int = 41
+    # Target wavelength (nm) for the normalisation reference band. The actual
+    # band index is resolved per-cube from that cube's own wavelength array
+    # (nearest match to this target) — no band selection/cropping is applied
+    # to the cube itself; the whole spectrum is kept.
+    norm_target_nm: float = 1500.0
     savgol_window: int = 7
     savgol_polyorder: int = 2
+
+    # Drop any patch whose fraction of fill/invalid pixels exceeds this.
+    fill_fraction_threshold: float = 0.05
 
     # ------------------------------------------------------------------
     # Slicing knobs (used by utils/dataset/slice.py)
@@ -43,7 +50,7 @@ class Settings:
     split_ratios: tuple = (0.70, 0.15, 0.15)   # (train, valid, test)
 
     # ------------------------------------------------------------------
-    # Data paths
+    # Data paths (generic defaults; per-dataset paths live in DATASETS)
     # ------------------------------------------------------------------
     data_original_root: str = "data/original"
     data_processed_root: str = "data/processed"
@@ -94,18 +101,98 @@ class Settings:
         #   After n blocks: final channel = input_channels * 2^(n-1)
         self.spectral_transpose_c = self.input_channels * (
             2 ** (self.spectral_n_1D_conv_blocks - 1)
-        )   # = 108 * 2 = 216
+        )
 
         # Encoder Conv1d final sequence length (halved each block):
         #   L_final = input_channels // 2^n
         self.spectral_transpose_l = self.input_channels // (
             2 ** self.spectral_n_1D_conv_blocks
-        )   # = 108 // 4 = 27
+        )
 
         # Linear expansion size (what the decoder's linear layer must produce):
         self.spectral_linear_expansion_dim = (
             self.spectral_transpose_c * self.spectral_transpose_l
-        )   # = 216 * 27 = 5832
+        )
 
 
-settings = Settings()
+settings = Settings()   # default: IIRS-shaped (input_channels=256)
+
+
+# ---------------------------------------------------------------------------
+# Multi-dataset registry
+# ---------------------------------------------------------------------------
+# Each entry describes one sensor's raw location, processed output location,
+# native band count (after any dataset-specific cropping needed to keep the
+# spectral branch's Conv1d/ConvTranspose1d arithmetic exact), and fill value.
+#
+# Band counts:
+#   IIRS   : 256 bands, divides cleanly by 2^spectral_n_1D_conv_blocks (4) → no crop.
+#   M3     : 85 bands natively — NOT divisible by 4 (85 → 21 → 84 ≠ 85 on the
+#            decoder round-trip). Cropped to 84 (drop the last band).
+#   AVIRIS : 424 bands, divides cleanly by 4 → no crop.
+DATASETS = {
+    "IIRS": {
+        "input_channels": 256,
+        "raw_root": "data/original - IIRS",
+        "processed_root": "data/processed/IIRS",
+        "fill_value": None,        # no sentinel fill value; only non-finite pixels are invalid
+        "crop_bands": None,
+    },
+    "M3": {
+        "input_channels": 84,
+        "raw_root": "data/original - m3",
+        "processed_root": "data/processed/M3",
+        "fill_value": -999.0,
+        "crop_bands": 84,          # drop the last of 85 native bands
+    },
+    "AVIRIS": {
+        "input_channels": 424,
+        "raw_root": "data/original - AVIRIS",
+        "processed_root": "data/processed/AVIRIS",
+        "fill_value": -9999.0,
+        "crop_bands": None,
+    },
+}
+
+
+def make_settings(dataset: str) -> Settings:
+    """
+    Build a Settings instance whose input_channels (and therefore every
+    derived spatial/spectral dim) matches the given dataset.
+
+    Args:
+        dataset : one of "IIRS", "M3", "AVIRIS" (case-insensitive)
+
+    Returns:
+        Settings with input_channels overridden; all other fields keep the
+        dataclass defaults.
+    """
+    key = dataset.upper()
+    if key not in DATASETS:
+        raise ValueError(f"Unknown dataset '{dataset}'. Choose from {sorted(DATASETS)}.")
+    return Settings(input_channels=DATASETS[key]["input_channels"])
+
+
+def apply_dataset(dataset: str) -> Settings:
+    """
+    Reconfigure the module-global ``settings`` in place for the given dataset.
+
+    The branch modules (SpatialBranch / SpectralBranch) read attributes off the
+    shared module-global ``settings`` object at forward time, so a single process
+    can target any dataset's band count simply by mutating that global and
+    recomputing the derived spatial/spectral dims.
+
+    Call this once before building a model / dataloader for a given dataset.
+
+    Args:
+        dataset : one of "IIRS", "M3", "AVIRIS" (case-insensitive)
+
+    Returns:
+        The (mutated) module-global ``settings`` instance.
+    """
+    key = dataset.upper()
+    if key not in DATASETS:
+        raise ValueError(f"Unknown dataset '{dataset}'. Choose from {sorted(DATASETS)}.")
+    settings.input_channels = DATASETS[key]["input_channels"]
+    settings.__post_init__()   # recompute all derived spatial/spectral dims
+    return settings

@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
 # scripts/train.sh
 # ----------------
-# Launch training for the Dual-Stream Physics-Informed VAE.
+# Launch training for the HSI VAE ablation study (model-agnostic train/train.py).
 #
 # Run from the repo root:
-#   bash scripts/train.sh [extra args forwarded to train/train.py]
+#   # Single run:
+#   bash scripts/train.sh --model vae-our --dataset IIRS --loss physics --epochs 100
 #
-# Examples:
-#   bash scripts/train.sh --epochs 200 --beta 0.005
-#   bash scripts/train.sh --no-wandb
-#   DATA_ROOT=data/processed CKPT_DIR=runs/exp1 bash scripts/train.sh
+#   # Full 21-run ablation grid (all models x all datasets x loss regimes):
+#   bash scripts/train.sh --all --epochs 100
 #
-# One-time W&B setup (run once before first training):
-#   wandb login
+# The grid is:
+#   - vae-our             : physics only        -> 1 run/dataset  (3)
+#   - vae-standard        : standard + physics  -> 2 runs/dataset (6)
+#   - vae-3d-spatio-spectral : standard + physics -> 2 runs/dataset (6)
+#   - vae-1d-pixelwise    : standard + physics  -> 2 runs/dataset (6)
+#   Total: 3 + 6 + 6 + 6 = 21 trainings across IIRS / M3 / AVIRIS.
+#
+# Checkpoints are written to ${CKPT_DIR}/<DATASET>/<name>.pt
+#   vae-our      -> vae-our.pt
+#   others       -> <model>_<loss>.pt
 #
 # Environment overrides:
-#   DATA_ROOT    — processed data directory  (default: data/processed)
-#   CKPT_DIR     — checkpoint directory      (default: checkpoints)
-#   WANDB_PROJECT — W&B project name        (default: hsi-pi-vae)
+#   CKPT_DIR   — checkpoint root directory   (default: model)
 
 set -euo pipefail
 
@@ -26,22 +31,45 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
-DATA_ROOT="${DATA_ROOT:-data/processed}"
-CKPT_DIR="${CKPT_DIR:-model/checkpoints}"
-WANDB_PROJECT="${WANDB_PROJECT:-hsi-pi-vae}"
-
-echo "=============================================="
-echo " Dual-Stream PI-VAE Training"
-echo "  data root   : ${REPO_ROOT}/${DATA_ROOT}"
-echo "  ckpt dir    : ${REPO_ROOT}/${CKPT_DIR}"
-echo "  wandb proj  : ${WANDB_PROJECT}"
-echo "=============================================="
-echo
+CKPT_DIR="${CKPT_DIR:-model}"
 
 cd "${REPO_ROOT}"
 
-python train/train.py \
-    --data-root      "${DATA_ROOT}" \
-    --ckpt-dir       "${CKPT_DIR}" \
-    --wandb-project  "${WANDB_PROJECT}" \
-    "$@"
+# --------------------------------------------------------------------------
+# --all : run the full ablation grid. Any extra args (e.g. --epochs 100) are
+# forwarded to every run.
+# --------------------------------------------------------------------------
+if [[ "${1:-}" == "--all" ]]; then
+    shift
+    DATASETS=("IIRS" "M3" "AVIRIS")
+    STANDARD_MODELS=("vae-standard" "vae-3d-spatio-spectral" "vae-1d-pixelwise")
+
+    echo "=============================================="
+    echo " HSI VAE Ablation — full grid (21 runs)"
+    echo "  ckpt dir : ${REPO_ROOT}/${CKPT_DIR}"
+    echo "=============================================="
+
+    for ds in "${DATASETS[@]}"; do
+        # vae-our: physics only
+        echo ">>> vae-our | ${ds} | physics"
+        python train/train.py --model vae-our --dataset "${ds}" --loss physics \
+            --ckpt-dir "${CKPT_DIR}" "$@"
+
+        # other models: standard + physics
+        for m in "${STANDARD_MODELS[@]}"; do
+            for loss in standard physics; do
+                echo ">>> ${m} | ${ds} | ${loss}"
+                python train/train.py --model "${m}" --dataset "${ds}" --loss "${loss}" \
+                    --ckpt-dir "${CKPT_DIR}" "$@"
+            done
+        done
+    done
+
+    echo "Ablation grid complete."
+    exit 0
+fi
+
+# --------------------------------------------------------------------------
+# Single run: forward all args straight through to train/train.py.
+# --------------------------------------------------------------------------
+python train/train.py --ckpt-dir "${CKPT_DIR}" "$@"

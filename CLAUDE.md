@@ -1,7 +1,7 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-06-21  
-> **Status:** All components implemented and byte-compiled.  
+> **Last updated:** 2026-07-18  
+> **Status:** All 4 ablation models + downstream experiments implemented and byte-compiled.  
 > ⚠️ Compile-pass ≠ verified-run. See [Caveats](#caveats) before running.
 
 ---
@@ -62,10 +62,60 @@ data/processed/<folder>/
 | `utils/training/dataloader.py` | HSIPatchDataset + DataLoader factory | ✅ New |
 | `modules/SpatialBranch.py` | Spatial encoder-decoder | ✅ Fixed |
 | `modules/SpectralBranch.py` | Spectral encoder-decoder | ✅ Fixed |
+| `modules/vae_our.py` | vae-our dual-stream PI-VAE (+ encode/decode_latents) | ✅ |
+| `modules/vae_standard.py` | Baseline A: 2D spatial VAE (AutoencoderKL-style) | ✅ New |
+| `modules/vae_3d.py` | Baseline B: 3D spatio-spectral VAE | ✅ New |
+| `modules/vae_1d.py` | Baseline C: 1D pixelwise VAE | ✅ New |
+| `modules/losses.py` | Shared SAM + KL loss primitives | ✅ |
+| `modules/registry.py` | CLI name → model class; model contract | ✅ |
 | `train/train.py` | Training loop, wandb, CLI, checkpointing | ✅ Rewritten |
+| `inference/inference.py` | Reconstruction eval (MSE/SAM/PSNR/SSIM) | ✅ |
+| `inference/downstream.py` | Latent noise-injection + interpolation experiments | ✅ New |
+| `notebooks/*.ipynb` | Per-model self-contained training notebooks | ✅ |
+| `inference/notebooks/*.ipynb` | Per-model self-contained eval notebooks | ✅ |
 | `scripts/preprocess.sh` | One-command preprocessing runner | ✅ New |
-| `scripts/train.sh` | One-command training runner | ✅ New |
+| `scripts/train.sh` | Training runner (single run or full 21-run grid) | ✅ New |
 | `docs/file_processing.py` | Reference script (do not modify) | — |
+
+### Ablation models & the model contract
+
+All four models implement one model-agnostic contract (see `modules/registry.py`;
+`train.py`/`inference.py` never branch on model type):
+
+```
+forward(x)                                               # x: (B, H, W, C)
+loss_terms(x, beta, lambda_physics, use_physics) -> dict(loss, mse, kld, sam)
+reconstruct(x) -> (B, H, W, C)
+encode_latents(x) -> list[Tensor]                        # deterministic (mu) latents
+decode_latents(list[Tensor]) -> (B, H, W, C)
+```
+
+| Model | Registry name | Latent | Hypothesis |
+|-------|---------------|--------|------------|
+| A: 2D Spatial | `vae-standard` | `(B, 16, 8, 8)` map | 2D convs blur pixel spectra → good PSNR, poor SAM |
+| B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
+| C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 32)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
+| Proposed: SpecSteer | `vae-our` | `[(B,256), (B,128,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
+
+Baselines A/B preserve the spatial grid at 8×8 (H,W ÷ 8) and reconstruct
+exactly for any band count C (B keeps spectral depth at stride 1; A/C are
+C-agnostic by construction), so all three run unchanged on IIRS/M3/AVIRIS.
+
+### Downstream experiments (`inference/downstream.py`)
+
+Model-agnostic latent-space probes proving diffusion-readiness without training an LDM:
+
+```bash
+# All 4 models on IIRS test split, with figures:
+PYTHONPATH=. python inference/downstream.py --dataset IIRS --save-plots
+```
+
+1. **Noise-injection robustness** — encode → add `N(0, σ²)` to latents at
+   `σ ∈ {0, 0.1, 0.5, 1.0}` → decode → SAM/PSNR/SSIM vs clean. Robust manifolds
+   degrade gracefully; fragile ones collapse by σ=0.5.
+2. **Chemical interpolation smoothness** — `z_mix = α·z_A + (1−α)·z_B` for
+   `α ∈ [0,1]`, decode, track a pixel's spectrum. Reports *jaggedness* (mean L2
+   of the 2nd difference along α); lower = smoother = more generative-ready.
 
 ---
 
