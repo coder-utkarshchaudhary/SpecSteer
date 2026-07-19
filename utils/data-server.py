@@ -125,7 +125,7 @@ def _iter_file(path: Path, start: int, end: int) -> Iterator[bytes]:
             yield chunk
 
 
-app = FastAPI(title="specsteer raw HSI file server")
+app = FastAPI(title="PRISM raw HSI file server")
 
 
 @app.get("/health")

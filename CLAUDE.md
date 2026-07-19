@@ -95,7 +95,7 @@ decode_latents(list[Tensor]) -> (B, H, W, C)
 | A: 2D Spatial | `vae-standard` | `(B, 16, 8, 8)` map | 2D convs blur pixel spectra → good PSNR, poor SAM |
 | B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
 | C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 32)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
-| Proposed: SpecSteer | `vae-our` | `[(B,256), (B,128,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
+| Proposed: PRISM | `vae-our` | `[(B,256), (B,128,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
 
 Baselines A/B preserve the spatial grid at 8×8 (H,W ÷ 8) and reconstruct
 exactly for any band count C (B keeps spectral depth at stride 1; A/C are

@@ -151,7 +151,7 @@ def _download_one(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download raw HSI cubes from the specsteer server.")
+    parser = argparse.ArgumentParser(description="Download raw HSI cubes from the PRISM server.")
     parser.add_argument("--server-url", required=True, help="e.g. https://abc123.ngrok-free.app")
     parser.add_argument("--dataset", required=True, help="IIRS | M3 | AVIRIS")
     parser.add_argument("--dest", default=None,
