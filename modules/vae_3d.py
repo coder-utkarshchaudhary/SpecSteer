@@ -47,12 +47,6 @@ from modules.losses import spectral_angle_mapper_loss, kl_divergence
 from utils.config import settings
 
 
-# Capacity. 3D convs are expensive, so BASE is kept small. With H=W=64 and
-# N_DOWN=3 the spatial grid is 8x8; the spectral depth C is preserved end to end.
-BASE_CH = 16
-N_DOWN = 3
-LATENT_CH = 8
-
 # Kernel/stride tuples are (depth, height, width): depth (spectral) uses stride 1
 # so C is preserved; H/W use stride 2 to down/upsample by a factor of 2 per block.
 _DOWN_K = (3, 4, 4)
@@ -61,31 +55,39 @@ _DOWN_P = (1, 1, 1)
 
 
 class VAE_3D_SpatioSpectral(nn.Module):
-    """3D spatio-spectral VAE ("vae-3d-spatio-spectral"), Baseline B."""
+    """3D spatio-spectral VAE ("vae-3d-spatio-spectral"), Baseline B.
+
+    Capacity knobs (`vae_3d_base_ch`, `vae_3d_n_down`, `vae_3d_latent_ch`) are
+    read from `settings` at build time so a per-dataset hyperparam YAML can
+    match this baseline's param count to vae-our at each dataset.
+    """
 
     def __init__(self):
         super().__init__()
-        self.latent_ch = LATENT_CH
+        base_ch = settings.vae_3d_base_ch
+        n_down = settings.vae_3d_n_down
+        latent_ch = settings.vae_3d_latent_ch
+        self.latent_ch = latent_ch
 
-        # ---- Encoder: (B, 1, C, H, W) -> (B, 2*LATENT_CH, C, h', w') ----
-        enc = [nn.Conv3d(1, BASE_CH, kernel_size=3, stride=1, padding=1), nn.ReLU()]
-        in_c = BASE_CH
-        for _ in range(N_DOWN):
+        # ---- Encoder: (B, 1, C, H, W) -> (B, 2*latent_ch, C, h', w') ----
+        enc = [nn.Conv3d(1, base_ch, kernel_size=3, stride=1, padding=1), nn.ReLU()]
+        in_c = base_ch
+        for _ in range(n_down):
             out_c = in_c * 2
             enc += [nn.Conv3d(in_c, out_c, kernel_size=_DOWN_K, stride=_DOWN_S, padding=_DOWN_P),
                     nn.ReLU()]
             in_c = out_c
-        enc.append(nn.Conv3d(in_c, 2 * LATENT_CH, kernel_size=1))
+        enc.append(nn.Conv3d(in_c, 2 * latent_ch, kernel_size=1))
         self.encoder = nn.Sequential(*enc)
 
-        # ---- Decoder: (B, LATENT_CH, C, h', w') -> (B, 1, C, H, W) ----
-        dec = [nn.Conv3d(LATENT_CH, in_c, kernel_size=1), nn.ReLU()]
-        for _ in range(N_DOWN):
+        # ---- Decoder: (B, latent_ch, C, h', w') -> (B, 1, C, H, W) ----
+        dec = [nn.Conv3d(latent_ch, in_c, kernel_size=1), nn.ReLU()]
+        for _ in range(n_down):
             out_c = in_c // 2
             dec += [nn.ConvTranspose3d(in_c, out_c, kernel_size=_DOWN_K, stride=_DOWN_S,
                                        padding=_DOWN_P), nn.ReLU()]
             in_c = out_c
-        # in_c is now BASE_CH; final 3x3x3 conv back to a single-channel volume.
+        # in_c is now base_ch; final 3x3x3 conv back to a single-channel volume.
         dec.append(nn.Conv3d(in_c, 1, kernel_size=3, stride=1, padding=1))
         self.decoder = nn.Sequential(*dec)
 

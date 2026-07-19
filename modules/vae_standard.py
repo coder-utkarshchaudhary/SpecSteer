@@ -41,41 +41,42 @@ from modules.losses import spectral_angle_mapper_loss, kl_divergence
 from utils.config import settings
 
 
-# Encoder/decoder capacity. Kept module-local so the baseline is self-contained;
-# only the band count is read from settings at build time. With H=W=64 and
-# N_DOWN=3 the latent grid is 8x8 (a 3x spatial-downsampling AutoencoderKL).
-BASE_CH = 64
-N_DOWN = 3
-LATENT_CH = 16
-
-
 class VAE_Standard(nn.Module):
-    """Single-stream 2D-conv VAE baseline ("vae-standard"), Baseline A."""
+    """Single-stream 2D-conv VAE baseline ("vae-standard"), Baseline A.
+
+    Capacity knobs (`vae_standard_base_ch`, `vae_standard_n_down`,
+    `vae_standard_latent_ch`) are read from `settings` at build time so a
+    per-dataset hyperparam YAML can match this baseline's param count to
+    vae-our at each dataset.
+    """
 
     def __init__(self):
         super().__init__()
         c = settings.input_channels
-        self.latent_ch = LATENT_CH
+        base_ch = settings.vae_standard_base_ch
+        n_down = settings.vae_standard_n_down
+        latent_ch = settings.vae_standard_latent_ch
+        self.latent_ch = latent_ch
 
-        # ---- Encoder: (B, C, H, W) -> (B, 2*LATENT_CH, H/2^N, W/2^N) ----
-        enc = [nn.Conv2d(c, BASE_CH, kernel_size=3, stride=1, padding=1), nn.ReLU()]
-        in_c = BASE_CH
-        for _ in range(N_DOWN):
+        # ---- Encoder: (B, C, H, W) -> (B, 2*latent_ch, H/2^N, W/2^N) ----
+        enc = [nn.Conv2d(c, base_ch, kernel_size=3, stride=1, padding=1), nn.ReLU()]
+        in_c = base_ch
+        for _ in range(n_down):
             out_c = in_c * 2
             enc += [nn.Conv2d(in_c, out_c, kernel_size=4, stride=2, padding=1), nn.ReLU()]
             in_c = out_c
         # Project to mu||logvar latent map (1x1 conv, no activation).
-        enc.append(nn.Conv2d(in_c, 2 * LATENT_CH, kernel_size=1))
+        enc.append(nn.Conv2d(in_c, 2 * latent_ch, kernel_size=1))
         self.encoder = nn.Sequential(*enc)
 
-        # ---- Decoder: (B, LATENT_CH, H/2^N, W/2^N) -> (B, C, H, W) ----
+        # ---- Decoder: (B, latent_ch, H/2^N, W/2^N) -> (B, C, H, W) ----
         # Mirror the encoder's channel schedule (in_c is the deepest width).
-        dec = [nn.Conv2d(LATENT_CH, in_c, kernel_size=1), nn.ReLU()]
-        for _ in range(N_DOWN):
+        dec = [nn.Conv2d(latent_ch, in_c, kernel_size=1), nn.ReLU()]
+        for _ in range(n_down):
             out_c = in_c // 2
             dec += [nn.ConvTranspose2d(in_c, out_c, kernel_size=4, stride=2, padding=1), nn.ReLU()]
             in_c = out_c
-        # in_c is now BASE_CH; final 3x3 conv back to C bands.
+        # in_c is now base_ch; final 3x3 conv back to C bands.
         dec.append(nn.Conv2d(in_c, c, kernel_size=3, stride=1, padding=1))
         self.decoder = nn.Sequential(*dec)
 

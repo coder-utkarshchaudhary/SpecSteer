@@ -1,0 +1,18 @@
+# AVIRIS (424 bands, largest models ~48.5M params) — biggest model,
+# heaviest activations. Smaller batch to fit VRAM; keep the same lr as IIRS.
+
+# --- Optimization ---
+epochs: 100
+lr: 1.0e-4
+batch_size: 16
+num_workers: 4
+beta: 1.0e-3
+lambda_physics: 0.3
+seed: 42
+weight_decay: 1.0e-5
+early_stopping_patience: 7
+
+# --- Baseline capacity (matches vae-our at AVIRIS = 48.53M within +/-2%) ---
+vae_standard_base_ch: 188
+vae_3d_base_ch: 110
+vae_1d_hidden_dims: [5888, 2944, 1472]

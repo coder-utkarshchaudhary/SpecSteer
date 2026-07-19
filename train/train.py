@@ -38,6 +38,7 @@ from modules.registry import (
     checkpoint_name,
 )
 from utils.config import DATASETS, apply_dataset, settings
+from utils.hyperparams import apply_hyperparams, load_hyperparams
 from utils.training.dataloader import build_dataloader
 
 
@@ -54,6 +55,8 @@ def train_vae(
     lr=1e-4,
     beta=1e-3,
     lambda_physics=0.3,
+    weight_decay=1e-5,
+    patience=7,
     val_dataloader=None,
     ckpt_path=None,
     ckpt_meta=None,
@@ -70,16 +73,19 @@ def train_vae(
         lr             : AdamW learning rate
         beta           : KL weight
         lambda_physics : SAM weight (ignored when use_physics is False)
+        weight_decay   : AdamW weight decay
+        patience       : early stopping patience (epochs w/o val_loss improvement); disabled if val_dataloader is None
         val_dataloader : optional validation DataLoader
         ckpt_path      : optional Path to save best_model checkpoint
         ckpt_meta      : dict merged into every saved checkpoint (model/dataset/loss_type)
     """
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     model.to(device)
     ckpt_meta = ckpt_meta or {}
     best_val_loss = math.inf
+    no_improve_epochs = 0
 
     if ckpt_path is not None:
         ckpt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,11 +154,13 @@ def train_vae(
             + val_str
         )
 
-        # ---- Checkpoint (best by monitored loss) ----
-        if ckpt_path is not None:
-            monitor = val_loss if val_dataloader is not None else train_loss
-            if monitor < best_val_loss:
-                best_val_loss = monitor
+        # ---- Checkpoint (best by monitored loss) + early stopping ----
+        monitor = val_loss if val_dataloader is not None else train_loss
+        improved = monitor < best_val_loss
+        if improved:
+            best_val_loss = monitor
+            no_improve_epochs = 0
+            if ckpt_path is not None:
                 torch.save(
                     {
                         "epoch": epoch,
@@ -163,6 +171,13 @@ def train_vae(
                     },
                     ckpt_path,
                 )
+        else:
+            no_improve_epochs += 1
+
+        # Early stopping only when a validation set is available.
+        if val_dataloader is not None and no_improve_epochs >= patience:
+            print(f"Early stopping at epoch {epoch}: no val_loss improvement for {patience} epochs.")
+            break
 
     if ckpt_path is not None:
         print(f"Best checkpoint saved to: {ckpt_path}")
@@ -190,15 +205,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default=None,
                         help="Override the dataset's processed root "
                              "(default: utils.config.DATASETS[<dataset>]['processed_root']).")
-    parser.add_argument("--num-workers", type=int, default=settings.num_workers)
+    parser.add_argument("--num-workers", type=int, default=None,
+                        help="Falls back to YAML then Settings.num_workers.")
 
-    # Hyper-parameters
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=settings.batch_size)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--beta", type=float, default=1e-3, help="KL divergence weight")
-    parser.add_argument("--lambda-physics", type=float, default=0.3, help="SAM loss weight")
-    parser.add_argument("--seed", type=int, default=42)
+    # Hyper-parameters — defaults resolve as: CLI > per-dataset YAML > hard fallback.
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--beta", type=float, default=None, help="KL divergence weight")
+    parser.add_argument("--lambda-physics", type=float, default=None, help="SAM loss weight")
+    parser.add_argument("--seed", type=int, default=None)
 
     # Checkpointing
     parser.add_argument("--ckpt-dir", default="model",
@@ -218,6 +234,13 @@ def set_seed(seed: int):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _resolve(cli_val, yaml_dict, key, fallback):
+    """CLI > YAML > hard fallback."""
+    if cli_val is not None:
+        return cli_val
+    return yaml_dict.get(key, fallback)
+
+
 def main():
     args = parse_args()
 
@@ -228,31 +251,48 @@ def main():
             f"use --loss physics."
         )
 
-    set_seed(args.seed)
+    # Configure the global settings for this dataset's band count *before*
+    # loading the YAML (YAML may then override Settings fields like
+    # batch_size and the per-dataset baseline widths).
+    apply_dataset(args.dataset)
+    hp = load_hyperparams(args.dataset)
+    apply_hyperparams(settings, hp)
+
+    # Resolve optimization hyperparams with CLI > YAML > hard-fallback precedence.
+    epochs = _resolve(args.epochs, hp, "epochs", 100)
+    batch_size = _resolve(args.batch_size, hp, "batch_size", settings.batch_size)
+    num_workers = _resolve(args.num_workers, hp, "num_workers", settings.num_workers)
+    lr = _resolve(args.lr, hp, "lr", 1e-4)
+    beta = _resolve(args.beta, hp, "beta", 1e-3)
+    lambda_physics = _resolve(args.lambda_physics, hp, "lambda_physics", 0.3)
+    seed = _resolve(args.seed, hp, "seed", 42)
+    weight_decay = hp.get("weight_decay", 1e-5)
+    patience = hp.get("early_stopping_patience", 7)
+
+    set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_physics = args.loss == "physics"
 
-    # Configure the global settings for this dataset's band count *before*
-    # building the model or dataloaders.
-    apply_dataset(args.dataset)
-
     print("==============================================")
-    print(f"  model    : {args.model}")
-    print(f"  dataset  : {args.dataset} (C={settings.input_channels})")
-    print(f"  loss     : {args.loss}")
-    print(f"  device   : {device}")
+    print(f"  model     : {args.model}")
+    print(f"  dataset   : {args.dataset} (C={settings.input_channels})")
+    print(f"  loss      : {args.loss}")
+    print(f"  device    : {device}")
+    print(f"  epochs    : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
+    print(f"  lr        : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
+    print(f"  wd        : {weight_decay}  patience: {patience}  seed: {seed}")
     print("==============================================")
 
     # Dataloaders
     train_loader = build_dataloader(
         args.dataset, "train",
         processed_root=args.data_root,
-        batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
+        batch_size=batch_size, shuffle=True, num_workers=num_workers,
     )
     val_loader = build_dataloader(
         args.dataset, "valid",
         processed_root=args.data_root,
-        batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
+        batch_size=batch_size, shuffle=False, num_workers=num_workers,
     )
     print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
@@ -274,12 +314,14 @@ def main():
     train_vae(
         model=model,
         dataloader=train_loader,
-        epochs=args.epochs,
+        epochs=epochs,
         device=device,
         use_physics=use_physics,
-        lr=args.lr,
-        beta=args.beta,
-        lambda_physics=args.lambda_physics,
+        lr=lr,
+        beta=beta,
+        lambda_physics=lambda_physics,
+        weight_decay=weight_decay,
+        patience=patience,
         val_dataloader=val_loader,
         ckpt_path=ckpt_path,
         ckpt_meta=ckpt_meta,

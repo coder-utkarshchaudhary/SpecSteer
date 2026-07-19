@@ -41,34 +41,34 @@ from modules.losses import spectral_angle_mapper_loss, kl_divergence
 from utils.config import settings
 
 
-# Per-pixel MLP widths and latent size. Kept module-local (not in the shared
-# Settings) so this baseline is fully self-contained; only the band count is
-# read from settings at build time.
-HIDDEN_DIMS = (256, 128)
-LATENT_DIM = 32
-
-
 class VAE_1D_Pixelwise(nn.Module):
-    """Per-pixel 1D spectral VAE ("vae-1d-pixelwise"), Baseline C."""
+    """Per-pixel 1D spectral VAE ("vae-1d-pixelwise"), Baseline C.
+
+    Capacity knobs (`vae_1d_hidden_dims`, `vae_1d_latent_dim`) are read from
+    `settings` at build time so a per-dataset hyperparam YAML can match this
+    baseline's param count to vae-our at each dataset.
+    """
 
     def __init__(self):
         super().__init__()
         c = settings.input_channels
-        self.latent_dim = LATENT_DIM
+        hidden_dims = tuple(settings.vae_1d_hidden_dims)
+        latent_dim = settings.vae_1d_latent_dim
+        self.latent_dim = latent_dim
 
         # ---- Encoder MLP: C -> hidden... -> 2*Z (mu || logvar) ----
         enc_layers = []
         in_f = c
-        for h in HIDDEN_DIMS:
+        for h in hidden_dims:
             enc_layers += [nn.Linear(in_f, h), nn.ReLU()]
             in_f = h
-        enc_layers.append(nn.Linear(in_f, 2 * LATENT_DIM))
+        enc_layers.append(nn.Linear(in_f, 2 * latent_dim))
         self.encoder = nn.Sequential(*enc_layers)
 
         # ---- Decoder MLP: Z -> hidden(reversed)... -> C ----
         dec_layers = []
-        in_f = LATENT_DIM
-        for h in reversed(HIDDEN_DIMS):
+        in_f = latent_dim
+        for h in reversed(hidden_dims):
             dec_layers += [nn.Linear(in_f, h), nn.ReLU()]
             in_f = h
         dec_layers.append(nn.Linear(in_f, c))

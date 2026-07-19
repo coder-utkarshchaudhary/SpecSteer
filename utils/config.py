@@ -89,6 +89,22 @@ class Settings:
     spectral_transpose_c: int = field(init=False)
     spectral_transpose_l: int = field(init=False)
 
+    # ------------------------------------------------------------------
+    # Baseline capacity knobs (overridden per-dataset by hyperparam YAML
+    # so each baseline matches vae-our's param count at that dataset).
+    # Defaults here are the IIRS picks.
+    # ------------------------------------------------------------------
+    vae_standard_base_ch: int = 134
+    vae_standard_n_down: int = 3
+    vae_standard_latent_ch: int = 16
+
+    vae_3d_base_ch: int = 78
+    vae_3d_n_down: int = 3
+    vae_3d_latent_ch: int = 8
+
+    vae_1d_hidden_dims: tuple = (4224, 2112, 1056)
+    vae_1d_latent_dim: int = 32
+
     def __post_init__(self):
         # ---- Spatial derived fields ----
         self.conv_output_c = self.reduced_dims * (2 ** self.n_2D_conv_blocks)

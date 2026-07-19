@@ -54,3 +54,6 @@ urllib3==2.7.0
 fastapi
 uvicorn[standard]
 tqdm
+
+# Added for utils/hyperparams.py (per-dataset training config).
+pyyaml
