@@ -7,15 +7,15 @@
 #   # Single run:
 #   bash scripts/train.sh --model vae-our --dataset IIRS --loss physics --epochs 100
 #
-#   # Full 21-run ablation grid (all models x all datasets x loss regimes):
+#   # Full 28-run ablation grid (all models x all datasets x loss regimes):
 #   bash scripts/train.sh --all --epochs 100
 #
 # The grid is:
-#   - vae-our             : physics only        -> 1 run/dataset  (3)
-#   - vae-standard        : standard + physics  -> 2 runs/dataset (6)
-#   - vae-3d-spatio-spectral : standard + physics -> 2 runs/dataset (6)
-#   - vae-1d-pixelwise    : standard + physics  -> 2 runs/dataset (6)
-#   Total: 3 + 6 + 6 + 6 = 21 trainings across IIRS / M3 / AVIRIS.
+#   - vae-our             : physics only        -> 1 run/dataset  (4)
+#   - vae-standard        : standard + physics  -> 2 runs/dataset (8)
+#   - vae-3d-spatio-spectral : standard + physics -> 2 runs/dataset (8)
+#   - vae-1d-pixelwise    : standard + physics  -> 2 runs/dataset (8)
+#   Total: 4 + 8 + 8 + 8 = 28 trainings across IIRS / M3 / AVIRIS / CRIMS.
 #
 # Checkpoints are written to ${CKPT_DIR}/<DATASET>/<name>.pt
 #   vae-our      -> vae-our.pt
@@ -41,11 +41,11 @@ cd "${REPO_ROOT}"
 # --------------------------------------------------------------------------
 if [[ "${1:-}" == "--all" ]]; then
     shift
-    DATASETS=("IIRS" "M3" "AVIRIS")
+    DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
     STANDARD_MODELS=("vae-standard" "vae-3d-spatio-spectral" "vae-1d-pixelwise")
 
     echo "=============================================="
-    echo " HSI VAE Ablation — full grid (21 runs)"
+    echo " HSI VAE Ablation — full grid (28 runs)"
     echo "  ckpt dir : ${REPO_ROOT}/${CKPT_DIR}"
     echo "=============================================="
 

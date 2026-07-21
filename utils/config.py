@@ -146,6 +146,8 @@ settings = Settings()   # default: IIRS-shaped (input_channels=256)
 #   M3     : 85 bands natively — NOT divisible by 4 (85 → 21 → 84 ≠ 85 on the
 #            decoder round-trip). Cropped to 84 (drop the last band).
 #   AVIRIS : 424 bands, divides cleanly by 4 → no crop.
+#   CRIMS  : 544 bands, divides cleanly by 4 → no crop. Already-preprocessed
+#            patches delivered to data/processed/crims/ via Google Drive.
 DATASETS = {
     "IIRS": {
         "input_channels": 256,
@@ -168,6 +170,13 @@ DATASETS = {
         "fill_value": -9999.0,
         "crop_bands": None,
     },
+    "CRIMS": {
+        "input_channels": 544,
+        "raw_root": "data/original - CRIMS",   # unused; CRIMS ships pre-processed
+        "processed_root": "data/processed/crims",
+        "fill_value": None,
+        "crop_bands": None,
+    },
 }
 
 
@@ -177,7 +186,7 @@ def make_settings(dataset: str) -> Settings:
     derived spatial/spectral dim) matches the given dataset.
 
     Args:
-        dataset : one of "IIRS", "M3", "AVIRIS" (case-insensitive)
+        dataset : one of "IIRS", "M3", "AVIRIS", "CRIMS" (case-insensitive)
 
     Returns:
         Settings with input_channels overridden; all other fields keep the
@@ -201,7 +210,7 @@ def apply_dataset(dataset: str) -> Settings:
     Call this once before building a model / dataloader for a given dataset.
 
     Args:
-        dataset : one of "IIRS", "M3", "AVIRIS" (case-insensitive)
+        dataset : one of "IIRS", "M3", "AVIRIS", "CRIMS" (case-insensitive)
 
     Returns:
         The (mutated) module-global ``settings`` instance.

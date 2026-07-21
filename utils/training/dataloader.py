@@ -15,7 +15,7 @@ utils/dataset/slice.py:
       ...
 
 Each .npy file contains a single (patch_size, patch_size, C) float32 array,
-where C is dataset-specific (IIRS=256, M3=84, AVIRIS=424 — see
+where C is dataset-specific (IIRS=256, M3=84, AVIRIS=424, CRIMS=544 — see
 utils.config.DATASETS). The dataset returns (H, W, C) float32 tensors — the
 shape expected by the Dual-Stream PI-VAE's forward pass. Since band count
 differs per dataset, each dataset needs its own model instance (built via
@@ -106,10 +106,18 @@ class AVIRISDataset(HSIPatchDataset):
         super().__init__(processed_root or DATASETS["AVIRIS"]["processed_root"], split)
 
 
+class CRIMSDataset(HSIPatchDataset):
+    """HSIPatchDataset rooted at DATASETS["CRIMS"]["processed_root"]."""
+
+    def __init__(self, split: str, processed_root: str = None):
+        super().__init__(processed_root or DATASETS["CRIMS"]["processed_root"], split)
+
+
 DATASET_CLASSES = {
     "IIRS": IIRSDataset,
     "M3": M3Dataset,
     "AVIRIS": AVIRISDataset,
+    "CRIMS": CRIMSDataset,
 }
 
 
