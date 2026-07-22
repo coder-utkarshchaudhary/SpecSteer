@@ -35,6 +35,7 @@ Results are printed as comparison tables and (with --save-plots) written under
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +45,7 @@ from inference.inference import compute_mse, compute_psnr, compute_ssim, load_mo
 from modules.losses import spectral_angle_mapper_loss
 from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name
 from utils.config import DATASETS, apply_dataset, settings
+from utils.logging_setup import get_console_logger, get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
 
 
@@ -51,6 +53,31 @@ from utils.training.dataloader import build_dataloader
 DEFAULT_SIGMAS = (0.0, 0.1, 0.5, 1.0)
 # Default alpha grid for the interpolation test.
 DEFAULT_N_ALPHA = 11
+
+
+class _MultiLogger:
+    """
+    Thin adapter that fans out ``.info(...)``/``.warning(...)``/``.error(...)``
+    calls to a list of underlying ``logging.Logger`` objects.
+
+    Used by run_for_model so a single per-model call site logs to both stdout
+    (via the shared console logger) and that model's on-disk file.
+    """
+
+    def __init__(self, loggers):
+        self._loggers = list(loggers)
+
+    def info(self, msg, *args, **kwargs):
+        for lg in self._loggers:
+            lg.info(msg, *args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        for lg in self._loggers:
+            lg.warning(msg, *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        for lg in self._loggers:
+            lg.error(msg, *args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -176,13 +203,13 @@ def resolve_ckpt(model_name, dataset, loss, ckpt_dir):
     return Path(ckpt_dir) / dataset / checkpoint_name(model_name, loss)
 
 
-def run_for_model(model_name, x, args, device, generator):
+def run_for_model(model_name, x, args, device, generator, logger):
     """Load one model's checkpoint and run both experiments; return a result dict."""
     # vae-our is physics-only; the baselines use the requested loss regime.
     loss = "physics" if model_name in PHYSICS_ONLY else args.loss
     ckpt_file = Path(args.ckpt) if args.ckpt else resolve_ckpt(model_name, args.dataset, loss, args.ckpt_dir)
     if not ckpt_file.exists():
-        print(f"[skip] {model_name}: checkpoint not found ({ckpt_file})")
+        logger.warning(f"[skip] {model_name}: checkpoint not found ({ckpt_file})")
         return None
 
     model, _ = load_model(model_name, ckpt_file, device)
@@ -199,34 +226,45 @@ def run_for_model(model_name, x, args, device, generator):
 # Reporting
 # ---------------------------------------------------------------------------
 
-def print_noise_table(all_results, sigmas):
-    print("\n" + "=" * 72)
-    print(" EXPERIMENT 1 — Latent noise-injection robustness (metrics vs clean x)")
-    print("=" * 72)
+def _broadcast(loggers, level, msg):
+    """Emit ``msg`` at ``level`` to every logger in ``loggers``."""
+    for lg in loggers:
+        lg.log(level, msg)
+
+
+def print_noise_table(all_results, sigmas, loggers):
+    _broadcast(loggers, logging.INFO, "=" * 72)
+    _broadcast(loggers, logging.INFO, " EXPERIMENT 1 — Latent noise-injection robustness (metrics vs clean x)")
+    _broadcast(loggers, logging.INFO, "=" * 72)
     for metric in ("psnr", "ssim", "sam"):
         arrow = "higher=better" if metric in ("psnr", "ssim") else "lower=better, rad"
-        print(f"\n {metric.upper()}  ({arrow}) by sigma:")
+        _broadcast(loggers, logging.INFO, f" {metric.upper()}  ({arrow}) by sigma:")
         header = f"  {'model':24s}" + "".join(f"{f'σ={s:g}':>12s}" for s in sigmas)
-        print(header)
+        _broadcast(loggers, logging.INFO, header)
         for r in all_results:
             by_sigma = {d["sigma"]: d[metric] for d in r["noise"]}
             row = f"  {r['model']:24s}" + "".join(f"{by_sigma.get(float(s), float('nan')):12.4f}" for s in sigmas)
-            print(row)
+            _broadcast(loggers, logging.INFO, row)
 
 
-def print_interp_table(all_results):
-    print("\n" + "=" * 72)
-    print(" EXPERIMENT 2 — Chemical interpolation smoothness")
-    print("=" * 72)
-    print(f"  {'model':24s}{'jaggedness↓':>16s}{'path_length':>16s}")
+def print_interp_table(all_results, loggers):
+    _broadcast(loggers, logging.INFO, "=" * 72)
+    _broadcast(loggers, logging.INFO, " EXPERIMENT 2 — Chemical interpolation smoothness")
+    _broadcast(loggers, logging.INFO, "=" * 72)
+    _broadcast(loggers, logging.INFO, f"  {'model':24s}{'jaggedness↓':>16s}{'path_length':>16s}")
     for r in all_results:
         it = r["interp"]
-        print(f"  {r['model']:24s}{it['jaggedness']:16.5f}{it['path_length']:16.5f}")
-    print("\n  jaggedness = mean L2 of 2nd difference of decoded spectra along alpha")
-    print("  (lower = smoother chemical transition = more generative-ready manifold)")
+        _broadcast(
+            loggers, logging.INFO,
+            f"  {r['model']:24s}{it['jaggedness']:16.5f}{it['path_length']:16.5f}",
+        )
+    _broadcast(loggers, logging.INFO,
+               "  jaggedness = mean L2 of 2nd difference of decoded spectra along alpha")
+    _broadcast(loggers, logging.INFO,
+               "  (lower = smoother chemical transition = more generative-ready manifold)")
 
 
-def save_outputs(all_results, args):
+def save_outputs(all_results, args, loggers):
     out_dir = Path(args.out_dir) / args.dataset
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +277,7 @@ def save_outputs(all_results, args):
         rc["interp"] = it
         serializable.append(rc)
     (out_dir / "downstream_results.json").write_text(json.dumps(serializable, indent=2))
-    print(f"\nSaved metrics JSON to {out_dir / 'downstream_results.json'}")
+    _broadcast(loggers, logging.INFO, f"Saved metrics JSON to {out_dir / 'downstream_results.json'}")
 
     if not args.save_plots:
         return
@@ -249,7 +287,7 @@ def save_outputs(all_results, args):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        print("[warn] matplotlib not available; skipping plots.")
+        _broadcast(loggers, logging.WARNING, "[warn] matplotlib not available; skipping plots.")
         return
 
     # Plot 1: PSNR-vs-sigma degradation curves (all models on one axis).
@@ -275,7 +313,7 @@ def save_outputs(all_results, args):
         ax.set_xlabel("band"); ax.set_ylabel("reflectance (norm.)")
     plt.suptitle(f"Chemical interpolation (α: 0→1) — {args.dataset}, pixel {tuple(args.pixel)}")
     plt.tight_layout(); plt.savefig(out_dir / "interpolation_spectra.png", dpi=150); plt.close()
-    print(f"Saved plots to {out_dir}/")
+    _broadcast(loggers, logging.INFO, f"Saved plots to {out_dir}/")
 
 
 # ---------------------------------------------------------------------------
@@ -330,13 +368,27 @@ def main():
     torch.manual_seed(args.seed)
     generator = torch.Generator(device=device).manual_seed(args.seed)
 
-    print("==============================================")
-    print(f"  dataset  : {args.dataset} (C={settings.input_channels})")
-    print(f"  models   : {args.models}")
-    print(f"  split    : {args.split}  |  batch: {args.batch_size}")
-    print(f"  sigmas   : {args.sigmas}")
-    print(f"  device   : {device}")
-    print("==============================================")
+    ts = timestamp()
+    console = get_console_logger()
+    # Build one file-only logger per model so each log is a self-contained
+    # trace of that run. Shared messages (banner, comparison tables) are
+    # broadcast to every file logger *and* printed once via ``console``.
+    model_loggers = {}
+    for model_name in args.models:
+        loss_for_name = "physics" if model_name in PHYSICS_ONLY else args.loss
+        model_loggers[model_name] = get_run_logger(
+            "downstream", model_name, args.dataset,
+            loss=loss_for_name, ts=ts, stream=False,
+        )
+    shared_loggers = [console] + list(model_loggers.values())
+
+    _broadcast(shared_loggers, logging.INFO, "==============================================")
+    _broadcast(shared_loggers, logging.INFO, f"  dataset  : {args.dataset} (C={settings.input_channels})")
+    _broadcast(shared_loggers, logging.INFO, f"  models   : {args.models}")
+    _broadcast(shared_loggers, logging.INFO, f"  split    : {args.split}  |  batch: {args.batch_size}")
+    _broadcast(shared_loggers, logging.INFO, f"  sigmas   : {args.sigmas}")
+    _broadcast(shared_loggers, logging.INFO, f"  device   : {device}")
+    _broadcast(shared_loggers, logging.INFO, "==============================================")
 
     # One fixed clean batch shared across all models, so the comparison is fair.
     loader = build_dataloader(
@@ -346,6 +398,8 @@ def main():
     )
     x = next(iter(loader)).to(device)
     if x.shape[0] < 2:
+        _broadcast(shared_loggers, logging.ERROR,
+                   "Need at least 2 samples in the batch for interpolation endpoints.")
         raise SystemExit("Need at least 2 samples in the batch for interpolation endpoints.")
     args.idx_a = min(args.idx_a, x.shape[0] - 1)
     args.idx_b = min(args.idx_b, x.shape[0] - 1)
@@ -354,16 +408,22 @@ def main():
     for model_name in args.models:
         # Fresh generator per model so each sees the same noise draw sequence.
         gen = torch.Generator(device=device).manual_seed(args.seed)
-        r = run_for_model(model_name, x, args, device, gen)
+        # For per-model progress ("[skip] ..."), pair the model's file logger
+        # with the console so it also lands on stdout.
+        per_model_loggers = [console, model_loggers[model_name]]
+        adapter = _MultiLogger(per_model_loggers)
+        r = run_for_model(model_name, x, args, device, gen, adapter)
         if r is not None:
             all_results.append(r)
 
     if not all_results:
+        _broadcast(shared_loggers, logging.ERROR,
+                   "No models could be evaluated (no checkpoints found).")
         raise SystemExit("No models could be evaluated (no checkpoints found).")
 
-    print_noise_table(all_results, args.sigmas)
-    print_interp_table(all_results)
-    save_outputs(all_results, args)
+    print_noise_table(all_results, args.sigmas, shared_loggers)
+    print_interp_table(all_results, shared_loggers)
+    save_outputs(all_results, args, shared_loggers)
 
 
 if __name__ == "__main__":

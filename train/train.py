@@ -23,6 +23,7 @@ Checkpoints are written to <ckpt-dir>/<DATASET>/<name>.pt where <name> is:
 """
 
 import argparse
+import logging
 import math
 import random
 from pathlib import Path
@@ -39,6 +40,7 @@ from modules.registry import (
 )
 from utils.config import DATASETS, apply_dataset, settings
 from utils.hyperparams import apply_hyperparams, load_hyperparams
+from utils.logging_setup import get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
 
 
@@ -60,6 +62,7 @@ def train_vae(
     val_dataloader=None,
     ckpt_path=None,
     ckpt_meta=None,
+    logger=None,
 ):
     """
     Generic VAE training loop driven by ``model.loss_terms``.
@@ -79,6 +82,9 @@ def train_vae(
         ckpt_path      : optional Path to save best_model checkpoint
         ckpt_meta      : dict merged into every saved checkpoint (model/dataset/loss_type)
     """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
@@ -146,7 +152,7 @@ def train_vae(
             f"| Val SAM: {val_sam:.4f} | Val KLD: {val_kld:.4f}"
             if val_dataloader is not None else ""
         )
-        print(
+        logger.info(
             f"Epoch [{epoch}/{epochs}] | "
             f"Loss: {train_loss:.4f} | MSE: {train_mse:.4f} | "
             f"SAM: {train_sam:.4f} | KLD: {train_kld:.4f} | "
@@ -171,16 +177,17 @@ def train_vae(
                     },
                     ckpt_path,
                 )
+                logger.info(f"Epoch {epoch}: new best {monitor:.6f} — checkpoint saved")
         else:
             no_improve_epochs += 1
 
         # Early stopping only when a validation set is available.
         if val_dataloader is not None and no_improve_epochs >= patience:
-            print(f"Early stopping at epoch {epoch}: no val_loss improvement for {patience} epochs.")
+            logger.info(f"Early stopping at epoch {epoch}: no val_loss improvement for {patience} epochs.")
             break
 
     if ckpt_path is not None:
-        print(f"Best checkpoint saved to: {ckpt_path}")
+        logger.info(f"Best checkpoint saved to: {ckpt_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -273,15 +280,19 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_physics = args.loss == "physics"
 
-    print("==============================================")
-    print(f"  model     : {args.model}")
-    print(f"  dataset   : {args.dataset} (C={settings.input_channels})")
-    print(f"  loss      : {args.loss}")
-    print(f"  device    : {device}")
-    print(f"  epochs    : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
-    print(f"  lr        : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
-    print(f"  wd        : {weight_decay}  patience: {patience}  seed: {seed}")
-    print("==============================================")
+    logger = get_run_logger(
+        "train", args.model, args.dataset, loss=args.loss, ts=timestamp(),
+    )
+
+    logger.info("==============================================")
+    logger.info(f"  model     : {args.model}")
+    logger.info(f"  dataset   : {args.dataset} (C={settings.input_channels})")
+    logger.info(f"  loss      : {args.loss}")
+    logger.info(f"  device    : {device}")
+    logger.info(f"  epochs    : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
+    logger.info(f"  lr        : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
+    logger.info(f"  wd        : {weight_decay}  patience: {patience}  seed: {seed}")
+    logger.info("==============================================")
 
     # Dataloaders
     train_loader = build_dataloader(
@@ -294,7 +305,7 @@ def main():
         processed_root=args.data_root,
         batch_size=batch_size, shuffle=False, num_workers=num_workers,
     )
-    print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
+    logger.info(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
     # Model
     model = build_model(args.model).to(device)
@@ -325,6 +336,7 @@ def main():
         val_dataloader=val_loader,
         ckpt_path=ckpt_path,
         ckpt_meta=ckpt_meta,
+        logger=logger,
     )
 
 

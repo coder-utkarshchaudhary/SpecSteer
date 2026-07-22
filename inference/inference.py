@@ -22,6 +22,7 @@ import torch
 from modules.losses import spectral_angle_mapper_loss
 from modules.registry import MODEL_NAMES, build_model, checkpoint_name
 from utils.config import DATASETS, apply_dataset, settings
+from utils.logging_setup import get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
 
 
@@ -122,21 +123,26 @@ def main():
 
     apply_dataset(args.dataset)
 
+    logger = get_run_logger(
+        "inference", args.model, args.dataset, loss=args.loss, ts=timestamp(),
+    )
+
     ckpt_file = (
         Path(args.ckpt) if args.ckpt
         else Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
     )
     if not ckpt_file.exists():
+        logger.error(f"Checkpoint not found: {ckpt_file}")
         raise SystemExit(f"Checkpoint not found: {ckpt_file}")
 
-    print("==============================================")
-    print(f"  model    : {args.model}")
-    print(f"  dataset  : {args.dataset} (C={settings.input_channels})")
-    print(f"  loss     : {args.loss}")
-    print(f"  ckpt     : {ckpt_file}")
-    print(f"  split    : {args.split}")
-    print(f"  device   : {device}")
-    print("==============================================")
+    logger.info("==============================================")
+    logger.info(f"  model    : {args.model}")
+    logger.info(f"  dataset  : {args.dataset} (C={settings.input_channels})")
+    logger.info(f"  loss     : {args.loss}")
+    logger.info(f"  ckpt     : {ckpt_file}")
+    logger.info(f"  split    : {args.split}")
+    logger.info(f"  device   : {device}")
+    logger.info("==============================================")
 
     model, _ = load_model(args.model, ckpt_file, device)
 
@@ -159,11 +165,11 @@ def main():
             n += 1
 
     n = max(n, 1)
-    print(f"\nResults over {len(loader.dataset)} {args.split} patches ({n} batches):")
-    print(f"  MSE  : {mse_sum / n:.6f}")
-    print(f"  SAM  : {sam_sum / n:.6f} rad")
-    print(f"  PSNR : {psnr_sum / n:.4f} dB")
-    print(f"  SSIM : {ssim_sum / n:.4f}")
+    logger.info(f"Results over {len(loader.dataset)} {args.split} patches ({n} batches):")
+    logger.info(f"  MSE  : {mse_sum / n:.6f}")
+    logger.info(f"  SAM  : {sam_sum / n:.6f} rad")
+    logger.info(f"  PSNR : {psnr_sum / n:.4f} dB")
+    logger.info(f"  SSIM : {ssim_sum / n:.4f}")
 
 
 if __name__ == "__main__":
