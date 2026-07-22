@@ -15,6 +15,7 @@ Usage (from repo root, with venv active):
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 
 import torch
@@ -50,7 +51,8 @@ def main() -> None:
 
     reference: dict[str, int] = {}
     for ds in dataset_names:
-        reference[ds] = build_and_count("vae-our", ds)
+        if os.path.exists(ds["processed_root"]):
+            reference[ds] = build_and_count("vae-our", ds)
 
     for name in MODEL_NAMES:
         counts = {ds: build_and_count(name, ds) for ds in dataset_names}
