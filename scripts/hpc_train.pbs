@@ -1,0 +1,109 @@
+#!/bin/bash
+#
+# scripts/hpc_train.pbs
+# ---------------------
+# IITD-HPC PBS job: preprocess IIRS/M3/AVIRIS then run the full 28-run
+# ablation grid on a single A100. Idempotent — safe to re-submit after
+# walltime expiry or a crash (completed checkpoints are skipped).
+#
+# Submit from $HOME/prism/ (after data has been staged into $SCRATCH):
+#   qsub scripts/hpc_train.pbs
+#
+#PBS -N prism-train28
+#PBS -P <REPLACE_ME>
+#PBS -q standard
+#PBS -l select=1:ncpus=8:ngpus=1:centos=icelake
+#PBS -l walltime=168:00:00
+#PBS -l software=pytorch
+#PBS -m bea
+#PBS -M REPLACE_ME@iitd.ac.in
+#PBS -o logs/hpc/train28.out
+#PBS -e logs/hpc/train28.err
+
+set -uo pipefail
+
+SCRATCH_ROOT="${SCRATCH}/prism-data"
+RAW_SRC="${SCRATCH_ROOT}/original"
+PROC_SRC="${SCRATCH_ROOT}/processed"
+
+cd "${PBS_O_WORKDIR}"
+mkdir -p logs/hpc data "${PROC_SRC}"
+
+echo "===================================================================="
+echo " PRISM full-grid training (28 runs)"
+echo " job id   : ${PBS_JOBID:-<none>}"
+echo " workdir  : ${PBS_O_WORKDIR}"
+echo " scratch  : ${SCRATCH_ROOT}"
+echo " started  : $(date -Is)"
+echo "===================================================================="
+
+# ---- environment -----------------------------------------------------------
+# module load compiler/cuda/12.1 || true       # uncomment after `module avail cuda`
+if [[ ! -d .venv ]]; then
+    echo "FATAL: .venv missing under ${PBS_O_WORKDIR}. Create it on the login node."
+    exit 2
+fi
+source .venv/bin/activate
+export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
+export WANDB_MODE="${WANDB_MODE:-offline}"    # sync from login node after run
+
+# ---- stage inputs on $SCRATCH via symlinks ---------------------------------
+# The code expects data/original and data/processed to be relative paths.
+# Symlink both to $SCRATCH so the 200+ GB working set never touches $HOME.
+if [[ ! -e "${RAW_SRC}" ]]; then
+    echo "FATAL: raw data not found at ${RAW_SRC}."
+    echo "       run scripts/hpc_download.pbs first."
+    exit 3
+fi
+ln -sfn "${RAW_SRC}"  data/original
+ln -sfn "${PROC_SRC}" data/processed
+echo ">>> data/original  -> $(readlink -f data/original)"
+echo ">>> data/processed -> $(readlink -f data/processed)"
+
+# ---- diagnostics -----------------------------------------------------------
+echo ""
+echo "----- nvidia-smi -----"
+nvidia-smi || echo "nvidia-smi failed"
+echo "----- free -h -----"
+free -h
+echo "----- df -h -----"
+df -h "${HOME}" "${SCRATCH}"
+echo ""
+
+# ---- preprocess (skip if outputs already exist) ----------------------------
+echo ">>> preprocessing (skip-if-exists per dataset)"
+for ds in iirs m3 aviris; do
+    ds_upper="$(echo "${ds}" | tr '[:lower:]' '[:upper:]')"
+    out="data/processed/${ds_upper}/train"
+    if [[ -d "${out}" ]] && [[ $(ls -A "${out}" 2>/dev/null | head -c1) ]]; then
+        echo "[skip] ${ds}: patches already present at ${out}"
+        continue
+    fi
+    echo ">>> preprocess ${ds}"
+    bash scripts/preprocess.sh --dataset "${ds}" || {
+        echo "WARN: preprocess ${ds} failed — continuing so other datasets can run."
+    }
+done
+# CRIMS ships already-preprocessed via the Drive folder; nothing to do here.
+
+# ---- run the 28-run grid ---------------------------------------------------
+echo ""
+echo ">>> launching train.sh --all"
+# All extra args are forwarded to each python train/train.py call.
+bash scripts/train.sh --all --epochs 100
+grid_rc=$?
+
+# ---- post-run summary ------------------------------------------------------
+echo ""
+echo ">>> checkpoint summary"
+find model -maxdepth 2 -name "*.pt" -printf "%TY-%Tm-%Td %TH:%TM  %8s  %p\n" | sort
+found=$(find model -maxdepth 2 -name "*.pt" 2>/dev/null | wc -l)
+echo ">>> ${found}/28 checkpoints present."
+
+echo ""
+if [[ "${WANDB_MODE}" == "offline" ]]; then
+    echo "wandb was offline. From a login node run:"
+    echo "  source .venv/bin/activate && wandb sync wandb/offline-run-*"
+fi
+echo " finished : $(date -Is)"
+exit ${grid_rc}

@@ -1,0 +1,98 @@
+#!/bin/bash
+#
+# scripts/hpc_download.pbs
+# ------------------------
+# One-shot IITD-HPC PBS job that stages the ~217 GB PRISM dataset folder from
+# a public Google Drive folder into $SCRATCH/prism-data/original.
+#
+# Submit from $HOME/prism/:
+#   qsub scripts/hpc_download.pbs
+#
+# Requires: gdown installed in the project venv (see wiki -> Env setup).
+# Fallback if gdown hits Google's 24h quota: use rclone (documented in wiki).
+#
+#PBS -N prism-download
+#PBS -P <REPLACE_ME>
+#PBS -q standard
+#PBS -l select=1:ncpus=4
+#PBS -l walltime=24:00:00
+#PBS -l software=gdown
+#PBS -m bea
+#PBS -M REPLACE_ME@iitd.ac.in
+#PBS -o logs/hpc/download.out
+#PBS -e logs/hpc/download.err
+
+set -uo pipefail
+
+DRIVE_FOLDER_URL="https://drive.google.com/drive/folders/1QjwlQRSCgLFKT4f3SHYTOyFSAKXiIAlZ"
+DEST="${SCRATCH}/prism-data/original"
+
+cd "${PBS_O_WORKDIR}"
+mkdir -p logs/hpc "${DEST}"
+
+echo "===================================================================="
+echo " PRISM data download (gdown)"
+echo " job id     : ${PBS_JOBID:-<none>}"
+echo " workdir    : ${PBS_O_WORKDIR}"
+echo " dest       : ${DEST}"
+echo " drive URL  : ${DRIVE_FOLDER_URL}"
+echo " started    : $(date -Is)"
+echo "===================================================================="
+
+# module load compiler/python-3.11 || true    # uncomment after `module avail python`
+if [[ ! -d .venv ]]; then
+    echo "FATAL: .venv missing under ${PBS_O_WORKDIR}. Create it on the login node first."
+    exit 2
+fi
+source .venv/bin/activate
+python -m pip install --quiet --upgrade gdown
+
+echo ">>> starting gdown --folder (this can take hours for 217 GB)"
+gdown --folder --continue --remaining-ok \
+    -O "${DEST}" \
+    "${DRIVE_FOLDER_URL}"
+rc=$?
+
+if [[ ${rc} -ne 0 ]]; then
+    echo ""
+    echo "gdown failed (exit=${rc})."
+    echo "Typical cause: Google Drive 24h public-quota throttle at this size."
+    echo "Fallback (see wiki -> Data download -> rclone):"
+    echo "  rclone copy gdrive:prism-data \"${DEST}\" \\"
+    echo "         --drive-shared-with-me --progress --transfers 8"
+    echo ""
+    echo "Re-submitting this job later is safe: --continue --remaining-ok"
+    echo "will resume where it left off."
+    exit ${rc}
+fi
+
+echo ""
+echo ">>> download complete. verifying layout"
+du -sh "${DEST}" | tee -a logs/hpc/download.tree.txt
+echo "----" | tee -a logs/hpc/download.tree.txt
+ls -1 "${DEST}" | tee -a logs/hpc/download.tree.txt
+
+# Expected top-level folder names (from utils/config.py DATASETS):
+declare -a EXPECTED=(
+    "data/original - IIRS"
+    "data/original - m3"
+    "data/original - AVIRIS"
+    "data/original - CRIMS"
+)
+missing=0
+for name in "${EXPECTED[@]}"; do
+    if [[ ! -e "${DEST}/${name}" ]]; then
+        echo "WARN: missing expected folder: ${DEST}/${name}"
+        missing=$((missing + 1))
+    fi
+done
+
+if [[ ${missing} -gt 0 ]]; then
+    echo "WARN: ${missing}/4 expected folders missing."
+    echo "      Compare against the drive folder in a browser before running preprocessing."
+    exit 3
+fi
+
+echo ""
+echo ">>> all 4 expected dataset folders present."
+echo " finished   : $(date -Is)"

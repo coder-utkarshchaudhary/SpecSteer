@@ -17,3 +17,7 @@ graphify-out/
 
 # logs
 logs/
+
+# Paper drafts (pre-LaTeX)
+paper/
+AuthorKit27/
