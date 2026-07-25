@@ -43,8 +43,8 @@ scipy==1.15.3
 sentry-sdk==2.63.0
 smmap==5.0.3
 sympy==1.14.0
-torch==2.12.0+cu132
-torchvision==0.27.0+cu132
+torch
+torchvision
 triton==3.7.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
