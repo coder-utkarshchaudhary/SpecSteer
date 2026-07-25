@@ -1,0 +1,29 @@
+# Patterns excluded from the HPC code tarball (tar --exclude-from) and
+# also honoured by rsync (-avP --exclude-from).
+#
+# Rule of thumb: exclude anything that's dev-only, huge, secret, machine-local,
+# or regenerable on the HPC side.
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+.claude
+.claude/settings.local.json
+build
+build/hpc_bundle
+data
+model
+logs
+wandb
+AuthorKit27
+visualisations
+paper
+docs/*.ipynb
+docs/*.pdf
+docs/hsi-pi-vae-v1.ipynb
+docs/hsi-pi-vae-v2.ipynb
+notebooks
+inference/notebooks

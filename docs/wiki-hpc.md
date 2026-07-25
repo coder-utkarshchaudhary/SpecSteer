@@ -7,8 +7,13 @@
 > _"Please do not run programs directly on login nodes"_ and
 > _"$SCRATCH is NOT backed up! Please download all your data!"_
 
-Here are the steps I need you to follow, in order. **If any step fails, stop
-and text me a screenshot before improvising.**
+**Compute nodes have no outbound internet.** That's the whole reason this
+workflow exists: everything internet-dependent (pip, Google Drive, wandb)
+happens on the lab Mac first. You end up on HPC with a self-contained tree
+that behaves like an offline workstation.
+
+Follow the steps in order. **If any step fails, stop and text me a screenshot
+before improvising.**
 
 ---
 
@@ -27,8 +32,7 @@ and text me a screenshot before improvising.**
    echo $HOME
    ```
    The segment right after `/home/` is your project code (e.g. `/home/cc/...`
-   → project code is `cc`). **Write this down** — you will paste it into the
-   two `.pbs` files.
+   → project code is `cc`). **Write this down** — `install_on_hpc.sh` needs it.
 
 3. **Sanity check the environment.** Run these on the login node and
    send me the outputs:
@@ -43,42 +47,119 @@ and text me a screenshot before improvising.**
    scratch is 25 TB **not** backed up.
 
 4. **Do NOT run `nvidia-smi` or training on the login node.** Login nodes
-   have no GPU visible; GPU checks happen inside a PBS job (see step 6).
+   have no GPU visible; GPU checks happen inside a PBS job (see step 5).
 
 ---
 
-## 2. Repo clone
+## 2. Build the bundle on the lab Mac
 
-Code is small and belongs on backed-up `$HOME`:
+Everything below happens on the Mac, **before** you touch the HPC again.
+
+### 2.1. Drop the datasets you have on hand into `data/processed/`
+
+The HPC bundle ships the processed data — no preprocessing on HPC. Two of
+the four datasets we already have; two come from Drive.
+
+From the external hard drive, copy over:
 
 ```bash
-cd $HOME
-git clone https://github.com/coder-utkarshchaudhary/SpecSteer.git prism
-cd prism
-git checkout master
+cd ~/Documents/personal/specsteer      # repo root
+mkdir -p data/processed
+cp -R /Volumes/<drive>/prism-data-processed/M3    data/processed/
+cp -R /Volumes/<drive>/prism-data-processed/crims data/processed/
 ```
 
-Confirm you're on master with `git log -1 --oneline`.
+Note the mixed casing — `M3`, `crims` (lowercase) are load-bearing (see
+`utils/config.py::DATASETS`).
+
+### 2.2. Run the builder
+
+```bash
+bash scripts/build_hpc_bundle.sh \
+     --drive-url "https://drive.google.com/drive/folders/1QjwlQRSCgLFKT4f3SHYTOyFSAKXiIAlZ"
+```
+
+What this does:
+1. `gdown`s IIRS + AVIRIS processed folders from Drive into
+   `data/processed/` (skips any that are already there).
+2. `pip download`s all wheels for **Python 3.10 / linux_x86_64 / CUDA 12.1**
+   into `build/hpc_bundle/wheels/` (~2 GB).
+3. Hardlink-copies `data/processed/` into `build/hpc_bundle/data/processed/`.
+4. Tars the repo (excluding `.git`, `.venv`, `data/`, `model/`, etc.) into
+   `build/hpc_bundle/code.tar.gz`.
+5. Writes `README.txt` with the exact scp commands.
+
+Skip the gdown step if all four folders are already local:
+
+```bash
+bash scripts/build_hpc_bundle.sh --skip-gdown
+```
+
+### 2.3. Ship the bundle to HPC
+
+Two independent transfers — the first is small (~2 GB), the second is
+big (~35 GB) and worth `rsync`ing so you get resume-on-drop.
+
+```bash
+cd build/hpc_bundle
+
+# code + wheels → $HOME on Padum
+scp   code.tar.gz install.sh <user>@hpc.iitd.ac.in:~/
+rsync -avP wheels/           <user>@hpc.iitd.ac.in:~/prism-wheels/
+
+# processed data → $SCRATCH
+rsync -avP data/processed/ \
+      <user>@hpc.iitd.ac.in:/scratch/<proj>/<user>/prism-data/processed/
+```
+
+`(<proj>` is your project code; `<user>` is your kerberos id. Confirm the
+scratch path with `ssh <user>@hpc.iitd.ac.in 'echo $SCRATCH'` first.)
 
 ---
 
-## 3. Env setup
-
-Env creation is allowed on the login node (takes < 2 minutes):
+## 3. Install on the HPC login node
 
 ```bash
-cd $HOME/prism
-python3 -m venv .venv
+ssh <user>@hpc.iitd.ac.in
+cd ~
+tar -xzf code.tar.gz                       # → creates ./specsteer/ (or ./prism/)
+mv install.sh specsteer/scripts/           # only if you keep them side by side
+cd specsteer
+
+PROJECT_CODE=cc \
+IITD_EMAIL=<you>@iitd.ac.in \
+WHEELS_DIR=$HOME/prism-wheels \
+bash scripts/install_on_hpc.sh
+```
+
+What this does:
+1. Fills `<REPLACE_ME>` in `scripts/hpc_train.pbs` with your project code +
+   email.
+2. Creates `.venv/` and installs from `~/prism-wheels/` with `--no-index`
+   (no PyPI access needed).
+3. Creates `$SCRATCH/prism-data/{original,processed}` and symlinks
+   `data/original`, `data/processed` under the repo. If you already
+   `rsync`'d directly to `$SCRATCH`, the symlink just picks it up.
+4. Prints the next commands to run.
+
+---
+
+## 4. Sanity check v2
+
+Still on the login node, venv activated:
+
+```bash
+cd $HOME/specsteer
 source .venv/bin/activate
-which python3            # must show $HOME/prism/.venv/bin/python3
-pip install -r requirements.txt
-pip install gdown wandb
+export PYTHONPATH=$PWD:$PYTHONPATH
+python3 utils/check-model-params.py
 ```
 
-If `python3 -m venv` fails, try `python -m venv` and retry. If both fail, call me.
+Send me the output on WhatsApp and call me.
 
-Once installed, log wandb in **offline mode** for now (compute nodes have no
-outbound internet in most partitions):
+Optional: log wandb in **offline mode** (compute nodes have no outbound
+internet, but the credentials file itself just needs to exist for the
+offline runs to write correctly):
 
 ```bash
 wandb login --relogin        # paste your API key from wandb.ai/authorize
@@ -86,134 +167,19 @@ wandb login --relogin        # paste your API key from wandb.ai/authorize
 
 ---
 
-## 4. Data download → `$SCRATCH`
-
-The dataset is **~217 GB** across 4 dataset folders (IIRS, M3, AVIRIS, CRIMS).
-It cannot fit under `$HOME` (100 GB quota) and must live on `$SCRATCH`
-(25 TB, not backed up).
-
-### 4.1. Prepare the scratch layout
-
-```bash
-mkdir -p $SCRATCH/prism-data/original
-cd $HOME/prism
-mkdir -p data
-ln -sfn $SCRATCH/prism-data/original data/original
-readlink data/original           # verify: prints $SCRATCH/prism-data/original
-```
-
-### 4.2. Edit the two PBS files with your project code
-
-Open both files and replace `<REPLACE_ME>` with your project code and
-`REPLACE_ME@iitd.ac.in` with your IITD email:
-
-```bash
-# open in your favourite editor:
-nano scripts/hpc_download.pbs
-nano scripts/hpc_train.pbs
-```
-
-Fields to change in each:
-- `#PBS -P <REPLACE_ME>` → `#PBS -P cc` (or your actual code)
-- `#PBS -M REPLACE_ME@iitd.ac.in` → your address
-
-### 4.3. Submit the download job (preferred path: `gdown`)
-
-```bash
-mkdir -p logs/hpc
-qsub scripts/hpc_download.pbs
-qstat -u $USER                  # confirm the job appears in state Q or R
-```
-
-You'll get an email when it starts and finishes (~1-3 h realistic; walltime
-cap is 24 h). While waiting, tail the logs:
-
-```bash
-tail -f logs/hpc/download.out
-```
-
-### 4.4. Fallback if `gdown` hits the Google 24 h quota
-
-`gdown --continue --remaining-ok` will resume where it left off on a fresh
-submission, so **first try re-submitting the same job** the next day.
-
-If that still fails, use rclone. One-time setup on the **login node**:
-
-```bash
-pip install --user rclone      # or: module load rclone
-rclone config
-# n) new remote
-# name> gdrive
-# type> drive
-# client_id / secret> leave blank (or set your own for better quota)
-# scope> 2  (read-only)
-# When it prints an authorize URL, open it in your laptop browser,
-# log in with the Google account that has access to the folder,
-# copy the auth token back to the terminal.
-```
-
-Then submit the download using rclone instead:
-
-```bash
-rclone copy 'gdrive:{path to prism-data on drive}' \
-       $SCRATCH/prism-data/original \
-       --drive-shared-with-me --progress --transfers 8
-```
-
-Wrap that inside an interactive PBS session so the login node doesn't kill it:
-
-```bash
-qsub -P <REPLACE_ME> -I -l select=1:ncpus=4 -l walltime=12:00:00
-# ...once you land on the compute node, run the rclone command above
-```
-
-### 4.5. Verify the download
-
-```bash
-du -sh $SCRATCH/prism-data/original           # ~ 217 GB
-ls $SCRATCH/prism-data/original               # 4 folders
-```
-
-Expect exactly these four:
-
-```
-data/original - IIRS
-data/original - m3
-data/original - AVIRIS
-data/original - CRIMS
-```
-
-If any are missing, re-submit `scripts/hpc_download.pbs` (safe — resumes).
-
----
-
-## 5. Sanity check v2
-
-Still on the login node, venv activated:
-
-```bash
-cd $HOME/prism
-source .venv/bin/activate
-python3 utils/check-model-params.py
-```
-
-Send me the output on WhatsApp and call me.
-
----
-
-## 6. Smoke test on a GPU compute node (interactive)
+## 5. Smoke test on a GPU compute node (interactive)
 
 Before submitting the 168 h monster, prove end-to-end works with a 1-hour
 interactive GPU session:
 
 ```bash
-qsub -P <REPLACE_ME> -I -l select=1:ncpus=4:ngpus=1 -l walltime=1:00:00
+qsub -P <PROJECT_CODE> -I -l select=1:ncpus=4:ngpus=1 -l walltime=1:00:00
 ```
 
-Once you land on the compute node, verify GPU visibility and run the smoke tests:
+Once you land on the compute node:
 
 ```bash
-cd $HOME/prism
+cd $HOME/specsteer
 source .venv/bin/activate
 export PYTHONPATH=$PWD:$PYTHONPATH
 export WANDB_MODE=offline
@@ -221,11 +187,7 @@ export WANDB_MODE=offline
 nvidia-smi                              # confirm GPU (A100 or V100)
 free -h                                 # host RAM
 
-# preprocess just one folder
-bash scripts/preprocess.sh --dataset iirs --limit 1
-ls $SCRATCH/prism-data/processed/IIRS/train | head
-
-# 1-epoch training smoke on each real model
+# 1-epoch training smoke on the flagship model
 python train/train.py --model vae-our --dataset IIRS --loss physics --epochs 1
 ls -lh model/IIRS/vae-our.pt
 
@@ -242,10 +204,10 @@ Then `exit` to leave the interactive session.
 
 ---
 
-## 7. Submit the full 28-run grid
+## 6. Submit the full 28-run grid
 
 ```bash
-cd $HOME/prism
+cd $HOME/specsteer
 qsub scripts/hpc_train.pbs
 qstat -u $USER                     # confirm state Q or R
 qstat -T <jobid>                   # estimated start time (recomputed every 6h)
@@ -295,12 +257,11 @@ find model -name "*.pt" | wc -l
 
 ---
 
-## 8. After the grid finishes
+## 7. After the grid finishes
 
-1. **Sync wandb** from the login node (compute nodes usually have no outbound
-   internet):
+1. **Sync wandb** from the login node:
    ```bash
-   cd $HOME/prism
+   cd $HOME/specsteer
    source .venv/bin/activate
    wandb sync wandb/offline-run-*
    ```
@@ -310,14 +271,21 @@ find model -name "*.pt" | wc -l
    ```
 3. **Downstream experiments** (needs GPU; submit as a fresh short PBS job):
    ```bash
-   qsub -P <REPLACE_ME> -I -l select=1:ncpus=4:ngpus=1 -l walltime=4:00:00
+   qsub -P <PROJECT_CODE> -I -l select=1:ncpus=4:ngpus=1 -l walltime=4:00:00
    # on the compute node:
-   cd $HOME/prism && source .venv/bin/activate
+   cd $HOME/specsteer && source .venv/bin/activate
    export PYTHONPATH=$PWD:$PYTHONPATH
-   python inference/downstream.py --dataset IIRS --save-plots
-   python inference/downstream.py --dataset M3 --save-plots
+   python inference/downstream.py --dataset IIRS   --save-plots
+   python inference/downstream.py --dataset M3     --save-plots
    python inference/downstream.py --dataset AVIRIS --save-plots
-   python inference/downstream.py --dataset CRIMS --save-plots
+   python inference/downstream.py --dataset CRIMS  --save-plots
+   ```
+4. **Pull results back to the Mac** so they're safe from the scratch purge:
+   ```bash
+   # from the Mac
+   rsync -avP <user>@hpc.iitd.ac.in:~/specsteer/model/           ./model/
+   rsync -avP <user>@hpc.iitd.ac.in:~/specsteer/visualisations/  ./visualisations/
+   rsync -avP <user>@hpc.iitd.ac.in:~/specsteer/wandb/           ./wandb/
    ```
 
 Text me when all 28 checkpoints are in `model/` and downstream plots are

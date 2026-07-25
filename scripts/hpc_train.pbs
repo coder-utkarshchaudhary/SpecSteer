@@ -2,11 +2,12 @@
 #
 # scripts/hpc_train.pbs
 # ---------------------
-# IITD-HPC PBS job: preprocess IIRS/M3/AVIRIS then run the full 28-run
-# ablation grid on a single A100. Idempotent — safe to re-submit after
-# walltime expiry or a crash (completed checkpoints are skipped).
+# IITD-HPC PBS job: run the full 28-run ablation grid on a single A100.
+# The bundle ships pre-processed patches, so no preprocessing runs here.
+# Idempotent — safe to re-submit after walltime expiry or a crash (completed
+# checkpoints are skipped).
 #
-# Submit from $HOME/prism/ (after data has been staged into $SCRATCH):
+# Submit from $HOME/prism/ (after install_on_hpc.sh has staged $SCRATCH):
 #   qsub scripts/hpc_train.pbs
 #
 #PBS -N prism-train28
@@ -23,7 +24,6 @@
 set -uo pipefail
 
 SCRATCH_ROOT="${SCRATCH}/prism-data"
-RAW_SRC="${SCRATCH_ROOT}/original"
 PROC_SRC="${SCRATCH_ROOT}/processed"
 
 cd "${PBS_O_WORKDIR}"
@@ -48,16 +48,14 @@ export PYTHONPATH="${PWD}:${PYTHONPATH:-}"
 export WANDB_MODE="${WANDB_MODE:-offline}"    # sync from login node after run
 
 # ---- stage inputs on $SCRATCH via symlinks ---------------------------------
-# The code expects data/original and data/processed to be relative paths.
-# Symlink both to $SCRATCH so the 200+ GB working set never touches $HOME.
-if [[ ! -e "${RAW_SRC}" ]]; then
-    echo "FATAL: raw data not found at ${RAW_SRC}."
-    echo "       run scripts/hpc_download.pbs first."
+# install_on_hpc.sh already ran this once; do it again defensively in case
+# someone re-cloned the repo without re-running install.
+if [[ ! -d "${PROC_SRC}" ]]; then
+    echo "FATAL: processed data missing at ${PROC_SRC}."
+    echo "       rsync data/processed/ from the bundle, then re-submit."
     exit 3
 fi
-ln -sfn "${RAW_SRC}"  data/original
 ln -sfn "${PROC_SRC}" data/processed
-echo ">>> data/original  -> $(readlink -f data/original)"
 echo ">>> data/processed -> $(readlink -f data/processed)"
 
 # ---- diagnostics -----------------------------------------------------------
@@ -69,22 +67,6 @@ free -h
 echo "----- df -h -----"
 df -h "${HOME}" "${SCRATCH}"
 echo ""
-
-# ---- preprocess (skip if outputs already exist) ----------------------------
-echo ">>> preprocessing (skip-if-exists per dataset)"
-for ds in iirs m3 aviris; do
-    ds_upper="$(echo "${ds}" | tr '[:lower:]' '[:upper:]')"
-    out="data/processed/${ds_upper}/train"
-    if [[ -d "${out}" ]] && [[ $(ls -A "${out}" 2>/dev/null | head -c1) ]]; then
-        echo "[skip] ${ds}: patches already present at ${out}"
-        continue
-    fi
-    echo ">>> preprocess ${ds}"
-    bash scripts/preprocess.sh --dataset "${ds}" || {
-        echo "WARN: preprocess ${ds} failed — continuing so other datasets can run."
-    }
-done
-# CRIMS ships already-preprocessed via the Drive folder; nothing to do here.
 
 # ---- run the 28-run grid ---------------------------------------------------
 echo ""
