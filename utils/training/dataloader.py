@@ -160,5 +160,7 @@ def build_dataloader(
         # drop_last avoids a size-1 batch at the end of the training set which
         # can cause issues with BatchNorm if ever added; safe to set for training.
         drop_last=(split == "train"),
+        multiprocessing_context="spawn" if num_workers > 0 else None,
+        persistent_workers=True if num_workers > 0 else False
     )
     return loader
