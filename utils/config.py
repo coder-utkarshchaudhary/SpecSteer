@@ -164,7 +164,7 @@ DATASETS = {
         "crop_bands": 84,          # drop the last of 85 native bands
     },
     "AVIRIS": {
-        "input_channels": 424,
+        "input_channels": 224,
         "raw_root": "data/original - AVIRIS",
         "processed_root": "data/processed/AVIRIS",
         "fill_value": -9999.0,
