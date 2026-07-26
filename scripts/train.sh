@@ -89,6 +89,11 @@ if [[ "${1:-}" == "--all" ]]; then
     echo "  extra    : ${EXTRA_ARGS[*]:-<none>}"
     echo "=============================================="
 
+    python utils/notify_cli.py --text "Ablation grid launched
+host: $(hostname)
+datasets: ${DATASETS[*]}
+extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
+
     SKIPPED=()
     FAILED=()
     RETRIED=()
@@ -149,6 +154,12 @@ if [[ "${1:-}" == "--all" ]]; then
         for f in "${FAILED[@]}"; do echo "    - ${f}"; done
     fi
     echo "=============================================="
+
+    python utils/notify_cli.py --text "Ablation grid finished
+host: $(hostname)
+datasets: ${DATASETS[*]}
+skipped: ${#SKIPPED[@]}  retried: ${#RETRIED[@]}  failed: ${#FAILED[@]}" >/dev/null 2>&1 || true
+
     exit $(( ${#FAILED[@]} > 0 ? 1 : 0 ))
 fi
 

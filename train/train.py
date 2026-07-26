@@ -26,6 +26,7 @@ import argparse
 import logging
 import math
 import random
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,7 @@ from modules.registry import (
 from utils.config import DATASETS, apply_dataset, settings
 from utils.hyperparams import apply_hyperparams, load_hyperparams
 from utils.logging_setup import get_run_logger, timestamp
+from utils.notify import RunNotifier
 from utils.training.dataloader import build_dataloader
 
 
@@ -63,6 +65,7 @@ def train_vae(
     ckpt_path=None,
     ckpt_meta=None,
     logger=None,
+    notifier=None,
 ):
     """
     Generic VAE training loop driven by ``model.loss_terms``.
@@ -160,6 +163,18 @@ def train_vae(
             + val_str
         )
 
+        if notifier is not None:
+            notifier.record_epoch(epoch, {
+                "train_loss": train_loss,
+                "train_mse": train_mse,
+                "train_sam": train_sam,
+                "train_kld": train_kld,
+                "val_loss": val_loss if val_dataloader is not None else None,
+                "val_mse": val_mse if val_dataloader is not None else None,
+                "val_sam": val_sam if val_dataloader is not None else None,
+                "val_kld": val_kld if val_dataloader is not None else None,
+            })
+
         # ---- Checkpoint (best by monitored loss) + early stopping ----
         monitor = val_loss if val_dataloader is not None else train_loss
         improved = monitor < best_val_loss
@@ -178,16 +193,19 @@ def train_vae(
                     ckpt_path,
                 )
                 logger.info(f"Epoch {epoch}: new best {monitor:.6f} — checkpoint saved")
+            if notifier is not None:
+                notifier.mark_best(epoch, monitor)
         else:
             no_improve_epochs += 1
 
         # Early stopping only when a validation set is available.
         if val_dataloader is not None and no_improve_epochs >= patience:
             logger.info(f"Early stopping at epoch {epoch}: no val_loss improvement for {patience} epochs.")
-            break
+            return "early_stop"
 
     if ckpt_path is not None:
         logger.info(f"Best checkpoint saved to: {ckpt_path}")
+    return "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -322,22 +340,38 @@ def main():
     ckpt_path = Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
     ckpt_meta = {"model": args.model, "dataset": args.dataset, "loss_type": args.loss}
 
-    train_vae(
-        model=model,
-        dataloader=train_loader,
-        epochs=epochs,
-        device=device,
-        use_physics=use_physics,
-        lr=lr,
-        beta=beta,
-        lambda_physics=lambda_physics,
-        weight_decay=weight_decay,
-        patience=patience,
-        val_dataloader=val_loader,
-        ckpt_path=ckpt_path,
-        ckpt_meta=ckpt_meta,
-        logger=logger,
+    notifier = RunNotifier(
+        model=args.model,
+        dataset=args.dataset,
+        loss=args.loss,
+        epochs_planned=epochs,
     )
+
+    try:
+        status = train_vae(
+            model=model,
+            dataloader=train_loader,
+            epochs=epochs,
+            device=device,
+            use_physics=use_physics,
+            lr=lr,
+            beta=beta,
+            lambda_physics=lambda_physics,
+            weight_decay=weight_decay,
+            patience=patience,
+            val_dataloader=val_loader,
+            ckpt_path=ckpt_path,
+            ckpt_meta=ckpt_meta,
+            logger=logger,
+            notifier=notifier,
+        )
+    except BaseException as e:
+        tb = traceback.format_exc()
+        logger.exception("Training run failed with an exception.")
+        notifier.flush_run("fail", extra=f"{type(e).__name__}: {e}\n\n{tb}")
+        raise
+
+    notifier.flush_run(status or "ok", extra=f"ckpt: {ckpt_path}")
 
 
 if __name__ == "__main__":

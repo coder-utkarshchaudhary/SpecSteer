@@ -57,10 +57,15 @@ class VAE_1D_Pixelwise(nn.Module):
         self.latent_dim = latent_dim
 
         # ---- Encoder MLP: C -> hidden... -> 2*Z (mu || logvar) ----
+        # Wide MLP hidden dims (up to ~7k for CRIMS, ~4k for IIRS) with plain
+        # ReLU risk dead-neuron collapse: too many units get pushed to always-
+        # zero early and never recover, degrading the baseline's true capacity.
+        # LayerNorm keeps pre-activation scale bounded per pixel spectrum, and
+        # GELU is smooth (no zero-gradient half-space) so units cannot die.
         enc_layers = []
         in_f = c
         for h in hidden_dims:
-            enc_layers += [nn.Linear(in_f, h), nn.ReLU()]
+            enc_layers += [nn.Linear(in_f, h), nn.LayerNorm(h), nn.GELU()]
             in_f = h
         enc_layers.append(nn.Linear(in_f, 2 * latent_dim))
         self.encoder = nn.Sequential(*enc_layers)
@@ -69,7 +74,7 @@ class VAE_1D_Pixelwise(nn.Module):
         dec_layers = []
         in_f = latent_dim
         for h in reversed(hidden_dims):
-            dec_layers += [nn.Linear(in_f, h), nn.ReLU()]
+            dec_layers += [nn.Linear(in_f, h), nn.LayerNorm(h), nn.GELU()]
             in_f = h
         dec_layers.append(nn.Linear(in_f, c))
         self.decoder = nn.Sequential(*dec_layers)

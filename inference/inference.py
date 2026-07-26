@@ -13,6 +13,7 @@ Run from the repo root with PYTHONPATH set:
 """
 
 import argparse
+import json
 from collections import OrderedDict
 from pathlib import Path
 
@@ -114,6 +115,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--split", default="test", choices=["train", "valid", "test"])
     parser.add_argument("--batch-size", type=int, default=settings.batch_size)
     parser.add_argument("--num-workers", type=int, default=settings.num_workers)
+    parser.add_argument("--out-json", default=None,
+                        help="Optional path to dump the metrics as JSON for aggregation.")
     return parser.parse_args()
 
 
@@ -165,11 +168,30 @@ def main():
             n += 1
 
     n = max(n, 1)
-    logger.info(f"Results over {len(loader.dataset)} {args.split} patches ({n} batches):")
-    logger.info(f"  MSE  : {mse_sum / n:.6f}")
-    logger.info(f"  SAM  : {sam_sum / n:.6f} rad")
-    logger.info(f"  PSNR : {psnr_sum / n:.4f} dB")
-    logger.info(f"  SSIM : {ssim_sum / n:.4f}")
+    metrics = {
+        "model": args.model,
+        "dataset": args.dataset,
+        "loss": args.loss,
+        "ckpt": str(ckpt_file),
+        "split": args.split,
+        "n_batches": n,
+        "n_samples": len(loader.dataset),
+        "mse": mse_sum / n,
+        "sam_rad": sam_sum / n,
+        "psnr": psnr_sum / n,
+        "ssim": ssim_sum / n,
+    }
+    logger.info(f"Results over {metrics['n_samples']} {args.split} patches ({n} batches):")
+    logger.info(f"  MSE  : {metrics['mse']:.6f}")
+    logger.info(f"  SAM  : {metrics['sam_rad']:.6f} rad")
+    logger.info(f"  PSNR : {metrics['psnr']:.4f} dB")
+    logger.info(f"  SSIM : {metrics['ssim']:.4f}")
+
+    if args.out_json:
+        out_path = Path(args.out_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(metrics, indent=2))
+        logger.info(f"Wrote metrics JSON to {out_path}")
 
 
 if __name__ == "__main__":
