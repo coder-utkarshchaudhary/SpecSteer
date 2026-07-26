@@ -31,6 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.optim as optim
 
 from modules.registry import (
@@ -44,6 +45,39 @@ from utils.hyperparams import apply_hyperparams, load_hyperparams
 from utils.logging_setup import get_run_logger, timestamp
 from utils.notify import RunNotifier
 from utils.training.dataloader import build_dataloader
+
+
+# ---------------------------------------------------------------------------
+# nn.DataParallel adapter
+# ---------------------------------------------------------------------------
+
+class _LossTermsAdapter(nn.Module):
+    """Route DP's ``forward()`` to the inner model's ``loss_terms(...)``.
+
+    ``nn.DataParallel`` only splits/gathers the module's ``forward`` call, so
+    we expose ``loss_terms`` through ``forward`` and unsqueeze each scalar term
+    to a length-1 first-dim tensor. DP concatenates those along dim 0 (one row
+    per GPU); the training loop takes ``.mean()`` afterwards to reduce.
+    """
+
+    def __init__(self, inner: nn.Module):
+        super().__init__()
+        self.inner = inner
+
+    def forward(self, x, beta, lambda_physics, use_physics):
+        terms = self.inner.loss_terms(
+            x, beta=beta, lambda_physics=lambda_physics, use_physics=use_physics,
+        )
+        return {k: v.unsqueeze(0) for k, v in terms.items()}
+
+
+def _unwrap(model: nn.Module) -> nn.Module:
+    """Return the underlying HSI-VAE model regardless of DP / adapter wrapping."""
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+    if isinstance(model, _LossTermsAdapter):
+        model = model.inner
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +130,9 @@ def train_vae(
     best_val_loss = math.inf
     no_improve_epochs = 0
 
+    use_amp = (device.type == "cuda")
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+
     if ckpt_path is not None:
         ckpt_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -105,20 +142,23 @@ def train_vae(
         train_loss = train_mse = train_sam = train_kld = 0.0
 
         for x_batch in dataloader:
-            x_batch = x_batch.to(device)
-            optimizer.zero_grad()
+            x_batch = x_batch.to(device, non_blocking=True)
+            optimizer.zero_grad(set_to_none=True)
 
-            terms = model.loss_terms(x_batch, beta=beta, lambda_physics=lambda_physics,
-                                     use_physics=use_physics)
-            loss = terms["loss"]
-            loss.backward()
+            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                terms = model(x_batch, beta, lambda_physics, use_physics)
+                loss = terms["loss"].mean()
+
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss += loss.item()
-            train_mse += terms["mse"].item()
-            train_sam += terms["sam"].item()
-            train_kld += terms["kld"].item()
+            train_mse += terms["mse"].mean().item()
+            train_sam += terms["sam"].mean().item()
+            train_kld += terms["kld"].mean().item()
 
         n_train = max(len(dataloader), 1)
         train_loss /= n_train
@@ -131,15 +171,14 @@ def train_vae(
         val_loss = val_mse = val_sam = val_kld = 0.0
         if val_dataloader is not None:
             model.eval()
-            with torch.no_grad():
+            with torch.no_grad(), torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
                 for x_val in val_dataloader:
-                    x_val = x_val.to(device)
-                    terms = model.loss_terms(x_val, beta=beta, lambda_physics=lambda_physics,
-                                             use_physics=use_physics)
-                    val_loss += terms["loss"].item()
-                    val_mse += terms["mse"].item()
-                    val_sam += terms["sam"].item()
-                    val_kld += terms["kld"].item()
+                    x_val = x_val.to(device, non_blocking=True)
+                    terms = model(x_val, beta, lambda_physics, use_physics)
+                    val_loss += terms["loss"].mean().item()
+                    val_mse += terms["mse"].mean().item()
+                    val_sam += terms["sam"].mean().item()
+                    val_kld += terms["kld"].mean().item()
 
             n_val = max(len(val_dataloader), 1)
             val_loss /= n_val
@@ -185,7 +224,7 @@ def train_vae(
                 torch.save(
                     {
                         "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
+                        "model_state_dict": _unwrap(model).state_dict(),
                         "optimizer_state_dict": optimizer.state_dict(),
                         "loss": monitor,
                         **ckpt_meta,
@@ -302,11 +341,13 @@ def main():
         "train", args.model, args.dataset, loss=args.loss, ts=timestamp(),
     )
 
+    n_gpus = torch.cuda.device_count() if device.type == "cuda" else 0
+
     logger.info("==============================================")
     logger.info(f"  model     : {args.model}")
     logger.info(f"  dataset   : {args.dataset} (C={settings.input_channels})")
     logger.info(f"  loss      : {args.loss}")
-    logger.info(f"  device    : {device}")
+    logger.info(f"  device    : {device}  gpus: {n_gpus}")
     logger.info(f"  epochs    : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
     logger.info(f"  lr        : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
     logger.info(f"  wd        : {weight_decay}  patience: {patience}  seed: {seed}")
@@ -326,15 +367,25 @@ def main():
     logger.info(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
     # Model
-    model = build_model(args.model).to(device)
+    raw_model = build_model(args.model).to(device)
 
     # Materialize LazyLinear layers with a single dummy forward before training.
+    # Kept in fp32 so lazy weights are initialised in fp32; autocast during
+    # training then casts activations to fp16 without touching the params.
     dummy = torch.randn(
         2, settings.input_height, settings.input_width, settings.input_channels,
         device=device,
     )
     with torch.no_grad():
-        model(dummy)
+        raw_model(dummy)
+
+    # Wrap so nn.DataParallel can split loss_terms across GPUs when available.
+    model = _LossTermsAdapter(raw_model)
+    if n_gpus > 1:
+        logger.info(f"Wrapping in nn.DataParallel across {n_gpus} GPUs "
+                    f"(per-GPU batch: {batch_size // n_gpus}).")
+        model = nn.DataParallel(model)
+    model.to(device)
 
     # Checkpoint destination
     ckpt_path = Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
