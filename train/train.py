@@ -26,6 +26,7 @@ import argparse
 import logging
 import math
 import random
+import sys
 import traceback
 from pathlib import Path
 
@@ -33,6 +34,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from tqdm.auto import tqdm
 
 from modules.registry import (
     MODEL_NAMES,
@@ -141,7 +143,14 @@ def train_vae(
         model.train()
         train_loss = train_mse = train_sam = train_kld = 0.0
 
-        for x_batch in dataloader:
+        train_bar = tqdm(
+            dataloader,
+            desc=f"epoch {epoch}/{epochs} train",
+            leave=False,
+            file=sys.stdout,
+            dynamic_ncols=True,
+        )
+        for i, x_batch in enumerate(train_bar, start=1):
             x_batch = x_batch.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
@@ -160,6 +169,11 @@ def train_vae(
             train_sam += terms["sam"].mean().item()
             train_kld += terms["kld"].mean().item()
 
+            train_bar.set_postfix(loss=f"{train_loss / i:.4f}",
+                                  mse=f"{train_mse / i:.4f}",
+                                  sam=f"{train_sam / i:.4f}")
+        train_bar.close()
+
         n_train = max(len(dataloader), 1)
         train_loss /= n_train
         train_mse /= n_train
@@ -171,14 +185,25 @@ def train_vae(
         val_loss = val_mse = val_sam = val_kld = 0.0
         if val_dataloader is not None:
             model.eval()
+            val_bar = tqdm(
+                val_dataloader,
+                desc=f"epoch {epoch}/{epochs} val  ",
+                leave=False,
+                file=sys.stdout,
+                dynamic_ncols=True,
+            )
             with torch.no_grad(), torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                for x_val in val_dataloader:
+                for j, x_val in enumerate(val_bar, start=1):
                     x_val = x_val.to(device, non_blocking=True)
                     terms = model(x_val, beta, lambda_physics, use_physics)
                     val_loss += terms["loss"].mean().item()
                     val_mse += terms["mse"].mean().item()
                     val_sam += terms["sam"].mean().item()
                     val_kld += terms["kld"].mean().item()
+                    val_bar.set_postfix(loss=f"{val_loss / j:.4f}",
+                                        mse=f"{val_mse / j:.4f}",
+                                        sam=f"{val_sam / j:.4f}")
+            val_bar.close()
 
             n_val = max(len(val_dataloader), 1)
             val_loss /= n_val
