@@ -12,7 +12,7 @@ set -euo pipefail
 # DEST="/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/prism/data/processed"
 
 # ==========================
-# Configuration v2
+# Configuration v2 -> Vultr
 # ==========================
 USER="mlr"
 HOST="192.168.1.30"

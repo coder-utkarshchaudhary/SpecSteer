@@ -259,9 +259,9 @@ def print_interp_table(all_results, loggers):
             f"  {r['model']:24s}{it['jaggedness']:16.5f}{it['path_length']:16.5f}",
         )
     _broadcast(loggers, logging.INFO,
-               "  jaggedness = mean L2 of 2nd difference of decoded spectra along alpha")
+                "  jaggedness = mean L2 of 2nd difference of decoded spectra along alpha")
     _broadcast(loggers, logging.INFO,
-               "  (lower = smoother chemical transition = more generative-ready manifold)")
+                "  (lower = smoother chemical transition = more generative-ready manifold)")
 
 
 def save_outputs(all_results, args, loggers):
