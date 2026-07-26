@@ -14,11 +14,12 @@ set -euo pipefail
 # ==========================
 # Configuration v2 -> Vultr
 # ==========================
-USER="mlr"
-HOST="192.168.1.30"
+USER="root"
+HOST="38.128.232.57"
+PORT="46508"
 
 SOURCE="data/processed/"
-DEST="/media/mlr/New Volume2/specsteer/data/processed"
+DEST="/workspace/prism/data/processed"
 
 # ==========================
 # Connectivity check
@@ -41,6 +42,7 @@ rsync \
     --info=progress2 \
     --partial \
     --compress \
+    -e "ssh -i ~/.ssh/id_rsa -p $PORT" \
     "$SOURCE" \
     "$USER@$HOST:$DEST"
 
