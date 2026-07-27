@@ -6,7 +6,7 @@
 # --- Optimization ---
 epochs: 100
 lr: 1.0e-3
-batch_size: 8         # scaled down from AVIRIS(16) — CRIMS activations ~1.28x larger spatially, ~1.65x spectrally
+batch_size: 32         # scaled down from AVIRIS(16) — CRIMS activations ~1.28x larger spatially, ~1.65x spectrally
 num_workers: 4
 beta: 1.0e-3
 lambda_physics: 0.3
