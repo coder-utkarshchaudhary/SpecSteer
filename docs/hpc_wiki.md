@@ -1,301 +1,269 @@
-# IITD HPC — Ablation Grid Launcher Wiki
+# Running the Ablation Grid on IITD HPC
 
-**Audience:** the lab junior who will run the 28-run ablation grid on the IITD HPC.  
-**You need to touch exactly one script:** `bash scripts/hpc_launch.sh`.  
-Everything else is automated.
+This document walks you through everything from "I just sat down at the lab machine" to "checkpoints are back and Utkarsh is notified." Read it top-to-bottom like a recipe — every step depends on the ones before it.
 
-> ⚠️ Anything marked **`FILL ME`** in this doc must be filled in *before* you run
-> the launcher. Each `FILL ME` includes a one-line "how to obtain" hint. If any
-> hint says "call Utkarsh" — do that, don't guess.
+You will touch exactly one script: **`bash scripts/hpc_launch.sh`**. Everything else is automated. If something breaks and this doc doesn't cover it, don't improvise — call Utkarsh.
 
 ---
 
-## Step 0 — Connect to the lab WiFi
-
-**This is not optional.** The HPC is only reachable from the lab network.
-
-- SSID: **`mlr lab 5g`**
-- If you cannot see this SSID, you're not in the lab; go there.
-- If you see it but can't connect, the WiFi password is on the whiteboard.
-
-Confirm you're on the right network before continuing.
-
-Copy the hpc_config.env.example into hpc_config.env and populate the fields. (SEE STEP 3)
-You also need to set the LAB_DATA_ROOT in `scripts/hpc_config.env`.
+## Before you begin
+Sit on system 9 (password is mlr@123#; confirm kar liyo idr properly). Connect to the **`mlr lab 5g`** WiFi. Other wifi networks are slow and will take a lot of time in rsync. 
 
 ---
 
-## Step 1 — One-time setup on the lab machine
+## Step 1 — Pull the latest code
 
-You only do this once. Skip to Step 2 if a previous junior already did it.
+Open a terminal on the lab machine and navigate to the repo. Mujhe exactly nahi pata ye kaha hai but it is most likely here `cd media/mlr/New Volume 21/...`; ek baar call me. I'll tell you where it is.
 
 ```bash
-# System packages (Debian/Ubuntu):
+cd <path-to-repo-given-by-utkarsh>              # or wherever the repo lives
+git checkout -b hpc                             # switch to the hpc branch
+git pull origin hpc                             # get the latest changes
+```
+
+If git asks you to stash local changes, do:
+
+```bash
+git stash
+git pull origin hpc
+git stash pop               # brings your changes back on top
+```
+
+**If this step fails** — you probably have uncommitted edits that conflict. Call Utkarsh rather than guessing at a merge resolution.
+
+---
+
+## Step 2 — One-time machine setup
+
+Skip this step entirely if a previous person already did it (the test in Step 3 will confirm). You only run these commands once per lab machine.
+Install the system tools the launcher depends on:
+
+```bash
 sudo apt update
 sudo apt install -y rsync openssh-client autossh tmux python3 python3-venv python3-pip
 ```
 
-### 1a — Log in to Weights & Biases on the lab machine
+Set up passwordless SSH to the HPC so the launcher can run non-interactively. Ask Kavinder how to connect to the HPC. If Kavinder is unavailable or you can't figure it out, call Utkarsh.
 
-The HPC job itself will run offline; the lab machine syncs the runs to the
-wandb server after the job finishes.
+Once you know your HPC username and hostname, run:
 
 ```bash
+ssh-copy-id YOUR_HPC_USER@THE_HPC_HOST
+```
+
+It will ask for your HPC password once. After that, verify:
+
+```bash
+ssh YOUR_HPC_USER@THE_HPC_HOST 'echo ok'
+```
+
+If it prints `ok` without asking for a password, you're set. If it still asks for a password, something went wrong — ask Kavinder or Utkarsh.
+Finally, log in to Weights & Biases on the lab machine (Utkarsh will give you the API key privately) using a new terminal window. Ensure the .prism-venv is activates using conda (`conda activate .prism-venv`)
+
+```bash
+pip install wandb
 wandb login
 # Paste the API key when prompted.
 ```
 
-**`WANDB_API_KEY`** — **FILL ME** — *ask Utkarsh (private channel). Never
-commit or paste in the repo.*
-
-### 1b — Passwordless SSH to the HPC
-Ask Kavinder on how to connect to hpc. Or use what you learnt last time. If kavinder is not available or you can't figure out how to log in, then call Utkarsh.
-
-```bash
-# Copy your public key to the HPC (you'll type your HPC password once):
-ssh-copy-id ${HPC_USER}@${HPC_HOST}
-
-# Verify it works without a password:
-ssh ${HPC_USER}@${HPC_HOST} 'echo ok'
-```
-
-**`HPC_USER`** — **FILL ME** — *your IITD LDAP username. Same as the SSH login
-Utkarsh gives you.*
-
-**`HPC_HOST`** — **FILL ME** — *IITD HPC login-node hostname. Usually
-`padum.iitd.ac.in`. Confirm with Kavinder / Utkarsh / IITD HPC docs before using.*
-
 ---
 
-## Step 2 — Verify processed data on the lab machine
+## Step 3 — Fill the configuration file
 
-The launcher rsyncs `data/processed/` to the HPC — the lab machine must have
-the full set of preprocessed patches. **Do NOT run preprocessing** — the data
-is already there.
+The launcher reads all its settings from a single file. Copy the template by running the following commands in the terminal:
 
 ```bash
-ls "${LAB_DATA_ROOT:-/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/data/processed}"
-# Expected output: AVIRIS  IIRS  M3  crims
-```
-
-If any of these subdirs are missing, **stop and call Utkarsh**.
-
----
-
-## Step 3 — Fill `scripts/hpc_config.env`
-
-```bash
-cd /path/to/specsteer
 cp scripts/hpc_config.env.example scripts/hpc_config.env
 ```
 
-The launcher refuses to run until every `FILL_ME` is replaced. Here's the
-catalog of what each field is and how to obtain it:
+Open `scripts/hpc_config.env` in VS Code. Every line that says `FILL_ME` needs to be replaced with a real value. Here is where to get each one:
 
-### HPC access
+**HPC credentials (ask Kavinder or Utkarsh):**
 
-| Field | How to obtain |
-|---|---|
-| `HPC_USER` | Your IITD LDAP username. Ask Utkarsh if unsure. |
-| `HPC_HOST` | Confirm with Utkarsh / IITD HPC docs. Often `padum.iitd.ac.in`. |
-| `HPC_HOME` | Run: `ssh ${HPC_USER}@${HPC_HOST} 'echo $HOME'` — copy the path it prints. |
-| `HPC_SCRATCH` | Usually `/scratch/${HPC_USER}` on IITD Padum. Verify: `ssh ${HPC_USER}@${HPC_HOST} 'ls -d /scratch/${HPC_USER}'`. |
-| `HPC_PROJECT_DIR` | Defaults to `${HPC_HOME}/prism`. Leave as-is unless Utkarsh says otherwise. |
+- `HPC_USER` — your IITD login username.
+- `HPC_HOST` — the HPC login node (typically `padum.iitd.ac.in`). Confirm with Kavinder.
+- `HPC_HOME` — run `ssh YOUR_USER@THE_HOST 'echo $HOME'` and paste what it prints.
+- `HPC_SCRATCH` — run `ssh YOUR_USER@THE_HOST 'ls -d /scratch/YOUR_USER'` and paste the path.
 
-### PBS scheduler
+**PBS queue (ask Utkarsh):**
 
-| Field | How to obtain |
-|---|---|
-| `HPC_QUEUE` | List available queues: `ssh ${HPC_USER}@${HPC_HOST} 'qstat -q'`. Pick a GPU queue with A100 access. **Ask Utkarsh which queue is right.** |
-| `HPC_WALLTIME` | Default `24:00:00`. If the queue's max is lower (check `qstat -q`), reduce it. |
-| `HPC_SELECT` | Default is fine for a single A100 node with 8 CPUs, 64 GB memory. If the queue rejects it, ask Utkarsh — the exact syntax is IITD-specific. |
-| `HPC_ARRAY_RANGE` | `1-28` for the full grid. For a smoke test set `1-1`. |
-| `HPC_PROJECT_CODE` | Leave empty unless IITD assigned you one. |
+- `HPC_QUEUE` — which GPU queue to submit to. If you want to check yourself: `ssh YOUR_USER@THE_HOST 'qstat -q'` lists them. Pick the one with A100 access. When in doubt, ask Utkarsh.
 
-### Lab-side tunnel
+**Telegram bot (ask Utkarsh — he will DM you):**
 
-| Field | How to obtain |
-|---|---|
-| `LAB_TUNNEL_PORT` | Default `8765`. Change only if that port is already busy on the lab machine. |
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
 
-### Telegram bot
+**Wandb (ask Utkarsh):**
 
-| Field | How to obtain |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | **Ask Utkarsh.** He'll send it privately. |
-| `TELEGRAM_CHAT_ID` | **Ask Utkarsh.** Same channel. |
+- `WANDB_API_KEY`
 
-### Weights & Biases
+**Data path:**
 
-| Field | How to obtain |
-|---|---|
-| `WANDB_API_KEY` | **Ask Utkarsh.** The HPC job uses this only to write offline runs; sync happens on the lab machine (already logged in via Step 1a). |
-| `WANDB_PROJECT` | Default `hsi-pi-vae`. Only change if Utkarsh says so. |
-| `WANDB_ENTITY` | Leave blank unless Utkarsh gives you a team name. |
+- `LAB_DATA_ROOT` — where the processed patches live on this machine. The default is `/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/data/processed`. If the data is elsewhere, update it.
 
-### Lab-side paths
+Everything else has sensible defaults. Don't change them unless Utkarsh tells you to.
 
-| Field | How to obtain |
-|---|---|
-| `LAB_DATA_ROOT` | Default matches the lab drive path. Only change if the data lives elsewhere. |
-| `LAB_REPO_ROOT` | Blank = auto-detect (uses this checkout). |
-
-### Wheels
-
-| Field | How to obtain |
-|---|---|
-| `PIP_PLATFORM`, `PIP_PYTHON_VERSION`, `PIP_ABI` | Defaults match Linux x86_64 + Python 3.11 on IITD HPC. If bootstrap complains about missing wheels, run `ssh ${HPC_USER}@${HPC_HOST} 'python3 --version'` and match the version. |
+**How to verify this step worked:** the launcher will check every field and refuse to start if anything is still `FILL_ME` or empty. So if Step 4 starts running, your config is correct.
 
 ---
 
-## Step 4 — Fire it up
+## Step 4 — Verify the data is present
+
+The launcher will rsync `data/processed/` to the HPC. Confirm it exists locally:
 
 ```bash
-cd /path/to/specsteer
+ls "${LAB_DATA_ROOT}"
+```
+
+You should see subdirectories: `IIRS`, `M3`, `AVIRIS`, `crims`. If any are missing, **stop and call Utkarsh** — do not proceed without the full dataset.
+
+---
+
+## Step 5 — Launch
+In a new terminal window run the following command from repo root:
+```bash
 bash scripts/hpc_launch.sh
 ```
 
-That's it. The launcher does everything: builds wheels, rsyncs, bootstraps the
-HPC venv, starts the lab-side relay, opens the reverse tunnel, kicks off the
-HPC forwarder inside tmux, and submits the PBS array job.
+That's it. The script does everything automatically:
 
-**What to expect (in order):**
+1. Checks WiFi, config, SSH access, local data.
+2. Downloads pip wheels for the HPC platform (5–15 min first time; instant on subsequent runs).
+3. Rsyncs the repo, wheels, and processed data to the HPC (**this is the slow step — 1 to 3 hours over lab WiFi**).
+4. Runs the HPC bootstrap (creates the Python environment from the wheels, offline).
+5. Starts the Telegram relay on the lab machine.
+6. Opens a reverse SSH tunnel so HPC notifications reach the lab. (This might ask for the lab system password, I am not sure yet. If it does just ask any faculty.)
+7. Starts the login-node message forwarder inside tmux on the HPC.
+8. Submits a **smoke run** — one slot, 5 epochs — to verify the environment works.
+9. Starts a background watcher that waits for the smoke to finish.
 
-1. Sanity checks (WiFi, config, ssh key). Fails loudly if anything is off.
-2. `pip download` of wheels — **5–15 min** the first time; skipped on later runs.
-3. Rsync of the repo (fast), wheels (~1 GB, medium), and `data/processed/`
-   (**this is the long one — 1–3 h over lab WiFi**).
-4. Bootstrap on the HPC (offline pip install, `.env` creation).
-5. Relay + tunnel + forwarder come up.
-6. `qsub` — you get back a job ID.
-7. Cheat-sheet printed with monitoring commands.
+**What happens after the smoke:**
 
-### Junior babysit rule
+- If the smoke passes: the watcher sleeps 10 minutes (giving you a window to stop if something looked wrong), then automatically submits the full 28-run grid. You will get a Telegram message: `[LAUNCHED] Full ablation grid submitted`.
+- If the smoke fails: the watcher pulls the logs, sends the tail to Telegram, and stops. The full grid is NOT submitted. Fix the issue (or call Utkarsh), then re-run `bash scripts/hpc_launch.sh`.
 
-**Sit at the machine for the first 1.0–1.5 hours** while `data/processed/`
-rsyncs. Watch the progress bar in the launcher log to confirm it's moving:
+**How long should you sit here?**
+
+Stay at the machine for 1.0–1.5 hours while the data rsyncs. Open a second terminal and watch:
 
 ```bash
 tail -f logs/hpc_launch_*.log
 ```
-(This can be done by running the above command in a new terminal.)
 
-Once you've seen the rsync progress advance steadily for ~30 min without
-stalling, you may leave. The launcher runs in the foreground of your shell,
-but the tunnel + forwarder + PBS job all keep running after it exits.
+As long as you see the rsync progress bar moving, things are fine. Once you've confirmed it's been moving steadily for ~30 minutes without stalling, you can leave. The script runs in the foreground, but the tunnel, relay, forwarder, and watcher are all background processes that survive you closing the terminal.
 
-**Do not close your shell during the rsync phase.** After `qsub` completes,
-you can close it — the tunnel is a background process with its PID in
-`logs/tunnel.pid`.
+**Do not close the terminal while rsync is still running.** After the script prints "launch complete," you can close it safely.
+
+**If rsync stalls** (no progress for 10+ minutes): your WiFi probably dropped. Reconnect to `mlr lab 5g` and re-run `bash scripts/hpc_launch.sh`. Rsync resumes where it left off (`--partial`), so you don't lose progress.
 
 ---
 
-## Step 5 — Monitoring
+## Step 6 — Monitor
 
-### On Telegram
+Utkarsh will receive Telegram messages throughout the run:
 
-You will get:
+- **[START]** — one per run, showing the hyperparameters.
+- **[HB]** — every 10 epochs, with current loss / MSE / SAM / KLD metrics, wall time, and ETA.
+- **[OK]** / **[FAIL]** / **[STOP]** — when a run finishes.
 
-- **[START]** — once per run, with the resolved hyperparameters.
-- **[HB]** — a heartbeat every 10 epochs with train/val loss, MSE, SAM, KLD.
-- **[OK]** / **[FAIL]** / **[STOP]** — once per run, at the end.
-
-### On the lab machine
+If you want to check status from the lab machine:
 
 ```bash
-# Launcher itself:
-tail -f logs/hpc_launch_*.log
-
-# Relay (Telegram sends from the tunnel land here):
-tail -f logs/relay.log
-
-# Tunnel status:
-tail -f logs/tunnel.log
-
-# Everything at a glance:
 bash scripts/hpc_launch.sh --status
 ```
 
-### On the HPC
+This shows whether the tunnel, relay, watcher, and PBS job are alive.
+
+If you want to watch logs on the HPC:
 
 ```bash
-# The PBS array queue:
-ssh ${HPC_USER}@${HPC_HOST} 'qstat -t $(cat logs/hpc_jobid)'
+# PBS array queue:
+ssh YOUR_USER@THE_HOST 'qstat -t $(cat ~/prism/logs/hpc_jobid)'
 
-# A specific array element's stdout+stderr:
-ssh ${HPC_USER}@${HPC_HOST} 'tail -f ~/prism/logs/pbs_*_1.out'
+# A specific run's log:
+ssh YOUR_USER@THE_HOST 'tail -f ~/prism/logs/train_*.log'
 
-# Attach to the forwarder tmux (detach with Ctrl-b, d):
-ssh ${HPC_USER}@${HPC_HOST} 'tmux attach -t specsteer_forwarder'
+# The forwarder (detach with Ctrl-b then d):
+ssh YOUR_USER@THE_HOST 'tmux attach -t specsteer_forwarder'
 ```
 
 ---
 
-## Step 6 — After the job completes
+## Step 7 — Pull results back
 
-Telegram will send a `[OK]` message for each of the 28 runs. Once you have
-28 finish messages (or the array status shows all elements done):
+When all 28 runs are done (you'll get 28 `[OK]` messages on Telegram, or check `qstat` shows them all finished):
 
 ```bash
-# Rsync checkpoints, wandb, logs back to the lab machine:
+cd ~/specsteer
 bash scripts/hpc_pull_results.sh
+```
 
-# Push offline wandb runs to the server:
-cd /path/to/specsteer
+This rsyncs the checkpoints, wandb offline runs, and logs from the HPC to the lab machine.
+
+Then push the wandb runs to the server:
+
+```bash
 wandb sync wandb/offline-run-*
 ```
 
-**Verify you got 28 checkpoints:**
+Verify you got 28 checkpoints:
 
 ```bash
 find model -name '*.pt' | wc -l
-# Expect: 28
-find model -name '*.pt' | sort
+# Should print: 28
 ```
 
-**Tell Utkarsh** — job is done, checkpoints pulled, wandb synced.
-
----
-
-## Troubleshooting
-
-| Symptom | What to do |
-|---|---|
-| `cannot ssh to ${HPC_USER}@${HPC_HOST}` | Passwordless key auth isn't set up. Redo Step 1b. |
-| Rsync stalls, no progress for 10 min | Reconnect to `mlr lab 5g`. Re-run `bash scripts/hpc_launch.sh` — rsync is idempotent (`--partial`), it will resume. |
-| `qsub` says "no matching queue" | Wrong `HPC_QUEUE`. Run `ssh ${HPC_USER}@${HPC_HOST} 'qstat -q'` and pick a valid GPU queue. Ask Utkarsh. |
-| `qsub` says "resources not available" | The A100 nodes are busy. This will resolve on its own — PBS will schedule as slots free up. Nothing to do. |
-| No Telegram messages arriving | Check `logs/relay.log` on the lab and `ssh ${HPC_USER}@${HPC_HOST} 'tail logs/forwarder.log'`. Common cause: tunnel died — run `bash scripts/hpc_launch.sh --status`; re-run `bash scripts/hpc_launch.sh` to restart it. |
-| Forwarder tmux session died | `ssh ${HPC_USER}@${HPC_HOST} 'tmux kill-session -t specsteer_forwarder'` then re-run `bash scripts/hpc_launch.sh` — it will restart the forwarder. |
-| Bootstrap says "wheels/ empty" | `pip download` on the lab produced 0 files. Usually a `PIP_PLATFORM` mismatch. Check `ssh ${HPC_USER}@${HPC_HOST} 'python3 --version'` and update `PIP_PYTHON_VERSION` / `PIP_ABI` in the config to match. |
-| A single run says `[FAIL]` on Telegram | The Telegram message includes the last log lines and the exception. Screenshot it and send to Utkarsh; don't try to fix it yourself. The other 27 runs continue independently. |
+**Tell Utkarsh** — job done, checkpoints pulled, wandb synced.
 
 ---
 
 ## Emergency stop
 
-If Utkarsh tells you to kill everything:
+If something is wrong and you need to kill everything:
 
 ```bash
 bash scripts/hpc_launch.sh --stop
 ```
 
-That kills the tunnel, the local relay, the HPC forwarder tmux session, and
-runs `qdel` on the PBS array. All 28 array elements terminate.
+This kills the local relay, tunnel, and watcher; kills the HPC forwarder tmux session; and `qdel`s both the smoke and full PBS jobs. All array elements terminate.
 
 ---
 
-## Summary — what you actually do
+## Troubleshooting
 
-1. Connect to `mlr lab 5g` WiFi.
-2. First time only: install packages, `wandb login`, `ssh-copy-id`.
-3. `cp scripts/hpc_config.env.example scripts/hpc_config.env` and fill every
-   `FILL_ME`. Ask Utkarsh for the values marked "ask Utkarsh".
-4. `bash scripts/hpc_launch.sh` — sit at the machine for 1.0–1.5 h until
-   the rsync bar is clearly progressing, then you can leave.
-5. Wait for the Telegram finish messages.
-6. `bash scripts/hpc_pull_results.sh` and `wandb sync wandb/offline-run-*`.
-7. Tell Utkarsh.
+**"cannot ssh to ..."** — Passwordless key auth isn't set up. Go back to Step 2.
 
-That is the entire junior workflow. If something isn't covered above — don't
-improvise, ping Utkarsh.
+**Rsync stalls** — Reconnect to `mlr lab 5g`. Re-run `bash scripts/hpc_launch.sh` — it resumes.
+
+**qsub says "no matching queue"** — Wrong `HPC_QUEUE` in the config. Run `ssh YOUR_USER@HOST 'qstat -q'` and pick a valid GPU queue. Ask Utkarsh.
+
+**qsub says "resources not available"** — A100 nodes are busy. PBS will schedule when slots free. Nothing to do.
+
+**"reverse tunnel failed to start"** — Two causes. Either your lab→HPC SSH key has a passphrase (the backgrounded tunnel can't type it), or the HPC login node blocks port-forwarding. For the first: make a passphraseless key, or run `eval $(ssh-agent); ssh-add ~/.ssh/id_ed25519` once, then re-launch. For the second, call Utkarsh — it needs a config change on his side. Note: the tunnel logs in *to the HPC* using your HPC key — it never asks for the lab machine's password.
+
+**"tunnel is up but the HPC could not reach the relay"** — The launcher warns about this but keeps going. Telegram messages are not lost — they queue on the HPC in `logs/notify_queue.jsonl` and flush automatically once the tunnel works. If messages never arrive, the login node is blocking forwarding; tell Utkarsh.
+
+**No Telegram messages arriving** — Check `logs/relay.log` and the tunnel: `bash scripts/hpc_launch.sh --status`. If the tunnel died, just re-run the launcher — it restarts it.
+
+**Smoke failed** — Read the Telegram failure message. Screenshot it and send to Utkarsh. Do not attempt to fix code yourself.
+
+**"wheels/ empty" during bootstrap** — The `PIP_PYTHON_VERSION` in the config doesn't match the HPC's python. Run `ssh YOUR_USER@HOST 'python3 --version'` and update `PIP_PYTHON_VERSION` and `PIP_ABI` to match.
+
+**A single run failed but others passed** — That's expected for edge cases. The other 27 runs continue independently. Tell Utkarsh about the failure; he'll decide whether to re-run it.
+
+---
+
+## Summary
+
+1. Connect to `mlr lab 5g`.
+2. `git checkout hpc && git pull origin hpc`.
+3. One-time only: install packages, SSH keys, `wandb login`.
+4. Fill `scripts/hpc_config.env` (ask Utkarsh / Kavinder for every `FILL_ME`).
+5. Confirm data exists at `LAB_DATA_ROOT`.
+6. `bash scripts/hpc_launch.sh` — sit for 1–1.5 h during rsync.
+7. Wait for Telegram messages.
+8. `bash scripts/hpc_pull_results.sh` + `wandb sync wandb/offline-run-*`.
+9. Tell Utkarsh.
+
+If it's not in this list, don't do it. If something fails, call Utkarsh.

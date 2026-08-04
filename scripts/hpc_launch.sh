@@ -129,20 +129,24 @@ _kill_pidfile() {
 }
 
 if [[ "${MODE}" == "stop" ]]; then
-    log_step "stopping local relay + tunnel"
+    log_step "stopping local relay + tunnel + watcher"
     _kill_pidfile "${RELAY_PID_FILE}"
     _kill_pidfile "${TUNNEL_PID_FILE}"
+    _kill_pidfile "${LOG_DIR}/smoke_watcher.pid"
 
     log_step "killing HPC forwarder tmux session"
     ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
         "tmux kill-session -t ${FORWARDER_SESSION} 2>/dev/null || true" || true
 
-    if [[ -s "${JOBID_FILE}" ]]; then
-        local_job=$(cat "${JOBID_FILE}")
-        log_step "qdel ${local_job}"
-        ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-            "qdel ${local_job} 2>/dev/null || true" || true
-    fi
+    # Kill both smoke and full jobs if present.
+    for jf in "${LOG_DIR}/hpc_jobid_smoke" "${LOG_DIR}/hpc_jobid_full" "${JOBID_FILE}"; do
+        if [[ -s "${jf}" ]]; then
+            local_job=$(cat "${jf}")
+            log_step "qdel ${local_job}"
+            ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
+                "qdel ${local_job} 2>/dev/null || true" || true
+        fi
+    done
     log_ok "stop complete."
     exit 0
 fi
@@ -399,29 +403,61 @@ else
     if [[ "${MODE}" == "dry-run" ]]; then
         echo "    (dry-run: would open autossh tunnel)"
     else
+        # The tunnel authenticates lab -> HPC using the SAME key that Step 1c
+        # already proved works in BatchMode. We repeat BatchMode=yes here so
+        # that if the key ever needs a passphrase, the tunnel dies immediately
+        # (which we detect below) instead of silently blocking on a hidden
+        # password prompt inside nohup.
+        #
+        # ExitOnForwardFailure=yes makes ssh exit non-zero if the HPC refuses
+        # the remote (-R) forward (e.g. sshd 'AllowTcpForwarding no'), so a
+        # forwarding-disabled login node is caught rather than looking "up".
+        COMMON_SSH_OPTS=(
+            -N -T
+            -o BatchMode=yes
+            -o ServerAliveInterval=30
+            -o ServerAliveCountMax=3
+            -o ExitOnForwardFailure=yes
+            -R "${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT}"
+        )
         AUTOSSH_BIN="$(command -v autossh || command -v ssh)"
         if [[ "$(basename "${AUTOSSH_BIN}")" == "autossh" ]]; then
-            AUTOSSH_GATETIME=0 nohup "${AUTOSSH_BIN}" -M 0 -N -T \
-                -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-                -o ExitOnForwardFailure=yes \
-                -R "${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT}" \
-                "${HPC_USER}@${HPC_HOST}" \
+            AUTOSSH_GATETIME=0 nohup "${AUTOSSH_BIN}" -M 0 \
+                "${COMMON_SSH_OPTS[@]}" "${HPC_USER}@${HPC_HOST}" \
                 >> "${LOG_DIR}/tunnel.log" 2>&1 &
         else
-            nohup "${AUTOSSH_BIN}" -N -T \
-                -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-                -o ExitOnForwardFailure=yes \
-                -R "${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT}" \
-                "${HPC_USER}@${HPC_HOST}" \
+            nohup "${AUTOSSH_BIN}" \
+                "${COMMON_SSH_OPTS[@]}" "${HPC_USER}@${HPC_HOST}" \
                 >> "${LOG_DIR}/tunnel.log" 2>&1 &
         fi
         tunnel_pid=$!
         echo "${tunnel_pid}" > "${TUNNEL_PID_FILE}"
-        sleep 2
-        if kill -0 "${tunnel_pid}" 2>/dev/null; then
-            log_ok "tunnel pid=${tunnel_pid} (logs: ${LOG_DIR}/tunnel.log)"
+        sleep 3
+        if ! kill -0 "${tunnel_pid}" 2>/dev/null; then
+            log_err "tunnel process exited immediately. Last lines of tunnel.log:"
+            tail -n 15 "${LOG_DIR}/tunnel.log" 2>/dev/null | sed 's/^/      /'
+            fatal "reverse tunnel failed to start.
+Most likely causes:
+  * your lab->HPC SSH key has a passphrase (make a passphraseless key, or
+    load it into an agent: eval \$(ssh-agent); ssh-add ~/.ssh/id_ed25519), or
+  * the HPC login node forbids remote port-forwarding (AllowTcpForwarding no).
+Check ${LOG_DIR}/tunnel.log and ask Utkarsh."
+        fi
+
+        # End-to-end probe: from the HPC login node, curl the relay THROUGH the
+        # reverse tunnel. This is the only check that proves the -R forward is
+        # actually live (a running ssh process alone does not guarantee it).
+        log_step "  verifying tunnel end-to-end (HPC -> relay /healthz)"
+        probe=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
+            "curl -s -m 8 http://localhost:${LAB_TUNNEL_PORT}/healthz 2>/dev/null || \
+             (command -v python3 >/dev/null && python3 -c \"import urllib.request,sys; sys.stdout.write(urllib.request.urlopen('http://localhost:${LAB_TUNNEL_PORT}/healthz', timeout=8).read().decode())\" 2>/dev/null) || echo PROBE_FAILED" \
+            2>/dev/null | tr -d '[:space:]')
+        if [[ "${probe}" == "ok" ]]; then
+            log_ok "tunnel verified end-to-end (pid=${tunnel_pid})"
         else
-            fatal "tunnel failed to start. Check ${LOG_DIR}/tunnel.log"
+            log_warn "tunnel process is up (pid=${tunnel_pid}) but the HPC could not reach the relay through it (probe='${probe:-empty}')."
+            log_warn "Telegram may be delayed: messages still accumulate in logs/notify_queue.jsonl on the HPC and flush once the tunnel works."
+            log_warn "If this persists, the login node likely blocks remote forwarding — tell Utkarsh; he may need a different relay path."
         fi
     fi
 fi
@@ -456,12 +492,17 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 8. qsub PBS array
+# 8. Submit smoke run (slot 1 only, few epochs) and launch watcher
 # ---------------------------------------------------------------------------
-log_step "8/9  qsub scripts/hpc_pbs_job.pbs -J ${HPC_ARRAY_RANGE}"
+log_step "8/9  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
+
+SMOKE_EPOCHS="${SMOKE_EPOCHS:-5}"
+SMOKE_DELAY_SECS="${SMOKE_DELAY_SECS:-600}"
+FULL_ARRAY_RANGE="${FULL_ARRAY_RANGE:-${HPC_ARRAY_RANGE}}"
+WATCHER_PID_FILE="${LOG_DIR}/smoke_watcher.pid"
 
 if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run: would run qsub)"
+    echo "    (dry-run: would submit smoke job for slot 1)"
     echo ""
     echo "    grid preview:"
     # shellcheck source=/dev/null
@@ -473,21 +514,32 @@ else
         qsub_extra+=(-P "${HPC_PROJECT_CODE}")
     fi
 
-    remote_qsub_cmd="cd '${HPC_PROJECT_DIR}' && qsub \
+    smoke_qsub_cmd="cd '${HPC_PROJECT_DIR}' && qsub \
         -q '${HPC_QUEUE}' \
         -l '${HPC_SELECT}' \
-        -l walltime='${HPC_WALLTIME}' \
-        -J '${HPC_ARRAY_RANGE}' \
+        -l walltime='01:00:00' \
+        -J '1-1' \
         ${qsub_extra[*]:-} \
-        -v HPC_PROJECT_DIR='${HPC_PROJECT_DIR}',EPOCHS='${EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
+        -v HPC_PROJECT_DIR='${HPC_PROJECT_DIR}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
         scripts/hpc_pbs_job.pbs"
 
-    JOB_ID=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" "${remote_qsub_cmd}") || \
-        fatal "qsub failed"
+    SMOKE_JOBID=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" "${smoke_qsub_cmd}") || \
+        fatal "qsub smoke failed"
 
-    JOB_ID=$(echo "${JOB_ID}" | xargs)
-    echo "${JOB_ID}" > "${JOBID_FILE}"
-    log_ok "job submitted: ${JOB_ID}"
+    SMOKE_JOBID=$(echo "${SMOKE_JOBID}" | xargs)
+    echo "${SMOKE_JOBID}" > "${LOG_DIR}/hpc_jobid_smoke"
+    echo "${SMOKE_JOBID}" > "${JOBID_FILE}"
+    log_ok "smoke job submitted: ${SMOKE_JOBID}"
+    log_step "  if smoke passes, watcher will wait ${SMOKE_DELAY_SECS}s then submit full grid (${FULL_ARRAY_RANGE})"
+
+    # Launch the watcher in the background (nohup'd so the junior can close the terminal).
+    export HPC_SMOKE_JOBID="${SMOKE_JOBID}"
+    export SMOKE_DELAY_SECS FULL_ARRAY_RANGE EPOCHS EXTRA_TRAIN_ARGS
+    nohup bash "${REPO_ROOT}/scripts/hpc_smoke_watcher.sh" \
+        >> "${LOG_DIR}/smoke_watcher.log" 2>&1 &
+    watcher_pid=$!
+    echo "${watcher_pid}" > "${WATCHER_PID_FILE}"
+    log_ok "smoke watcher pid=${watcher_pid} (logs: ${LOG_DIR}/smoke_watcher.log)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -500,6 +552,9 @@ cat <<EOF
     Watch this launcher log:
       tail -f ${LAUNCH_LOG}
 
+    Watch smoke watcher progress:
+      tail -f ${LOG_DIR}/smoke_watcher.log
+
     Watch job queue status:
       ssh ${HPC_USER}@${HPC_HOST} 'qstat -t $(cat "${JOBID_FILE}" 2>/dev/null)'
 
@@ -510,7 +565,7 @@ cat <<EOF
     Tail a specific run's log (once it starts on a compute node):
       ssh ${HPC_USER}@${HPC_HOST} 'tail -f ${HPC_PROJECT_DIR}/logs/train_*.log'
 
-    Pull results back to lab (after job completes):
+    Pull results back to lab (after full job completes):
       bash scripts/hpc_pull_results.sh
 
     Emergency stop everything:
@@ -518,6 +573,13 @@ cat <<EOF
 
     Current status snapshot:
       bash scripts/hpc_launch.sh --status
+
+    What happens next (automated):
+      1. Smoke watcher polls qstat for the smoke job to finish.
+      2. If smoke passes → waits ${SMOKE_DELAY_SECS:-600}s → submits full ${FULL_ARRAY_RANGE:-1-28} grid.
+         (Telegram: "[LAUNCHED] Full ablation grid submitted")
+      3. If smoke fails  → pulls logs → Telegrams the tail → does NOT launch full grid.
+         (fix the issue, re-run this script)
 
 EOF
 log_ok "launch complete. Junior brain may sleep."

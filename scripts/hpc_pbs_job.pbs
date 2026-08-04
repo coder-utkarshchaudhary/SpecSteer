@@ -28,6 +28,8 @@ set -uo pipefail
 # ---- resolve env ---------------------------------------------------------
 : "${HPC_PROJECT_DIR:?HPC_PROJECT_DIR must be passed via qsub -v}"
 : "${EPOCHS:=100}"
+: "${SMOKE_MODE:=0}"     # 1 -> writes to model_smoke/, uses SMOKE_EPOCHS
+: "${SMOKE_EPOCHS:=5}"
 
 cd "${HPC_PROJECT_DIR}"
 
@@ -57,14 +59,27 @@ MODEL="${CFG%%|*}"; REST="${CFG#*|}"
 DATASET="${REST%%|*}"; REST="${REST#*|}"
 LOSS="${REST%%|*}"
 CKPT_NAME="${REST#*|}"
-CKPT_PATH="model/${DATASET}/${CKPT_NAME}.pt"
 
+# In smoke mode we (a) point the checkpoint at a scratch dir so it does not
+# collide with a real run, and (b) reduce epochs so the smoke completes fast.
+if [[ "${SMOKE_MODE}" == "1" ]]; then
+    CKPT_ROOT="model_smoke"
+    RUN_EPOCHS="${SMOKE_EPOCHS}"
+    RUN_TAG="SMOKE"
+else
+    CKPT_ROOT="model"
+    RUN_EPOCHS="${EPOCHS}"
+    RUN_TAG="FULL"
+fi
+CKPT_PATH="${CKPT_ROOT}/${DATASET}/${CKPT_NAME}.pt"
+
+echo "  mode       : ${RUN_TAG}"
 echo "  model      : ${MODEL}"
 echo "  dataset    : ${DATASET}"
 echo "  loss       : ${LOSS}"
 echo "  ckpt_name  : ${CKPT_NAME}"
 echo "  ckpt_path  : ${CKPT_PATH}"
-echo "  epochs     : ${EPOCHS}"
+echo "  epochs     : ${RUN_EPOCHS}"
 
 # ---- skip if a ckpt is already present -----------------------------------
 if [[ -s "${CKPT_PATH}" ]]; then
@@ -110,9 +125,9 @@ python train/train.py \
     --model "${MODEL}" \
     --dataset "${DATASET}" \
     --loss "${LOSS}" \
-    --epochs "${EPOCHS}" \
+    --epochs "${RUN_EPOCHS}" \
     --num-workers "${NUM_WORKERS}" \
-    --ckpt-dir "model" \
+    --ckpt-dir "${CKPT_ROOT}" \
     --wandb-project "${WANDB_PROJECT:-hsi-pi-vae}" \
     ${WANDB_ENTITY:+--wandb-entity "${WANDB_ENTITY}"} \
     "${EXTRA_TRAIN_ARR[@]}"
