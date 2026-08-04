@@ -1,7 +1,9 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-07-18  
-> **Status:** All 4 ablation models + downstream experiments implemented and byte-compiled.  
+> **Last updated:** 2026-08-04  
+> **Status:** All 4 ablation models + downstream experiments implemented and byte-compiled.
+> IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay added.
+> Training loop performance-tuned (BF16 on Ampere+, channels_last, per-epoch metric sync).  
 > ⚠️ Compile-pass ≠ verified-run. See [Caveats](#caveats) before running.
 
 ---
@@ -301,7 +303,100 @@ project instructions). Before your first full training run:
 
 ---
 
-## 8. Phase 2 (Future)
+## 8. HPC / IITD (PBS Pro)
+
+The 28-run ablation grid targets IITD's Padum HPC (PBS Pro, A100 80GB
+compute nodes). Compute nodes have **no outbound internet**, so:
+
+- **pip** — the lab machine runs `pip download` for the HPC's platform;
+  `wheels/` is rsynced; the HPC installs offline via `pip install --no-index`.
+- **wandb** — `WANDB_MODE=offline` on the HPC. The lab machine runs
+  `wandb sync wandb/offline-run-*` after `hpc_pull_results.sh` completes.
+- **Telegram** — three-tier fallback in `utils/notify.py`:
+  1. `TELEGRAM_RELAY_URL` (lab-side HTTP relay), then
+  2. Direct `sendMessage` API, then
+  3. JSONL queue at `logs/notify_queue.jsonl`.
+  On HPC compute nodes only (3) works, so a login-node forwarder
+  (`scripts/notify_forwarder.py`) tails the queue on shared FS and POSTs
+  each line to `http://localhost:${LAB_TUNNEL_PORT}/notify` — which is
+  reverse-tunneled from the lab machine's `utils/notify_relay.py`.
+
+### Entry point
+
+The junior runs exactly one script on the lab machine:
+
+```bash
+bash scripts/hpc_launch.sh
+```
+
+That sanity-checks the WiFi (`mlr lab 5g`), builds `wheels/`, rsyncs
+repo + wheels + `data/processed/`, ssh's into the HPC login node to run
+`hpc_bootstrap.sh` (offline pip install + `.env`), starts the relay +
+reverse tunnel on the lab machine, launches the forwarder tmux session
+on the HPC login node, and `qsub`'s the array job.
+
+Config lives in `scripts/hpc_config.env` (copied from
+`.example`) — every runtime-fill value is marked `FILL_ME` with an
+"how to obtain" hint in `docs/hpc_wiki.md`. Full walkthrough for the
+junior: **`docs/hpc_wiki.md`**.
+
+### Grid manifest
+
+The 28 grid slots are defined **once** in `scripts/grid_manifest.sh` and
+sourced by both `scripts/train.sh --all` and `scripts/hpc_pbs_job.pbs`.
+Slot ↔ tuple mapping:
+
+- slots 1–7:   IIRS   (vae-our + 3 baselines × standard/physics)
+- slots 8–14:  M3
+- slots 15–21: AVIRIS
+- slots 22–28: CRIMS
+
+The PBS script picks its slot from `${PBS_ARRAY_INDEX}` via `grid_lookup`.
+
+### Notification format (`utils/notify.py`)
+
+`RunNotifier` emits three message types:
+
+- **[START]** — once at run start, with resolved hyper-params in a `<pre>` block.
+- **[HB]** — every `log_every` epochs (default 10), with current-epoch
+  train/val loss/MSE/SAM/KLD, wall time, ETA, and best-so-far pointer.
+- **[OK] / [FAIL] / [STOP]** — once at run end, with a stride-10 table and
+  (on failure) the last ~60 log lines + exception traceback.
+
+### Perf changes (math-preserving)
+
+`train/train.py` now:
+
+- Auto-picks BF16 autocast on Ampere+ (SM8.0+), FP16 + `GradScaler` elsewhere.
+- Applies `channels_last` (2D models) / `channels_last_3d` (`vae-3d-spatio-spectral`).
+- Accumulates loss/MSE/SAM/KLD on-GPU each step; one `.item()` per epoch.
+- Updates the tqdm postfix every 20 steps, not every step.
+- Enables TF32 for FP32 matmul paths + `cudnn.benchmark = True`.
+- Wraps in `nn.DataParallel` only when `--allow-multi-gpu` is passed AND >1 GPU
+  is visible (default single-GPU on HPC).
+- Optional `torch.compile(model, mode="reduce-overhead")` via `--compile`,
+  auto-skipped for `vae-3d-spatio-spectral` where Dynamo trips.
+- DEBUG log level for the first `--debug-epochs` (default 3) epochs, then INFO.
+- Shape-only tensor logging via `utils.logging_setup.log_tensor` — never
+  dumps values.
+
+`utils/training/dataloader.py`:
+
+- `persistent_workers=True` (drops the spawn-context re-fork cost).
+- `prefetch_factor=4`.
+- Per-patch max cached in `__init__` from the sidecar `manifest.json`
+  (written by `utils/dataset/slice.py`) — no per-item `.max()` scan.
+
+### Compile-pass caveat for new bash / .pbs
+
+All new bash scripts (`hpc_launch.sh`, `hpc_bootstrap.sh`, `hpc_pull_results.sh`,
+`grid_manifest.sh`, `hpc_pbs_job.pbs`) and Python files (`notify_relay.py`,
+`notify_forwarder.py`, updated `train.py` / `notify.py` / `logging_setup.py` /
+`dataloader.py` / `slice.py`) have been passed through `python -m py_compile`
+and `bash -n`. **They have not been executed on a real HPC.** The wiki's
+smoke-test flow (`HPC_ARRAY_RANGE=1-1`) is the recommended first run.
+
+## 9. Phase 2 (Future)
 
 The VAE encoder (`SpatialEncoderDecoder`, `SpectralEncoderDecoder`) will serve as
 the backbone for a Latent Diffusion Model (LDM) that performs diffusion-based

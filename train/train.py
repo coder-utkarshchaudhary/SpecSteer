@@ -20,13 +20,22 @@ Run from the repo root with PYTHONPATH set (scripts/train.sh does this):
 Checkpoints are written to <ckpt-dir>/<DATASET>/<name>.pt where <name> is:
     vae-our            -> vae-our.pt
     <model>            -> <model>_<loss>.pt   (e.g. vae-standard_physics.pt)
+
+Perf features (math-preserving):
+    * BF16 autocast on Ampere+ GPUs (fp16 + GradScaler elsewhere)
+    * channels_last / channels_last_3d memory format
+    * On-GPU metric accumulation; a single .item() sync per epoch
+    * Optional torch.compile(model, mode="reduce-overhead") via --compile
+    * DP only when --allow-multi-gpu is passed AND >1 GPU visible
 """
 
 import argparse
 import logging
 import math
+import os
 import random
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -44,9 +53,21 @@ from modules.registry import (
 )
 from utils.config import DATASETS, apply_dataset, settings
 from utils.hyperparams import apply_hyperparams, load_hyperparams
-from utils.logging_setup import get_run_logger, timestamp
+from utils.logging_setup import (
+    get_run_logger,
+    log_tensor,
+    tail_log,
+    timestamp,
+)
 from utils.notify import RunNotifier
 from utils.training.dataloader import build_dataloader
+
+try:
+    import wandb
+    _HAS_WANDB = True
+except ImportError:
+    wandb = None  # type: ignore
+    _HAS_WANDB = False
 
 
 # ---------------------------------------------------------------------------
@@ -74,12 +95,44 @@ class _LossTermsAdapter(nn.Module):
 
 
 def _unwrap(model: nn.Module) -> nn.Module:
-    """Return the underlying HSI-VAE model regardless of DP / adapter wrapping."""
+    """Return the underlying HSI-VAE model regardless of DP / adapter / compile wrapping."""
     if isinstance(model, nn.DataParallel):
         model = model.module
+    # torch.compile wraps modules in OptimizedModule with the original at ._orig_mod.
+    if hasattr(model, "_orig_mod"):
+        model = model._orig_mod
+    if isinstance(model, _LossTermsAdapter):
+        model = model.inner
+    # If _orig_mod pointed at the adapter, unwrap once more.
     if isinstance(model, _LossTermsAdapter):
         model = model.inner
     return model
+
+
+# ---------------------------------------------------------------------------
+# Autocast / memory-format helpers
+# ---------------------------------------------------------------------------
+
+def _pick_amp_dtype(device: torch.device, logger: logging.Logger) -> torch.dtype:
+    """BF16 on Ampere+ (SM8.0+); FP16 elsewhere on CUDA; FP32 on CPU."""
+    if device.type != "cuda":
+        return torch.float32
+    try:
+        major, _ = torch.cuda.get_device_capability()
+    except Exception:
+        major = 0
+    if major >= 8:
+        logger.info("AMP: bfloat16 (Ampere+, no GradScaler)")
+        return torch.bfloat16
+    logger.info("AMP: float16 (pre-Ampere, GradScaler enabled)")
+    return torch.float16
+
+
+def _memory_format_for(model_name: str) -> torch.memory_format:
+    """channels_last_3d for vae-3d-spatio-spectral, channels_last for the rest."""
+    if model_name == "vae-3d-spatio-spectral":
+        return torch.channels_last_3d
+    return torch.channels_last
 
 
 # ---------------------------------------------------------------------------
@@ -102,25 +155,11 @@ def train_vae(
     ckpt_meta=None,
     logger=None,
     notifier=None,
+    amp_dtype: torch.dtype = torch.float32,
+    tqdm_every: int = 20,
+    wandb_run=None,
 ):
-    """
-    Generic VAE training loop driven by ``model.loss_terms``.
-
-    Args:
-        model          : any model implementing the registry contract
-        dataloader     : training DataLoader yielding (B, H, W, C) tensors
-        epochs         : number of epochs
-        device         : torch.device
-        use_physics    : add the SAM term to the loss
-        lr             : AdamW learning rate
-        beta           : KL weight
-        lambda_physics : SAM weight (ignored when use_physics is False)
-        weight_decay   : AdamW weight decay
-        patience       : early stopping patience (epochs w/o val_loss improvement); disabled if val_dataloader is None
-        val_dataloader : optional validation DataLoader
-        ckpt_path      : optional Path to save best_model checkpoint
-        ckpt_meta      : dict merged into every saved checkpoint (model/dataset/loss_type)
-    """
+    """Generic VAE training loop driven by ``model.loss_terms``."""
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -133,15 +172,29 @@ def train_vae(
     no_improve_epochs = 0
 
     use_amp = (device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    # BF16 doesn't need the scaler; FP16 does.
+    needs_scaler = use_amp and (amp_dtype == torch.float16)
+    scaler = torch.amp.GradScaler("cuda", enabled=needs_scaler)
 
     if ckpt_path is not None:
         ckpt_path.parent.mkdir(parents=True, exist_ok=True)
 
+    epoch_wall_starts = []
+
     for epoch in range(1, epochs + 1):
+        # Flip DEBUG -> INFO at the epoch boundary.
+        if hasattr(logger, "set_epoch"):
+            logger.set_epoch(epoch - 1)  # epoch is 1-indexed; policy is 0-indexed
+        epoch_t0 = time.time()
+        epoch_wall_starts.append(epoch_t0)
+
         # ---- Training ----
         model.train()
-        train_loss = train_mse = train_sam = train_kld = 0.0
+        # Accumulate on-GPU to avoid per-batch CUDA syncs.
+        run_loss = torch.zeros((), device=device)
+        run_mse = torch.zeros((), device=device)
+        run_sam = torch.zeros((), device=device)
+        run_kld = torch.zeros((), device=device)
 
         train_bar = tqdm(
             dataloader,
@@ -152,39 +205,56 @@ def train_vae(
         )
         for i, x_batch in enumerate(train_bar, start=1):
             x_batch = x_batch.to(device, non_blocking=True)
+            if epoch == 1 and i == 1:
+                log_tensor(logger, "x_batch", x_batch)
+
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+            with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
                 terms = model(x_batch, beta, lambda_physics, use_physics)
                 loss = terms["loss"].mean()
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            if needs_scaler:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
 
-            train_loss += loss.item()
-            train_mse += terms["mse"].mean().item()
-            train_sam += terms["sam"].mean().item()
-            train_kld += terms["kld"].mean().item()
+            with torch.no_grad():
+                run_loss += loss.detach()
+                run_mse += terms["mse"].detach().mean()
+                run_sam += terms["sam"].detach().mean()
+                run_kld += terms["kld"].detach().mean()
 
-            train_bar.set_postfix(loss=f"{train_loss / i:.4f}",
-                                  mse=f"{train_mse / i:.4f}",
-                                  sam=f"{train_sam / i:.4f}")
+            if i % tqdm_every == 0:
+                # One sync per tqdm_every batches, not every batch.
+                train_bar.set_postfix(
+                    loss=f"{(run_loss / i).item():.4f}",
+                    mse=f"{(run_mse / i).item():.4f}",
+                    sam=f"{(run_sam / i).item():.4f}",
+                )
         train_bar.close()
 
         n_train = max(len(dataloader), 1)
-        train_loss /= n_train
-        train_mse /= n_train
-        train_sam /= n_train
-        train_kld /= n_train
+        train_loss = (run_loss / n_train).item()
+        train_mse = (run_mse / n_train).item()
+        train_sam = (run_sam / n_train).item()
+        train_kld = (run_kld / n_train).item()
         current_lr = optimizer.param_groups[0]["lr"]
 
         # ---- Validation ----
         val_loss = val_mse = val_sam = val_kld = 0.0
         if val_dataloader is not None:
             model.eval()
+            v_loss = torch.zeros((), device=device)
+            v_mse = torch.zeros((), device=device)
+            v_sam = torch.zeros((), device=device)
+            v_kld = torch.zeros((), device=device)
             val_bar = tqdm(
                 val_dataloader,
                 desc=f"epoch {epoch}/{epochs} val  ",
@@ -192,24 +262,27 @@ def train_vae(
                 file=sys.stdout,
                 dynamic_ncols=True,
             )
-            with torch.no_grad(), torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+            with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
                 for j, x_val in enumerate(val_bar, start=1):
                     x_val = x_val.to(device, non_blocking=True)
                     terms = model(x_val, beta, lambda_physics, use_physics)
-                    val_loss += terms["loss"].mean().item()
-                    val_mse += terms["mse"].mean().item()
-                    val_sam += terms["sam"].mean().item()
-                    val_kld += terms["kld"].mean().item()
-                    val_bar.set_postfix(loss=f"{val_loss / j:.4f}",
-                                        mse=f"{val_mse / j:.4f}",
-                                        sam=f"{val_sam / j:.4f}")
+                    v_loss += terms["loss"].mean()
+                    v_mse += terms["mse"].mean()
+                    v_sam += terms["sam"].mean()
+                    v_kld += terms["kld"].mean()
+                    if j % tqdm_every == 0:
+                        val_bar.set_postfix(
+                            loss=f"{(v_loss / j).item():.4f}",
+                            mse=f"{(v_mse / j).item():.4f}",
+                            sam=f"{(v_sam / j).item():.4f}",
+                        )
             val_bar.close()
 
             n_val = max(len(val_dataloader), 1)
-            val_loss /= n_val
-            val_mse /= n_val
-            val_sam /= n_val
-            val_kld /= n_val
+            val_loss = (v_loss / n_val).item()
+            val_mse = (v_mse / n_val).item()
+            val_sam = (v_sam / n_val).item()
+            val_kld = (v_kld / n_val).item()
 
         scheduler.step()
 
@@ -219,11 +292,12 @@ def train_vae(
             f"| Val SAM: {val_sam:.4f} | Val KLD: {val_kld:.4f}"
             if val_dataloader is not None else ""
         )
+        epoch_wall = time.time() - epoch_t0
         logger.info(
             f"Epoch [{epoch}/{epochs}] | "
             f"Loss: {train_loss:.4f} | MSE: {train_mse:.4f} | "
             f"SAM: {train_sam:.4f} | KLD: {train_kld:.4f} | "
-            f"LR: {current_lr:.2e}"
+            f"LR: {current_lr:.2e} | wall {epoch_wall:.1f}s"
             + val_str
         )
 
@@ -237,6 +311,27 @@ def train_vae(
                 "val_mse": val_mse if val_dataloader is not None else None,
                 "val_sam": val_sam if val_dataloader is not None else None,
                 "val_kld": val_kld if val_dataloader is not None else None,
+            })
+
+        if wandb_run is not None:
+            wandb_run.log({
+                "epoch": epoch,
+                "train/loss": train_loss,
+                "train/mse": train_mse,
+                "train/sam": train_sam,
+                "train/kld": train_kld,
+                "train/lr": current_lr,
+                "train/epoch_wall_s": epoch_wall,
+                **(
+                    {
+                        "val/loss": val_loss,
+                        "val/mse": val_mse,
+                        "val/sam": val_sam,
+                        "val/kld": val_kld,
+                    }
+                    if val_dataloader is not None
+                    else {}
+                ),
             })
 
         # ---- Checkpoint (best by monitored loss) + early stopping ----
@@ -262,6 +357,16 @@ def train_vae(
         else:
             no_improve_epochs += 1
 
+        # ---- Heartbeat (every log_every epochs) ----
+        if notifier is not None:
+            # Estimate ETA from the mean epoch wall time so far.
+            recent = epoch_wall_starts[-min(len(epoch_wall_starts), 5):]
+            elapsed = time.time() - recent[0]
+            n_seen = len(recent)
+            mean_epoch_s = elapsed / max(n_seen, 1)
+            eta = mean_epoch_s * (epochs - epoch)
+            notifier.heartbeat(epoch, eta_seconds=eta)
+
         # Early stopping only when a validation set is available.
         if val_dataloader is not None and no_improve_epochs >= patience:
             logger.info(f"Early stopping at epoch {epoch}: no val_loss improvement for {patience} epochs.")
@@ -282,32 +387,41 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Ablation selectors
-    parser.add_argument("--model", required=True, choices=list(MODEL_NAMES),
-                        help="Which model architecture to train.")
-    parser.add_argument("--dataset", required=True, choices=sorted(DATASETS),
-                        help="Which dataset to train on (sets band count).")
-    parser.add_argument("--loss", default="physics", choices=["standard", "physics"],
-                        help="Loss regime: standard (MSE+KLD) or physics (+SAM). "
-                             "vae-our is physics-only.")
+    parser.add_argument("--model", required=True, choices=list(MODEL_NAMES))
+    parser.add_argument("--dataset", required=True, choices=sorted(DATASETS))
+    parser.add_argument("--loss", default="physics", choices=["standard", "physics"])
 
     # Data
-    parser.add_argument("--data-root", default=None,
-                        help="Override the dataset's processed root "
-                             "(default: utils.config.DATASETS[<dataset>]['processed_root']).")
-    parser.add_argument("--num-workers", type=int, default=None,
-                        help="Falls back to YAML then Settings.num_workers.")
+    parser.add_argument("--data-root", default=None)
+    parser.add_argument("--num-workers", type=int, default=None)
 
-    # Hyper-parameters — defaults resolve as: CLI > per-dataset YAML > hard fallback.
+    # Hyper-parameters
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
-    parser.add_argument("--beta", type=float, default=None, help="KL divergence weight")
-    parser.add_argument("--lambda-physics", type=float, default=None, help="SAM loss weight")
+    parser.add_argument("--beta", type=float, default=None)
+    parser.add_argument("--lambda-physics", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
 
     # Checkpointing
-    parser.add_argument("--ckpt-dir", default="model",
-                        help="Root directory for checkpoints (per-dataset subfolders).")
+    parser.add_argument("--ckpt-dir", default="model")
+
+    # Perf toggles
+    parser.add_argument("--compile", action="store_true",
+                        help="torch.compile(model, mode='reduce-overhead'). "
+                             "Skipped automatically for vae-3d-spatio-spectral.")
+    parser.add_argument("--allow-multi-gpu", action="store_true",
+                        help="Wrap in nn.DataParallel if >1 GPU is visible. "
+                             "Default (off) keeps things single-GPU on HPC.")
+
+    # W&B
+    parser.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging.")
+    parser.add_argument("--wandb-project", default="hsi-pi-vae")
+    parser.add_argument("--wandb-entity", default=None)
+
+    # Debug logging
+    parser.add_argument("--debug-epochs", type=int, default=3,
+                        help="Number of leading epochs to log at DEBUG level.")
 
     return parser.parse_args()
 
@@ -319,12 +433,7 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
 def _resolve(cli_val, yaml_dict, key, fallback):
-    """CLI > YAML > hard fallback."""
     if cli_val is not None:
         return cli_val
     return yaml_dict.get(key, fallback)
@@ -333,21 +442,16 @@ def _resolve(cli_val, yaml_dict, key, fallback):
 def main():
     args = parse_args()
 
-    # Guard: physics-only models cannot run a "standard" loss regime.
     if args.model in PHYSICS_ONLY and args.loss == "standard":
         raise SystemExit(
             f"Model '{args.model}' is physics-only (SAM intrinsic); "
             f"use --loss physics."
         )
 
-    # Configure the global settings for this dataset's band count *before*
-    # loading the YAML (YAML may then override Settings fields like
-    # batch_size and the per-dataset baseline widths).
     apply_dataset(args.dataset)
     hp = load_hyperparams(args.dataset)
     apply_hyperparams(settings, hp)
 
-    # Resolve optimization hyperparams with CLI > YAML > hard-fallback precedence.
     epochs = _resolve(args.epochs, hp, "epochs", 100)
     batch_size = _resolve(args.batch_size, hp, "batch_size", settings.batch_size)
     num_workers = _resolve(args.num_workers, hp, "num_workers", settings.num_workers)
@@ -364,21 +468,25 @@ def main():
 
     logger = get_run_logger(
         "train", args.model, args.dataset, loss=args.loss, ts=timestamp(),
+        debug_epochs=args.debug_epochs,
     )
 
     n_gpus = torch.cuda.device_count() if device.type == "cuda" else 0
+    gpu_name = torch.cuda.get_device_name(0) if n_gpus else "cpu"
 
     logger.info("==============================================")
-    logger.info(f"  model     : {args.model}")
-    logger.info(f"  dataset   : {args.dataset} (C={settings.input_channels})")
-    logger.info(f"  loss      : {args.loss}")
-    logger.info(f"  device    : {device}  gpus: {n_gpus}")
-    logger.info(f"  epochs    : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
-    logger.info(f"  lr        : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
-    logger.info(f"  wd        : {weight_decay}  patience: {patience}  seed: {seed}")
+    logger.info(f"  model         : {args.model}")
+    logger.info(f"  dataset       : {args.dataset} (C={settings.input_channels})")
+    logger.info(f"  loss          : {args.loss}")
+    logger.info(f"  device        : {device}  gpus: {n_gpus} ({gpu_name})")
+    logger.info(f"  epochs        : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
+    logger.info(f"  lr            : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
+    logger.info(f"  wd            : {weight_decay}  patience: {patience}  seed: {seed}")
+    logger.info(f"  compile       : {args.compile}  allow_multi_gpu: {args.allow_multi_gpu}")
+    logger.info(f"  debug_epochs  : {args.debug_epochs}")
     logger.info("==============================================")
 
-    # Dataloaders
+    # ---- Dataloaders ----
     train_loader = build_dataloader(
         args.dataset, "train",
         processed_root=args.data_root,
@@ -391,12 +499,10 @@ def main():
     )
     logger.info(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
-    # Model
+    # ---- Model ----
     raw_model = build_model(args.model).to(device)
 
     # Materialize LazyLinear layers with a single dummy forward before training.
-    # Kept in fp32 so lazy weights are initialised in fp32; autocast during
-    # training then casts activations to fp16 without touching the params.
     dummy = torch.randn(
         2, settings.input_height, settings.input_width, settings.input_channels,
         device=device,
@@ -404,13 +510,51 @@ def main():
     with torch.no_grad():
         raw_model(dummy)
 
-    # Wrap so nn.DataParallel can split loss_terms across GPUs when available.
     model = _LossTermsAdapter(raw_model)
-    if n_gpus > 1:
+
+    # Optional torch.compile — the training loop invokes model.forward, which
+    # routes into loss_terms via _LossTermsAdapter. Compiling the adapter
+    # means the compiled graph actually covers the hot path.
+    # Skipped for vae-3d-spatio-spectral where Dynamo frequently trips on the
+    # 3D transposed convs.
+    if args.compile:
+        if args.model == "vae-3d-spatio-spectral":
+            logger.info("--compile requested but skipped for vae-3d-spatio-spectral")
+        else:
+            try:
+                model = torch.compile(model, mode="reduce-overhead")
+                logger.info("torch.compile: enabled (mode=reduce-overhead)")
+            except Exception as e:
+                logger.warning("torch.compile failed to enable, continuing eager: %s", e)
+
+    if n_gpus > 1 and args.allow_multi_gpu:
         logger.info(f"Wrapping in nn.DataParallel across {n_gpus} GPUs "
                     f"(per-GPU batch: {batch_size // n_gpus}).")
         model = nn.DataParallel(model)
+    elif n_gpus > 1:
+        logger.info(f"{n_gpus} GPUs visible; keeping single-GPU. Pass --allow-multi-gpu to enable DP.")
+
     model.to(device)
+
+    amp_dtype = _pick_amp_dtype(device, logger)
+
+    # Ampere+ perf: TF32 for the FP32 matmul paths that AMP doesn't cover
+    # (linear reparameterization, norm layers). Preserves math semantics
+    # closely enough for training but noticeably faster on Ampere/Hopper.
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+
+    # Memory-format hint. cuDNN uses channels-last kernels on Ampere+ when
+    # the model's parameters and inputs are both in channels_last. Safe no-op
+    # when the model's convs don't benefit (registry contract is 4D input).
+    mem_fmt = _memory_format_for(args.model)
+    try:
+        model.to(memory_format=mem_fmt)
+        logger.debug("memory_format applied: %s", mem_fmt)
+    except Exception as e:
+        logger.debug("memory_format apply failed, continuing default: %s", e)
 
     # Checkpoint destination
     ckpt_path = Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
@@ -423,6 +567,48 @@ def main():
         epochs_planned=epochs,
     )
 
+    resolved_cfg = {
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "lr": lr,
+        "beta": beta,
+        "lambda_physics": lambda_physics,
+        "seed": seed,
+        "weight_decay": weight_decay,
+        "patience": patience,
+        "gpu": gpu_name,
+        "amp_dtype": str(amp_dtype).replace("torch.", ""),
+        "compile": bool(args.compile),
+        "allow_multi_gpu": bool(args.allow_multi_gpu),
+    }
+    notifier.send_start(resolved_cfg)
+
+    # ---- Weights & Biases ----
+    wandb_run = None
+    if _HAS_WANDB and not args.no_wandb:
+        try:
+            wandb_mode = os.environ.get("WANDB_MODE", "online")
+            run_name = f"{args.model}__{args.loss}__{args.dataset}"
+            wandb_run = wandb.init(
+                project=args.wandb_project,
+                entity=args.wandb_entity,
+                name=run_name,
+                mode=wandb_mode,
+                config=resolved_cfg,
+                tags=[args.model, args.dataset, args.loss],
+                reinit=True,
+            )
+            logger.info(f"wandb: initialised (mode={wandb_mode}, run={run_name})")
+        except Exception as e:
+            logger.warning("wandb init failed, continuing without: %s", e)
+            wandb_run = None
+    elif args.no_wandb:
+        logger.info("wandb: disabled by --no-wandb")
+    else:
+        logger.info("wandb: not installed; skipping")
+
+    status = "fail"
     try:
         status = train_vae(
             model=model,
@@ -440,14 +626,28 @@ def main():
             ckpt_meta=ckpt_meta,
             logger=logger,
             notifier=notifier,
+            amp_dtype=amp_dtype,
+            wandb_run=wandb_run,
         )
     except BaseException as e:
         tb = traceback.format_exc()
         logger.exception("Training run failed with an exception.")
-        notifier.flush_run("fail", extra=f"{type(e).__name__}: {e}\n\n{tb}")
+        tail = tail_log(logger, n_lines=60)
+        extra = f"{type(e).__name__}: {e}\n\n--- last {60} log lines ---\n{tail}\n\n{tb}"
+        notifier.flush_run("fail", extra=extra)
+        if wandb_run is not None:
+            try:
+                wandb_run.finish(exit_code=1)
+            except Exception:
+                pass
         raise
 
     notifier.flush_run(status or "ok", extra=f"ckpt: {ckpt_path}")
+    if wandb_run is not None:
+        try:
+            wandb_run.finish(exit_code=0)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

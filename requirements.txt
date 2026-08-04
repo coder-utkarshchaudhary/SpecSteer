@@ -60,3 +60,7 @@ pyyaml
 
 # Added for utils/notify.py (Telegram overnight-run notifier).
 python-dotenv
+
+# Added for train/train.py (experiment logging). WANDB_MODE=offline on HPC;
+# lab machine syncs after the job finishes.
+wandb==0.19.9

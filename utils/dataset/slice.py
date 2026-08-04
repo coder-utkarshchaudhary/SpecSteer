@@ -28,6 +28,7 @@ Usage:
 """
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -150,14 +151,26 @@ class BaseHSISlicer:
         """Yield (scene_name, source) pairs for every acquisition under raw_root."""
         raise NotImplementedError
 
-    def slice_source(self, scene_name: str, source) -> dict:
-        """Preprocess one source and save all of its patches. Returns per-split counts."""
+    def slice_source(self, scene_name: str, source) -> tuple:
+        """
+        Preprocess one source and save all of its patches.
+
+        Returns:
+            (counts, patch_maxes) where counts is {split: n} and patch_maxes is
+            a dict mapping the patch's path relative to self.out_root (as a
+            POSIX string) to its per-patch max reflectance. Consumed by the
+            dataloader to skip the per-item .max() scan.
+        """
         split_names = ("train", "valid", "test")
         out_dirs = {s: self.out_root / scene_name / s for s in split_names}
 
         if not self.overwrite and all(d.exists() and any(d.iterdir()) for d in out_dirs.values()):
             print(f"  [skip] {scene_name} already exists (use --overwrite to redo)")
-            return {s: len(list(out_dirs[s].glob("*.npy"))) for s in split_names}
+            counts = {s: len(list(out_dirs[s].glob("*.npy"))) for s in split_names}
+            # Re-scan existing patches so the manifest we're about to write
+            # covers *all* patches on disk, not just ones we produced this run.
+            maxes = self._scan_existing_maxes(out_dirs)
+            return counts, maxes
 
         for d in out_dirs.values():
             d.mkdir(parents=True, exist_ok=True)
@@ -169,7 +182,8 @@ class BaseHSISlicer:
         H, W, C = cube_hwc.shape
         bounds = _region_bounds(H, self.split_ratios)
 
-        counts = {}
+        counts: dict = {}
+        maxes: dict = {}
         for split, (r_start, r_end) in zip(split_names, bounds):
             patches, dropped = _extract_patches(
                 cube_hwc,
@@ -184,6 +198,8 @@ class BaseHSISlicer:
             for idx, patch in enumerate(patches):
                 fname = out_dir / f"patch_{idx:05d}.npy"
                 np.save(str(fname), patch)
+                rel = fname.relative_to(self.out_root).as_posix()
+                maxes[rel] = float(patch.max())
 
             counts[split] = len(patches)
             print(
@@ -191,7 +207,16 @@ class BaseHSISlicer:
                 f"({dropped} dropped for >{self.fill_fraction_threshold:.0%} fill) to {out_dir}"
             )
 
-        return counts
+        return counts, maxes
+
+    def _scan_existing_maxes(self, out_dirs: dict) -> dict:
+        """Fallback used on --skip to rebuild manifest for already-processed scenes."""
+        maxes = {}
+        for d in out_dirs.values():
+            for p in sorted(d.glob("*.npy")):
+                rel = p.relative_to(self.out_root).as_posix()
+                maxes[rel] = float(np.load(p).max())
+        return maxes
 
     def run(self, raw_root=None, limit: int = None) -> dict:
         """Process every source under raw_root. Returns aggregate per-split counts."""
@@ -207,12 +232,44 @@ class BaseHSISlicer:
             return {"train": 0, "valid": 0, "test": 0}
 
         total = {"train": 0, "valid": 0, "test": 0}
+        manifest_maxes: dict = {}
         for scene_name, source in sources:
             print(f"[{scene_name}]")
-            counts = self.slice_source(scene_name, source)
+            counts, scene_maxes = self.slice_source(scene_name, source)
             for split, n in counts.items():
                 total[split] += n
+            manifest_maxes.update(scene_maxes)
+
+        # Write / merge the sidecar manifest at the dataset root so the
+        # dataloader can skip the per-item .max() scan.
+        self._write_manifest(manifest_maxes)
         return total
+
+    def _write_manifest(self, patch_maxes: dict) -> None:
+        """Write logs/manifest.json alongside the processed patches."""
+        if not patch_maxes:
+            return
+        self.out_root.mkdir(parents=True, exist_ok=True)
+        manifest_path = self.out_root / "manifest.json"
+        existing = {}
+        if manifest_path.is_file():
+            try:
+                with manifest_path.open("r", encoding="utf-8") as fh:
+                    existing = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                existing = {}
+        merged_maxes = {**(existing.get("patch_max") or {}), **patch_maxes}
+        payload = {
+            "dataset": self.dataset_name,
+            "patch_size": self.patch_size,
+            "stride": self.stride,
+            "split_ratios": list(self.split_ratios),
+            "fill_fraction_threshold": self.fill_fraction_threshold,
+            "patch_max": merged_maxes,
+        }
+        with manifest_path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        print(f"  manifest: {manifest_path} ({len(merged_maxes)} patches indexed)")
 
 
 # ---------------------------------------------------------------------------

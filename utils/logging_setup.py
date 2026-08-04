@@ -13,8 +13,12 @@ checkpoint it produced:
     inference_...                                   (same rules)
     downstream_<model>_<dataset>_<ts>.log           (one per model)
 
-``ts`` is captured once by the caller (``timestamp()``) and threaded through so
-the filename suffix matches the banner inside the log.
+Level policy for training:
+    - DEBUG for the first ``debug_epochs`` epochs (default 3), then INFO.
+    - ``set_epoch(n)`` on the returned logger flips the level on both the
+      file and stream handlers atomically.
+    - ``log_tensor(logger, name, tensor)`` prints shape/dtype/device only —
+      never element values — so DEBUG logs stay small and safe.
 """
 
 from __future__ import annotations
@@ -43,12 +47,6 @@ def run_log_name(
     loss: Optional[str] = None,
     ts: Optional[str] = None,
 ) -> str:
-    """
-    Build the log filename for one run.
-
-    Physics-only models drop the loss token (they have no meaningful alternative
-    regime), matching ``modules.registry.checkpoint_name``.
-    """
     if ts is None:
         ts = timestamp()
     include_loss = loss is not None and model not in PHYSICS_ONLY
@@ -66,6 +64,24 @@ _FORMATTER = logging.Formatter(
 )
 
 
+class _EpochAwareLogger(logging.Logger):
+    """Logger with a helper to flip DEBUG↔INFO at an epoch boundary."""
+
+    debug_epochs: int = 3
+
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the training loop at the start of each epoch."""
+        want = logging.DEBUG if epoch < self.debug_epochs else logging.INFO
+        if self.level != want:
+            self.setLevel(want)
+            for h in self.handlers:
+                h.setLevel(want)
+            self.info(
+                "log level -> %s (epoch %d, debug_epochs=%d)",
+                logging.getLevelName(want), epoch, self.debug_epochs,
+            )
+
+
 def get_run_logger(
     kind: str,
     model: str,
@@ -73,45 +89,43 @@ def get_run_logger(
     loss: Optional[str] = None,
     ts: Optional[str] = None,
     stream: bool = True,
-) -> logging.Logger:
+    debug_epochs: int = 3,
+) -> _EpochAwareLogger:
     """
-    Return a logger that writes to ``logs/<run_log_name(...)>``.
-
-    With ``stream=True`` (default), progress is also mirrored to stdout — this
-    is what train/inference want. Downstream runs many models per invocation
-    and pairs several file-only loggers (``stream=False``) with a single shared
-    ``get_console_logger()`` so shared messages are broadcast to every file but
-    only printed once.
-
-    Handlers are attached once per logger name; calling this repeatedly with
-    the same args reuses the same logger without duplicating output.
+    Return an ``_EpochAwareLogger`` for one run. Starts at DEBUG so epoch 0
+    setup already emits shapes; the trainer calls ``.set_epoch(e)`` at each
+    epoch to switch to INFO once ``e >= debug_epochs``.
     """
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     filename = run_log_name(kind, model, dataset, loss=loss, ts=ts)
     log_path = LOG_DIR / filename
 
+    # Register our subclass so getLogger() returns _EpochAwareLogger instances.
+    logging.setLoggerClass(_EpochAwareLogger)
     logger = logging.getLogger(log_path.stem)
-    logger.setLevel(logging.INFO)
+    # Reset class back so we don't affect unrelated loggers.
+    logging.setLoggerClass(logging.Logger)
+
+    logger.debug_epochs = debug_epochs
+    logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
     if not logger.handlers:
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(_FORMATTER)
+        file_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_handler)
         if stream:
             stream_handler = logging.StreamHandler(sys.stdout)
             stream_handler.setFormatter(_FORMATTER)
+            stream_handler.setLevel(logging.DEBUG)
             logger.addHandler(stream_handler)
 
-    return logger
+    logger.info("log file: %s", log_path)
+    return logger  # type: ignore[return-value]
 
 
 def get_console_logger(name: str = "specsteer.console") -> logging.Logger:
-    """
-    Return a stdout-only logger. Used by downstream to print shared messages
-    (banner, comparison tables) once while its per-model file loggers persist
-    the same messages to every log file.
-    """
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -120,3 +134,54 @@ def get_console_logger(name: str = "specsteer.console") -> logging.Logger:
         stream_handler.setFormatter(_FORMATTER)
         logger.addHandler(stream_handler)
     return logger
+
+
+def log_tensor(logger: logging.Logger, name: str, t) -> None:
+    """
+    Emit a DEBUG-only line describing a tensor by its metadata alone.
+
+    Never prints element values — safe to leave in hot code paths without
+    risking log bloat or leaking numerical content.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    try:
+        shape = tuple(t.shape)
+        dtype = getattr(t, "dtype", "?")
+        device = getattr(t, "device", "?")
+    except Exception:
+        logger.debug("tensor %s: (unreadable metadata)", name)
+        return
+    logger.debug("tensor %s: shape=%s dtype=%s device=%s", name, shape, dtype, device)
+
+
+def log_tensors(logger: logging.Logger, **named) -> None:
+    """Convenience wrapper: ``log_tensors(log, x=x, z=z)``."""
+    for k, v in named.items():
+        log_tensor(logger, k, v)
+
+
+def get_log_path(logger: logging.Logger) -> Optional[Path]:
+    """Return the file path of the first FileHandler attached, if any."""
+    for h in logger.handlers:
+        if isinstance(h, logging.FileHandler):
+            return Path(h.baseFilename)
+    return None
+
+
+def tail_log(logger: logging.Logger, n_lines: int = 40) -> str:
+    """Read the last ``n_lines`` from the logger's file handler. Best-effort."""
+    p = get_log_path(logger)
+    if p is None or not p.is_file():
+        return ""
+    try:
+        with p.open("rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            block = min(size, 32 * 1024)
+            fh.seek(size - block)
+            data = fh.read().decode("utf-8", errors="replace")
+        lines = data.splitlines()[-n_lines:]
+        return "\n".join(lines)
+    except OSError:
+        return ""

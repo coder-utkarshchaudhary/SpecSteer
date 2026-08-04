@@ -5,32 +5,22 @@
 #
 # Run from the repo root:
 #   # Single run:
-#   bash scripts/train.sh --model vae-our --dataset IIRS --loss physics --epochs 100
+#   bash scripts/train.sh --model vae-our --dataset IIRS --loss physics
 #
 #   # Full 28-run ablation grid (all models x all datasets x loss regimes):
-#   bash scripts/train.sh --all --epochs 100
+#   bash scripts/train.sh --all
 #
 #   # Subset — one workstation runs half the grid:
-#   bash scripts/train.sh --all --datasets IIRS,M3      --epochs 100
-#   bash scripts/train.sh --all --datasets AVIRIS,CRIMS --epochs 100
+#   bash scripts/train.sh --all --datasets IIRS,M3
+#   bash scripts/train.sh --all --datasets AVIRIS,CRIMS
 #
-# The grid is:
-#   - vae-our             : physics only        -> 1 run/dataset  (4)
-#   - vae-standard        : standard + physics  -> 2 runs/dataset (8)
-#   - vae-3d-spatio-spectral : standard + physics -> 2 runs/dataset (8)
-#   - vae-1d-pixelwise    : standard + physics  -> 2 runs/dataset (8)
-#   Total: 4 + 8 + 8 + 8 = 28 trainings across IIRS / M3 / AVIRIS / CRIMS.
-#
-# Checkpoints are written to ${CKPT_DIR}/<DATASET>/<name>.pt
-#   vae-our      -> vae-our.pt
-#   others       -> <model>_<loss>.pt
+# The grid is defined once in scripts/grid_manifest.sh (28 slots).
 #
 # Environment overrides:
 #   CKPT_DIR   — checkpoint root directory   (default: model)
+#   EPOCHS     — passed through as --epochs  (default: 100 unless overridden)
 
 set -uo pipefail
-# NOTE: -e is intentionally omitted. In --all mode, each run is wrapped so one
-# failure does not kill the remaining runs (and each failed run gets one retry).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -38,110 +28,106 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
 CKPT_DIR="${CKPT_DIR:-model}"
+DEFAULT_EPOCHS="${EPOCHS:-100}"
 
 cd "${REPO_ROOT}"
 
 # --------------------------------------------------------------------------
-# --all : run the full ablation grid. --datasets IIRS,M3 restricts to a subset.
-# Any other extra args (e.g. --epochs 100) are forwarded to every run.
+# --all : run the full ablation grid via scripts/grid_manifest.sh
 # --------------------------------------------------------------------------
 if [[ "${1:-}" == "--all" ]]; then
     shift
 
-    # Default is all four; --datasets replaces it with a comma-separated subset.
-    ALL_DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
-    DATASETS=("${ALL_DATASETS[@]}")
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/grid_manifest.sh"
 
-    # Parse the leading options recognised here; anything else falls through
-    # to the python train.py forward list.
+    # Filter subset (comma-separated).
+    DATASETS_SUBSET=""
     EXTRA_ARGS=()
+    HAS_EPOCHS=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --datasets)
-                IFS=',' read -r -a DATASETS <<< "$2"
-                shift 2
-                ;;
-            *)
-                EXTRA_ARGS+=("$1")
-                shift
-                ;;
+            --datasets) DATASETS_SUBSET="$2"; shift 2 ;;
+            --epochs)   HAS_EPOCHS=1; EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
+            *)          EXTRA_ARGS+=("$1"); shift ;;
         esac
     done
+    if (( HAS_EPOCHS == 0 )); then
+        EXTRA_ARGS+=(--epochs "${DEFAULT_EPOCHS}")
+    fi
 
-    # Validate the subset against the known set.
-    for ds in "${DATASETS[@]}"; do
-        found=0
-        for known in "${ALL_DATASETS[@]}"; do
-            [[ "${ds}" == "${known}" ]] && { found=1; break; }
+    IFS=',' read -r -a DATASETS_FILTER <<< "${DATASETS_SUBSET}"
+    _in_filter() {
+        local ds="$1"
+        [[ -z "${DATASETS_SUBSET}" ]] && return 0
+        for d in "${DATASETS_FILTER[@]}"; do
+            [[ "${d}" == "${ds}" ]] && return 0
         done
-        if [[ ${found} -eq 0 ]]; then
-            echo "ERROR: unknown dataset '${ds}'. Choose from: ${ALL_DATASETS[*]}"
-            exit 2
-        fi
-    done
-
-    STANDARD_MODELS=("vae-standard" "vae-3d-spatio-spectral" "vae-1d-pixelwise")
+        return 1
+    }
 
     echo "=============================================="
     echo " HSI VAE Ablation — grid launch"
-    echo "  datasets : ${DATASETS[*]}"
-    echo "  ckpt dir : ${REPO_ROOT}/${CKPT_DIR}"
-    echo "  extra    : ${EXTRA_ARGS[*]:-<none>}"
+    echo "  slots     : ${GRID_TOTAL}"
+    echo "  datasets  : ${DATASETS_SUBSET:-<all>}"
+    echo "  ckpt dir  : ${REPO_ROOT}/${CKPT_DIR}"
+    echo "  extra     : ${EXTRA_ARGS[*]:-<none>}"
     echo "=============================================="
 
     python utils/notify_cli.py --text "Ablation grid launched
 host: $(hostname)
-datasets: ${DATASETS[*]}
+datasets: ${DATASETS_SUBSET:-<all>}
 extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
 
     SKIPPED=()
     FAILED=()
     RETRIED=()
 
-    run_one() {
-        # $1=model  $2=dataset  $3=loss  $4=ckpt_name  $5..=forwarded args
-        local m="$1" ds="$2" loss="$3" name="$4"
-        shift 4
-        local ckpt="${CKPT_DIR}/${ds}/${name}.pt"
-        if [[ -s "${ckpt}" ]]; then
-            echo "[skip] ${m} | ${ds} | ${loss}  (ckpt exists: ${ckpt})"
-            SKIPPED+=("${m}|${ds}|${loss}")
-            return 0
+    for (( slot=1; slot<=GRID_TOTAL; slot++ )); do
+        cfg="$(grid_lookup "${slot}")"
+        m="${cfg%%|*}"; rest="${cfg#*|}"
+        ds="${rest%%|*}"; rest="${rest#*|}"
+        loss="${rest%%|*}"
+        name="${rest#*|}"
+
+        if ! _in_filter "${ds}"; then
+            continue
         fi
 
-        local attempt=1
-        local rc=0
+        ckpt="${CKPT_DIR}/${ds}/${name}.pt"
+        if [[ -s "${ckpt}" ]]; then
+            echo "[skip] slot ${slot}  ${m} | ${ds} | ${loss}  (ckpt exists: ${ckpt})"
+            SKIPPED+=("${m}|${ds}|${loss}")
+            continue
+        fi
+
+        attempt=1
+        rc=0
         while (( attempt <= 2 )); do
-            echo ">>> ${m} | ${ds} | ${loss}  (attempt ${attempt}/2)"
-            if python train/train.py --model "${m}" --dataset "${ds}" --loss "${loss}" \
-                    --ckpt-dir "${CKPT_DIR}" "$@"; then
+            echo ">>> slot ${slot}  ${m} | ${ds} | ${loss}  (attempt ${attempt}/2)"
+            if python train/train.py \
+                    --model "${m}" --dataset "${ds}" --loss "${loss}" \
+                    --ckpt-dir "${CKPT_DIR}" "${EXTRA_ARGS[@]}"; then
                 if (( attempt > 1 )); then
                     RETRIED+=("${m}|${ds}|${loss}")
                 fi
-                return 0
+                rc=0
+                break
             fi
             rc=$?
-            echo "!!! ${m} | ${ds} | ${loss}  attempt ${attempt} failed (exit=${rc})"
+            echo "!!! slot ${slot}  attempt ${attempt} failed (exit=${rc})"
             (( attempt < 2 )) && { echo "    retrying after 5s..."; sleep 5; }
             attempt=$(( attempt + 1 ))
         done
-        FAILED+=("${m}|${ds}|${loss}|rc=${rc}")
-        return 0
-    }
-
-    for ds in "${DATASETS[@]}"; do
-        run_one vae-our "${ds}" physics vae-our "${EXTRA_ARGS[@]}"
-        for m in "${STANDARD_MODELS[@]}"; do
-            for loss in standard physics; do
-                run_one "${m}" "${ds}" "${loss}" "${m}_${loss}" "${EXTRA_ARGS[@]}"
-            done
-        done
+        if (( rc != 0 )); then
+            FAILED+=("${m}|${ds}|${loss}|rc=${rc}")
+        fi
     done
 
     echo ""
     echo "=============================================="
     echo " Ablation grid complete."
-    echo "  datasets              : ${DATASETS[*]}"
+    echo "  datasets              : ${DATASETS_SUBSET:-<all>}"
     echo "  skipped (ckpt exists) : ${#SKIPPED[@]}"
     echo "  retried (passed on 2) : ${#RETRIED[@]}"
     echo "  failed                : ${#FAILED[@]}"
@@ -157,7 +143,7 @@ extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
 
     python utils/notify_cli.py --text "Ablation grid finished
 host: $(hostname)
-datasets: ${DATASETS[*]}
+datasets: ${DATASETS_SUBSET:-<all>}
 skipped: ${#SKIPPED[@]}  retried: ${#RETRIED[@]}  failed: ${#FAILED[@]}" >/dev/null 2>&1 || true
 
     exit $(( ${#FAILED[@]} > 0 ? 1 : 0 ))

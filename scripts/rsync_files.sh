@@ -5,21 +5,21 @@ set -euo pipefail
 # ==========================
 # Configuration
 # ==========================
-# USER="yashdeep"
-# HOST="192.168.1.36"
+USER="yashdeep"
+HOST="192.168.1.36"
 
-# SOURCE="data/processed/"
-# DEST="/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/prism/data/processed"
+SOURCE="data/processed/"
+DEST="/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/prism/data/processed"
 
 # ==========================
 # Configuration v2 -> Vultr
 # ==========================
-USER="root"
-HOST="38.128.232.57"
-PORT="46508"
+# USER="root"
+# HOST="38.128.232.57"
+# PORT="46508"
 
-SOURCE="data/processed/"
-DEST="/workspace/prism/data/processed"
+# SOURCE="data/processed/"
+# DEST="/workspace/prism/data/processed"
 
 # ==========================
 # Connectivity check
