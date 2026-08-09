@@ -129,10 +129,11 @@ _kill_pidfile() {
 }
 
 if [[ "${MODE}" == "stop" ]]; then
-    log_step "stopping local relay + tunnel + watcher"
+    log_step "stopping local relay + tunnel + watchers"
     _kill_pidfile "${RELAY_PID_FILE}"
     _kill_pidfile "${TUNNEL_PID_FILE}"
     _kill_pidfile "${LOG_DIR}/smoke_watcher.pid"
+    _kill_pidfile "${LOG_DIR}/grid_watcher.pid"
 
     log_step "killing HPC forwarder tmux session"
     ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
@@ -153,13 +154,20 @@ fi
 
 if [[ "${MODE}" == "status" ]]; then
     log_step "local processes"
-    for pf in "${RELAY_PID_FILE}" "${TUNNEL_PID_FILE}"; do
+    for pf in "${RELAY_PID_FILE}" "${TUNNEL_PID_FILE}" "${LOG_DIR}/smoke_watcher.pid" "${LOG_DIR}/grid_watcher.pid"; do
         if [[ -s "${pf}" ]] && kill -0 "$(cat "${pf}")" 2>/dev/null; then
             echo "    ${pf##*/}: alive (pid=$(cat "${pf}"))"
         else
             echo "    ${pf##*/}: not running"
         fi
     done
+    if [[ -d "${LOG_DIR}/grid_watcher/pulled" ]]; then
+        n_pulled=$(ls "${LOG_DIR}/grid_watcher/pulled" 2>/dev/null | wc -l | tr -d ' ')
+        status_range="${FULL_ARRAY_RANGE:-${HPC_ARRAY_RANGE}}"
+        IFS='-' read -r status_rs status_re <<< "${status_range}"
+        n_total=$(( ${status_re:-${status_rs:-1}} - ${status_rs:-1} + 1 ))
+        echo "    grid pull-back progress: ${n_pulled}/${n_total} slots pulled so far (range ${status_range})"
+    fi
     log_step "HPC forwarder"
     ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
         "tmux has-session -t ${FORWARDER_SESSION} 2>/dev/null && echo alive || echo not running" \
@@ -555,6 +563,9 @@ cat <<EOF
     Watch smoke watcher progress:
       tail -f ${LOG_DIR}/smoke_watcher.log
 
+    Watch grid pull-back watcher (after smoke passes, per-run checkpoint pulls):
+      tail -f ${LOG_DIR}/grid_watcher.log
+
     Watch job queue status:
       ssh ${HPC_USER}@${HPC_HOST} 'qstat -t $(cat "${JOBID_FILE}" 2>/dev/null)'
 
@@ -565,21 +576,27 @@ cat <<EOF
     Tail a specific run's log (once it starts on a compute node):
       ssh ${HPC_USER}@${HPC_HOST} 'tail -f ${HPC_PROJECT_DIR}/logs/train_*.log'
 
-    Pull results back to lab (after full job completes):
+    Manual full pull (grid watcher already does this per-slot automatically;
+    use this only for a one-off refresh, e.g. to grab wandb/ mid-run):
       bash scripts/hpc_pull_results.sh
 
     Emergency stop everything:
       bash scripts/hpc_launch.sh --stop
 
-    Current status snapshot:
+    Current status snapshot (includes grid pull-back progress):
       bash scripts/hpc_launch.sh --status
 
     What happens next (automated):
       1. Smoke watcher polls qstat for the smoke job to finish.
       2. If smoke passes → waits ${SMOKE_DELAY_SECS:-600}s → submits full ${FULL_ARRAY_RANGE:-1-28} grid.
          (Telegram: "[LAUNCHED] Full ablation grid submitted")
+         → starts the grid watcher, which polls each array slot and, the moment
+           a slot finishes, immediately pulls its checkpoint + logs back to the
+           lab machine (Telegram: "[OK]"/"[FAIL] slot N/M done: ...") — so a
+           later failure (tunnel drop, HPC outage, lab machine reboot) only
+           risks runs still in flight, never runs that already finished.
       3. If smoke fails  → pulls logs → Telegrams the tail → does NOT launch full grid.
          (fix the issue, re-run this script)
 
 EOF
-log_ok "launch complete. Junior brain may sleep."
+log_ok "launch complete. Thanks a lot people. You may rest now."

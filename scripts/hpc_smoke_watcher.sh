@@ -171,7 +171,19 @@ if [[ "${exit_code}" == "0" ]]; then
     echo "STATE=full_submitted" >> "${STATE_FILE}"
     echo "FULL_JOBID=${full_jobid}" >> "${STATE_FILE}"
     log "full array submitted: ${full_jobid}"
-    _notify "$(printf '[LAUNCHED] Full ablation grid submitted.\njobid: %s\nrange: %s\nepochs: %s' \
+
+    # Launch the per-run pull-back watcher: it pulls each slot's checkpoint
+    # the moment that slot finishes, instead of waiting for the whole grid.
+    log "starting grid watcher (per-slot pull-back)"
+    export HPC_FULL_JOBID="${full_jobid}"
+    export FULL_ARRAY_RANGE
+    nohup bash "${SCRIPT_DIR}/hpc_grid_watcher.sh" \
+        >> "${LOG_DIR}/grid_watcher.log" 2>&1 &
+    grid_watcher_pid=$!
+    echo "${grid_watcher_pid}" > "${LOG_DIR}/grid_watcher.pid"
+    log "grid watcher pid=${grid_watcher_pid} (logs: ${LOG_DIR}/grid_watcher.log)"
+
+    _notify "$(printf '[LAUNCHED] Full ablation grid submitted.\njobid: %s\nrange: %s\nepochs: %s\nCheckpoints will be pulled back to the lab machine as each run finishes.' \
         "${full_jobid}" "${FULL_ARRAY_RANGE}" "${EPOCHS}")"
     exit 0
 else
