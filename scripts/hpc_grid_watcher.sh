@@ -81,6 +81,13 @@ log() {
     printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${WATCHER_LOG}"
 }
 
+# Run a remote command in a LOGIN shell so PBS binaries (qstat) are on PATH —
+# IITD's PBS Pro wires them via /etc/profile.d, which a plain non-interactive
+# ssh never sources. See hpc_launch.sh:hpc_ssh for detail.
+hpc_ssh() {
+    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "$1"
+}
+
 _notify() {
     local text="$1"
     (
@@ -105,8 +112,7 @@ echo "STATE=polling" >> "${STATE_FILE}"
 # every "Job Id: <jobid>[<idx>].host" block in `qstat -f -x -t` output.
 # ---------------------------------------------------------------------------
 _qstat_slots() {
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "qstat -f -x -t '${FULL_JOBID}' 2>/dev/null" | awk '
+    hpc_ssh "qstat -f -x -t '${FULL_JOBID}' 2>/dev/null" | awk '
         /^Job Id: / {
             line = $0
             s = index(line, "["); e = index(line, "]")

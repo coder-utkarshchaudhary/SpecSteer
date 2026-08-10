@@ -112,6 +112,20 @@ JOBID_FILE="${LOG_DIR}/hpc_jobid"
 FORWARDER_SESSION="specsteer_forwarder"
 
 # ---------------------------------------------------------------------------
+# hpc_ssh — run a remote command in a LOGIN shell.
+#
+# IITD's PBS Pro only puts the scheduler binaries (qsub/qstat/qdel) on PATH via
+# /etc/profile.d, which a plain non-interactive `ssh host 'cmd'` never sources —
+# that's the "qsub: command not found" (/opt/pbs/.../bin/qsub missing) the
+# junior hit. Piping the command over stdin to `bash -l -s` sources the login
+# profile AND sidesteps nested-quoting issues in the command string. Use this
+# for anything that calls qsub/qstat/qdel; plain ssh is fine for tmux/tail/etc.
+# ---------------------------------------------------------------------------
+hpc_ssh() {
+    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "$1"
+}
+
+# ---------------------------------------------------------------------------
 # --stop and --status short-circuit here
 # ---------------------------------------------------------------------------
 _kill_pidfile() {
@@ -144,8 +158,7 @@ if [[ "${MODE}" == "stop" ]]; then
         if [[ -s "${jf}" ]]; then
             local_job=$(cat "${jf}")
             log_step "qdel ${local_job}"
-            ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-                "qdel ${local_job} 2>/dev/null || true" || true
+            hpc_ssh "qdel ${local_job} 2>/dev/null || true" || true
         fi
     done
     log_ok "stop complete."
@@ -174,8 +187,7 @@ if [[ "${MODE}" == "status" ]]; then
         || log_warn "could not ssh"
     if [[ -s "${JOBID_FILE}" ]]; then
         log_step "PBS job $(cat "${JOBID_FILE}")"
-        ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-            "qstat -t $(cat "${JOBID_FILE}") 2>&1 || echo '(job no longer in queue)'"
+        hpc_ssh "qstat -t $(cat "${JOBID_FILE}") 2>&1 || echo '(job no longer in queue)'"
     fi
     exit 0
 fi
@@ -263,12 +275,16 @@ for tool in rsync ssh autossh tmux python3; do
 done
 
 # 1e. hpc has the tools we need
+# NOTE: qsub is intentionally NOT checked here. On IITD's PBS Pro the scheduler
+# binaries are not on the login-node PATH for non-interactive ssh sessions; the
+# queue is assigned automatically when a node becomes available. Probing for
+# qsub gives a false negative and blocks launch.
 missing_hpc=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-    'for t in python3 qsub tmux; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
+    'for t in python3 tmux; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
 if [[ -n "${missing_hpc}" ]]; then
     fatal "HPC missing tools: ${missing_hpc}. Ask IITD HPC support / your PI."
 fi
-log_ok "hpc has python3, qsub, tmux"
+log_ok "hpc has python3, tmux"
 
 # ---------------------------------------------------------------------------
 # 2. Build wheels
@@ -531,10 +547,13 @@ else
         -v HPC_PROJECT_DIR='${HPC_PROJECT_DIR}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
         scripts/hpc_pbs_job.pbs"
 
-    SMOKE_JOBID=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" "${smoke_qsub_cmd}") || \
+    SMOKE_JOBID=$(hpc_ssh "${smoke_qsub_cmd}") || \
         fatal "qsub smoke failed"
 
-    SMOKE_JOBID=$(echo "${SMOKE_JOBID}" | xargs)
+    # A login shell may print module-load / MOTD banners before qsub's output;
+    # the job id is the LAST non-empty line. (Mirrors the full-array capture in
+    # hpc_smoke_watcher.sh.)
+    SMOKE_JOBID=$(echo "${SMOKE_JOBID}" | tail -1 | xargs)
     echo "${SMOKE_JOBID}" > "${LOG_DIR}/hpc_jobid_smoke"
     echo "${SMOKE_JOBID}" > "${JOBID_FILE}"
     log_ok "smoke job submitted: ${SMOKE_JOBID}"
@@ -566,8 +585,8 @@ cat <<EOF
     Watch grid pull-back watcher (after smoke passes, per-run checkpoint pulls):
       tail -f ${LOG_DIR}/grid_watcher.log
 
-    Watch job queue status:
-      ssh ${HPC_USER}@${HPC_HOST} 'qstat -t $(cat "${JOBID_FILE}" 2>/dev/null)'
+    Watch job queue status (qstat needs a login shell for PATH -> use ssh -t):
+      ssh -t ${HPC_USER}@${HPC_HOST} "qstat -t $(cat "${JOBID_FILE}" 2>/dev/null)"
 
     Attach to the HPC forwarder:
       ssh ${HPC_USER}@${HPC_HOST} 'tmux attach -t ${FORWARDER_SESSION}'

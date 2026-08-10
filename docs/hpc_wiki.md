@@ -87,7 +87,7 @@ Open `scripts/hpc_config.env` in VS Code. Every line that says `FILL_ME` needs t
 
 **PBS queue (ask Utkarsh):**
 
-- `HPC_QUEUE` — which GPU queue to submit to. If you want to check yourself: `ssh YOUR_USER@THE_HOST 'qstat -q'` lists them. Pick the one with A100 access. When in doubt, ask Utkarsh.
+- `HPC_QUEUE` — which GPU queue to submit to. If you want to check yourself: `ssh -t YOUR_USER@THE_HOST 'qstat -q'` lists them (the `-t` forces a login shell so `qstat` is on `PATH`). Pick the one with A100 access. When in doubt, ask Utkarsh.
 
 **Telegram bot (ask Utkarsh — he will DM you):**
 
@@ -178,8 +178,8 @@ This shows whether the tunnel, relay, watcher, and PBS job are alive.
 If you want to watch logs on the HPC:
 
 ```bash
-# PBS array queue:
-ssh YOUR_USER@THE_HOST 'qstat -t $(cat ~/prism/logs/hpc_jobid)'
+# PBS array queue (use -t so qstat is on PATH via the login shell):
+ssh -t YOUR_USER@THE_HOST 'qstat -t $(cat ~/prism/logs/hpc_jobid)'
 
 # A specific run's log:
 ssh YOUR_USER@THE_HOST 'tail -f ~/prism/logs/train_*.log'
@@ -236,9 +236,11 @@ This kills the local relay, tunnel, and watcher; kills the HPC forwarder tmux se
 
 **Rsync stalls** — Reconnect to `mlr lab 5g`. Re-run `bash scripts/hpc_launch.sh` — it resumes.
 
-**qsub says "no matching queue"** — Wrong `HPC_QUEUE` in the config. Run `ssh YOUR_USER@HOST 'qstat -q'` and pick a valid GPU queue. Ask Utkarsh.
+**qsub says "no matching queue"** — Wrong `HPC_QUEUE` in the config. Run `ssh -t YOUR_USER@HOST 'qstat -q'` and pick a valid GPU queue. Ask Utkarsh.
 
 **qsub says "resources not available"** — A100 nodes are busy. PBS will schedule when slots free. Nothing to do.
+
+**"qsub: command not found" / "/opt/pbs/.../bin/qsub: No such file or directory"** — On IITD's PBS Pro the scheduler binaries (`qsub`/`qstat`/`qdel`) are only put on `PATH` by the login profile (`/etc/profile.d`), which a plain non-interactive `ssh HOST 'cmd'` does not source. The launcher and watchers handle this internally (they run PBS commands through a login shell). If you run `qstat`/`qsub` by hand, use `ssh -t YOUR_USER@HOST '...'` (the `-t` gives you a login shell) — a plain `ssh YOUR_USER@HOST 'qstat ...'` will report the binary as missing even though it exists.
 
 **"reverse tunnel failed to start"** — Two causes. Either your lab→HPC SSH key has a passphrase (the backgrounded tunnel can't type it), or the HPC login node blocks port-forwarding. For the first: make a passphraseless key, or run `eval $(ssh-agent); ssh-add ~/.ssh/id_ed25519` once, then re-launch. For the second, call Utkarsh — it needs a config change on his side. Note: the tunnel logs in *to the HPC* using your HPC key — it never asks for the lab machine's password.
 

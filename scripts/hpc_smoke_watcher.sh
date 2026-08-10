@@ -61,6 +61,13 @@ log() {
     printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${WATCHER_LOG}"
 }
 
+# Run a remote command in a LOGIN shell so PBS binaries (qsub/qstat) are on
+# PATH — IITD's PBS Pro wires them via /etc/profile.d, which a plain
+# non-interactive ssh never sources. See hpc_launch.sh:hpc_ssh for detail.
+hpc_ssh() {
+    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "$1"
+}
+
 _notify() {
     # Best-effort Telegram send via the lab-side notify_cli.py.
     local text="$1"
@@ -98,14 +105,12 @@ echo "STATE=polling" >> "${STATE_FILE}"
 # exit codes into the master's exit status (non-zero if any element failed).
 
 _qstat_master_state() {
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *job_state = / {print \$3; exit}'" \
+    hpc_ssh "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *job_state = / {print \$3; exit}'" \
         || echo "?"
 }
 
 _qstat_master_exit() {
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *Exit_status = / {print \$3; exit}'" \
+    hpc_ssh "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *Exit_status = / {print \$3; exit}'" \
         || echo ""
 }
 
@@ -159,7 +164,7 @@ if [[ "${exit_code}" == "0" ]]; then
         ${qsub_extra} \
         -v HPC_PROJECT_DIR='${HPC_PROJECT_DIR}',EPOCHS='${EPOCHS}',SMOKE_MODE=0,WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
         scripts/hpc_pbs_job.pbs"
-    full_jobid="$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" "${full_cmd}" 2>&1 | tail -1 | tr -d '[:space:]')"
+    full_jobid="$(hpc_ssh "${full_cmd}" 2>&1 | tail -1 | tr -d '[:space:]')"
     if [[ -z "${full_jobid}" ]]; then
         log "!! full array submit produced empty jobid"
         _notify "[FAIL] full array submit failed after smoke passed. Watcher log: ${WATCHER_LOG}"
