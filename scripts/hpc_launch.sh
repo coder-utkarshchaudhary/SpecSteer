@@ -95,7 +95,7 @@ _check_filled HPC_QUEUE
 _check_filled TELEGRAM_BOT_TOKEN
 _check_filled TELEGRAM_CHAT_ID
 _check_filled WANDB_API_KEY
-export HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_SCRATCH}/prism}"
+export HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_HOME}/prism}"
 export LAB_TUNNEL_PORT="${LAB_TUNNEL_PORT:-8765}"
 export LAB_REPO_ROOT="${LAB_REPO_ROOT:-${REPO_ROOT}}"
 export EPOCHS="${EPOCHS:-100}"
@@ -245,7 +245,7 @@ fi
 n_iirs=$(find "${LAB_DATA_ROOT}/IIRS"   -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
 n_m3=$(find   "${LAB_DATA_ROOT}/M3"     -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
 n_av=$(find   "${LAB_DATA_ROOT}/AVIRIS" -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
-n_cr=$(find   "${LAB_DATA_ROOT}/crims"  -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
+n_cr=$(find   "${LAB_DATA_ROOT}/CRIMS"  -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
 log_ok "patches: IIRS=${n_iirs}  M3=${n_m3}  AVIRIS=${n_av}  CRIMS=${n_cr}"
 if (( n_iirs + n_m3 + n_av + n_cr < 1000 )); then
     fatal "very few patches under ${LAB_DATA_ROOT} — did preprocessing run?"
@@ -323,7 +323,6 @@ RSYNC_EXCLUDES=(
     --exclude='.git/'
     --exclude='__pycache__/'
     --exclude='*.pyc'
-    --exclude='.venv/'
     --exclude='wandb/'
     --exclude='logs/'
     --exclude='checkpoints/'
