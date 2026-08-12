@@ -95,7 +95,7 @@ _check_filled HPC_QUEUE
 _check_filled TELEGRAM_BOT_TOKEN
 _check_filled TELEGRAM_CHAT_ID
 _check_filled WANDB_API_KEY
-export HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_HOME}/prism}"
+export HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_SCRATCH}/prism}"
 export LAB_TUNNEL_PORT="${LAB_TUNNEL_PORT:-8765}"
 export LAB_REPO_ROOT="${LAB_REPO_ROOT:-${REPO_ROOT}}"
 export EPOCHS="${EPOCHS:-100}"
