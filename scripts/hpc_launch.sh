@@ -122,7 +122,13 @@ FORWARDER_SESSION="specsteer_forwarder"
 # for anything that calls qsub/qstat/qdel; plain ssh is fine for tmux/tail/etc.
 # ---------------------------------------------------------------------------
 hpc_ssh() {
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "$1"
+    # Even `bash -l -s` may miss the PBS PATH when the scheduler binaries are
+    # added by an interactive-only rc guard (the actual "qsub: command not
+    # found" the junior hit). Prepend a best-effort fix: read PBS_EXEC from
+    # /etc/pbs.conf (present on every PBS Pro node) and fall back to the common
+    # install dirs. No-op for non-PBS commands (tmux/tail) since qsub is found.
+    local pbs_fix='if ! command -v qsub >/dev/null 2>&1; then [ -r /etc/pbs.conf ] && . /etc/pbs.conf; for d in "${PBS_EXEC:-/opt/pbs}/bin" /opt/pbs/bin /opt/pbs/default/bin; do [ -x "$d/qsub" ] && export PATH="$d:$PATH" && break; done; fi;'
+    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "${pbs_fix} $1"
 }
 
 # ---------------------------------------------------------------------------
