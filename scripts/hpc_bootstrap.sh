@@ -1,87 +1,120 @@
 #!/usr/bin/env bash
 # scripts/hpc_bootstrap.sh
 # ------------------------
-# Runs on the HPC login node (invoked by scripts/hpc_launch.sh over SSH).
-# Idempotent — safe to run repeatedly.
+# Runs on the HPC COMPUTE node (invoked by scripts/hpc_launch.sh over
+# compute_ssh, from hpc_common.sh). Idempotent — safe to run repeatedly.
 #
 # Steps:
-#   1. Create python venv at ${HPC_PROJECT_DIR}/.venv if missing.
-#   2. Offline pip install from the rsync'd wheels/ directory.
-#   3. Write .env with the Telegram / relay / wandb env values.
-#   4. mkdir logs, checkpoints, wandb.
+#   1. Environment: EITHER reuse a rsynced .venv as-is (USE_SHIPPED_VENV=1,
+#      default) OR create one and offline-install from wheels/.
+#   2. Write .env with the Telegram / relay / wandb env values.
+#   3. mkdir logs, checkpoints, wandb, model, and the result-return
+#      bookkeeping dirs (pending_push, grid_done).
 #
-# This script is *invoked* on the HPC, not run there interactively. All
-# required config is passed via env vars — see the "required env" block below.
+# This script is *invoked*, not run interactively. All required config comes
+# via env vars — see the "required env" block below.
+#
+# INVARIANT: never `source .venv/bin/activate` anywhere in the HPC path. A
+# venv rsynced from a different machine has VIRTUAL_ENV baked into
+# bin/activate as an absolute path that doesn't exist on this host, so
+# activation is a silent no-op and `python` resolves to the wrong
+# interpreter. `.venv/bin/python` itself IS relocatable (it derives its
+# prefix from the adjacent pyvenv.cfg) — always invoke it by absolute path
+# instead. See scripts/hpc_pbs_job.pbs and the launcher's forwarder/collector
+# startup for the other call sites that follow this same rule.
 
 set -euo pipefail
 
 : "${HPC_PROJECT_DIR:?HPC_PROJECT_DIR must be set}"
 : "${LAB_TUNNEL_PORT:?LAB_TUNNEL_PORT must be set}"
+: "${USE_SHIPPED_VENV:=1}"
 
 cd "${HPC_PROJECT_DIR}"
 
 echo "=========================================="
-echo " HPC bootstrap"
-echo "  cwd    : $(pwd)"
-echo "  host   : $(hostname)"
-echo "  user   : $(whoami)"
-echo "  python : $(command -v python3 || echo 'MISSING')"
+echo " HPC bootstrap (compute node)"
+echo "  cwd              : $(pwd)"
+echo "  host              : $(hostname)"
+echo "  user              : $(whoami)"
+echo "  use_shipped_venv  : ${USE_SHIPPED_VENV}"
 echo "=========================================="
 
-# --- 1. venv --------------------------------------------------------------
-if [[ ! -d .venv ]]; then
-    echo ">>> creating .venv/"
-    python3 -m venv .venv
+VENV_PY="${HPC_PROJECT_DIR}/.venv/bin/python"
+
+# --- 1. environment ---------------------------------------------------------
+if [[ "${USE_SHIPPED_VENV}" == "1" && -x "${VENV_PY}" ]]; then
+    echo ">>> USE_SHIPPED_VENV=1 and ${VENV_PY} exists — verifying it imports torch+wandb"
+    if "${VENV_PY}" -c "import sys, torch, wandb; print('    python :', sys.version.splitlines()[0]); print('    torch  :', torch.__version__, ' cuda_available:', torch.cuda.is_available()); print('    wandb  :', wandb.__version__)"; then
+        echo ">>> shipped .venv verified — skipping venv creation and pip entirely."
+    else
+        echo "!!! shipped .venv failed to import torch/wandb."
+        echo "!!! Likely cause: the venv was rsynced with unanchored excludes that dropped a"
+        echo "!!! site-packages subfolder (e.g. wandb/) named the same as a repo-root exclude."
+        echo "!!! Fix on the lab side: re-push .venv (scripts/hpc_launch.sh now uses anchored"
+        echo "!!! excludes for the repo push and a separate, minimally-excluded push for .venv)."
+        echo "!!! Falling back to the offline-wheels path below, if wheels/ is present."
+        USE_SHIPPED_VENV=0
+    fi
 fi
 
-# shellcheck source=/dev/null
-source .venv/bin/activate
-echo ">>> venv python: $(which python)"
-python -m pip install --upgrade --no-index --find-links wheels/ pip 2>/dev/null || \
-    echo "    (pip self-upgrade skipped: no matching wheel — safe to ignore)"
-
-# --- 2. offline pip install ----------------------------------------------
-if [[ -d wheels && $(ls wheels/*.whl 2>/dev/null | wc -l) -gt 0 ]]; then
+if [[ "${USE_SHIPPED_VENV}" != "1" ]]; then
+    if [[ ! -d wheels || $(ls wheels/*.whl 2>/dev/null | wc -l) -eq 0 ]]; then
+        echo "!!! USE_SHIPPED_VENV=0 (or the shipped venv failed) AND wheels/ is missing or empty."
+        echo "!!! Nothing to bootstrap from. Either:"
+        echo "!!!   (a) fix/re-push .venv and set USE_SHIPPED_VENV=1, or"
+        echo "!!!   (b) run scripts/hpc_launch.sh with the wheel-build step enabled."
+        exit 3
+    fi
+    echo ">>> offline-wheels path: creating/using .venv/ and installing from wheels/"
+    if [[ ! -d .venv ]]; then
+        echo ">>> creating .venv/"
+        python3 -m venv .venv
+    fi
+    "${VENV_PY}" -m pip install --upgrade --no-index --find-links wheels/ pip 2>/dev/null || \
+        echo "    (pip self-upgrade skipped: no matching wheel — safe to ignore)"
     echo ">>> installing requirements from wheels/ (offline)"
-    python -m pip install --no-index --find-links wheels/ -r requirements.txt
-else
-    echo "!!! wheels/ directory missing or empty — did rsync run?"
-    exit 3
+    "${VENV_PY}" -m pip install --no-index --find-links wheels/ -r requirements.txt
 fi
 
-# --- 3. write .env --------------------------------------------------------
-# ${TELEGRAM_BOT_TOKEN}, ${TELEGRAM_CHAT_ID}, ${LAB_TUNNEL_PORT} come from
-# the launcher's env. TELEGRAM_RELAY_URL is *localhost* on the HPC login node —
-# but training runs on compute (no reverse tunnel there), so the compute job
-# writes to logs/notify_queue.jsonl and the login-node forwarder drains it.
+echo ">>> venv python (absolute, never activated): ${VENV_PY}"
+
+# --- 2. write .env --------------------------------------------------------
+# TELEGRAM_RELAY_URL is left blank here for the queue-fallback path (compute
+# node, no direct internet, no tunnel of its own) — utils/notify.py falls
+# through to logs/notify_queue.jsonl, which scripts/notify_forwarder.py
+# (now started ON THIS compute node, see hpc_launch.sh) drains toward the
+# lab relay via the chained reverse tunnel. If probe 5 of hpc_preflight.sh
+# found direct internet, hpc_launch.sh instead passes real Telegram values
+# so the notifier's tier-2 direct send handles everything with no tunnel.
 echo ">>> writing .env"
 cat > .env <<EOF
 # Auto-generated by scripts/hpc_bootstrap.sh — do not commit.
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-# NOTE: compute nodes cannot reach the login-node tunnel. TELEGRAM_RELAY_URL
-# is intentionally left blank inside the compute job's env so that the
-# notifier falls through to logs/notify_queue.jsonl. The login-node
-# forwarder (scripts/notify_forwarder.py) drains that queue over the tunnel.
-TELEGRAM_RELAY_URL=
+TELEGRAM_RELAY_URL=${TELEGRAM_RELAY_URL:-}
 WANDB_API_KEY=${WANDB_API_KEY:-}
 WANDB_MODE=offline
 WANDB_PROJECT=${WANDB_PROJECT:-hsi-pi-vae}
 WANDB_ENTITY=${WANDB_ENTITY:-}
+HPC_COMPUTE_REPO_ROOT=${HPC_COMPUTE_REPO_ROOT:-${HPC_PROJECT_DIR}}
+HPC_LOGIN_REPO_ROOT=${HPC_LOGIN_REPO_ROOT:-}
+HPC_USER=${HPC_USER:-}
+HPC_HOST=${HPC_HOST:-}
+PUSH_RESULTS_FROM_JOB=${PUSH_RESULTS_FROM_JOB:-0}
 EOF
 chmod 600 .env
 
-# --- 4. directories -------------------------------------------------------
-mkdir -p logs checkpoints wandb model
+# --- 3. directories -------------------------------------------------------
+mkdir -p logs checkpoints wandb model model_smoke logs/pending_push logs/grid_done
 : > logs/notify_queue.jsonl   # ensure it exists
 
-# --- 5. exec bits ---------------------------------------------------------
+# --- 4. exec bits ---------------------------------------------------------
 chmod +x scripts/*.sh scripts/*.pbs 2>/dev/null || true
 
 echo ">>> bootstrap complete."
-python - <<'PY'
+"${VENV_PY}" -c "
 import sys
-print(f"    python : {sys.version.splitlines()[0]}")
+print(f'    python : {sys.version.splitlines()[0]}')
 import torch
-print(f"    torch  : {torch.__version__}  cuda_available: {torch.cuda.is_available()}")
-PY
+print(f'    torch  : {torch.__version__}  cuda_available: {torch.cuda.is_available()}')
+"

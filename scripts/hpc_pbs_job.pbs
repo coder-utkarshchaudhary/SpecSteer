@@ -15,23 +15,30 @@
 # submission. Do NOT hard-code them here.
 #
 # Requires the following env from qsub -v:
-#   HPC_PROJECT_DIR   absolute path to the project on the HPC
-#   EPOCHS            number of epochs to train (100 for full grid)
+#   HPC_PROJECT_DIR         absolute path to the project ON THE COMPUTE NODE
+#                           (kept for back-compat; same as HPC_COMPUTE_REPO_ROOT)
+#   HPC_COMPUTE_REPO_ROOT   same path, preferred name
+#   HPC_LOGIN_REPO_ROOT     absolute path to the project on the LOGIN node —
+#                           where this job's results get pushed back to
+#   HPC_USER / HPC_HOST     login node ssh target (for the results push)
+#   PUSH_RESULTS_FROM_JOB   "1" to push results at slot end; default "0"
+#   EPOCHS                  number of epochs to train (100 for full grid)
 #
 # Per-array-element files:
 #   logs/pbs_${PBS_ARRAY_ID}_${PBS_ARRAY_INDEX}.out      combined stdout+err
 #   logs/train_<model>_<loss>_<dataset>_<ts>.log         RunLogger file
-#   checkpoints/<DATASET>/<name>.pt                      best-val checkpoint
+#   model/<DATASET>/<name>.pt (or model_smoke/... in smoke mode)  best-val checkpoint
 
 set -uo pipefail
 
 # ---- resolve env ---------------------------------------------------------
 : "${HPC_PROJECT_DIR:?HPC_PROJECT_DIR must be passed via qsub -v}"
+: "${HPC_COMPUTE_REPO_ROOT:=${HPC_PROJECT_DIR}}"
 : "${EPOCHS:=100}"
 : "${SMOKE_MODE:=0}"     # 1 -> writes to model_smoke/, uses SMOKE_EPOCHS
 : "${SMOKE_EPOCHS:=5}"
 
-cd "${HPC_PROJECT_DIR}"
+cd "${HPC_COMPUTE_REPO_ROOT}"
 
 ARRAY_IDX="${PBS_ARRAY_INDEX:-1}"
 JOB_ID="${PBS_JOBID:-standalone}"
@@ -84,16 +91,24 @@ echo "  epochs     : ${RUN_EPOCHS}"
 # ---- skip if a ckpt is already present -----------------------------------
 if [[ -s "${CKPT_PATH}" ]]; then
     echo ">>> [skip] ${CKPT_PATH} exists; nothing to do."
+    # Still worth a push attempt: this slot's ckpt could exist locally on the
+    # compute node from an earlier partial run that never made it back to the
+    # login node (e.g. a prior push/collector failure). Cheap and idempotent.
+    export HPC_COMPUTE_REPO_ROOT
+    bash scripts/hpc_push_results.sh "${ARRAY_IDX}" "0" "${CKPT_ROOT}" "${DATASET}" "${CKPT_NAME}" || true
     exit 0
 fi
 
-# ---- activate env --------------------------------------------------------
-if [[ ! -d .venv ]]; then
-    echo "!!! .venv/ missing. Run scripts/hpc_bootstrap.sh first."
+# ---- resolve env (never `source .venv/bin/activate` — see hpc_bootstrap.sh
+# header for why: a rsynced venv's activate script has a dead VIRTUAL_ENV
+# path baked in and silently no-ops, leaving `python` pointing at the wrong
+# interpreter. .venv/bin/python IS relocatable — always invoke it by
+# absolute path instead.) --------------------------------------------------
+VENV_PY="$(pwd)/.venv/bin/python"
+if [[ ! -x "${VENV_PY}" ]]; then
+    echo "!!! ${VENV_PY} missing/not executable. Run scripts/hpc_bootstrap.sh first."
     exit 4
 fi
-# shellcheck source=/dev/null
-source .venv/bin/activate
 
 # Load .env produced by bootstrap (for WANDB_MODE etc.). Never fail on missing.
 if [[ -f .env ]]; then
@@ -106,9 +121,10 @@ fi
 export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}:${PYTHONPATH:-}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export PATH="$(pwd)/.venv/bin:${PATH}"   # convenience only — never depended on
 
-echo ">>> python: $(which python)"
-python -c "import torch; print(f'torch {torch.__version__}  cuda={torch.cuda.is_available()}  ndev={torch.cuda.device_count()}')"
+echo ">>> python: ${VENV_PY}"
+"${VENV_PY}" -c "import torch; print(f'torch {torch.__version__}  cuda={torch.cuda.is_available()}  ndev={torch.cuda.device_count()}')"
 
 # ---- launch training -----------------------------------------------------
 # --compile is OFF by default: torch.compile occasionally trips on model
@@ -121,7 +137,7 @@ NUM_WORKERS="${PBS_NCPUS_PER_JOB:-8}"
 IFS=' ' read -r -a EXTRA_TRAIN_ARR <<< "${EXTRA_TRAIN_ARGS:-}"
 
 set +e
-python train/train.py \
+"${VENV_PY}" train/train.py \
     --model "${MODEL}" \
     --dataset "${DATASET}" \
     --loss "${LOSS}" \
@@ -142,4 +158,9 @@ else
     echo " PBS array element ${ARRAY_IDX} — FAIL (rc=${rc})"
 fi
 echo "=========================================="
+
+# ---- push results back to the login node (best-effort, never masks rc) ---
+export HPC_COMPUTE_REPO_ROOT
+bash scripts/hpc_push_results.sh "${ARRAY_IDX}" "${rc}" "${CKPT_ROOT}" "${DATASET}" "${CKPT_NAME}" || true
+
 exit ${rc}

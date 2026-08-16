@@ -2,7 +2,8 @@
 # scripts/hpc_smoke_watcher.sh
 # ----------------------------
 # Lab-side background watcher launched by scripts/hpc_launch.sh right after
-# the smoke job is submitted. Responsibilities:
+# the smoke job is submitted (two-hop: qstat/qsub run via compute_ssh, from
+# scripts/hpc_common.sh, since only the compute node has PBS). Responsibilities:
 #
 #   1. Poll qstat for the smoke PBS job until it reaches a terminal state.
 #   2. If the smoke run succeeded:
@@ -12,7 +13,8 @@
 #        - Write the full job id to logs/hpc_jobid_full
 #        - Send Telegram: "full grid launched, JOBID=..."
 #   3. If the smoke run failed:
-#        - rsync HPC logs back
+#        - Fetch the failing log's tail directly via compute_ssh (no rsync —
+#          the lab machine cannot reach the compute node's filesystem)
 #        - Send Telegram with the log tail and the exception
 #        - Do NOT submit the full array. Exit.
 #
@@ -37,11 +39,15 @@ fi
 # shellcheck source=/dev/null
 set -a; source "${CONFIG_FILE}"; set +a
 
-HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_HOME}/prism}"
+# shellcheck source=hpc_common.sh
+source "${SCRIPT_DIR}/hpc_common.sh"
+resolve_hpc_roots
+
 SMOKE_DELAY_SECS="${SMOKE_DELAY_SECS:-600}"      # 10 min default
 SMOKE_POLL_INTERVAL="${SMOKE_POLL_INTERVAL:-30}" # every 30 s
 FULL_ARRAY_RANGE="${FULL_ARRAY_RANGE:-1-28}"
 EPOCHS="${EPOCHS:-100}"
+PUSH_RESULTS_FROM_JOB="${PUSH_RESULTS_FROM_JOB:-0}"
 
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
@@ -59,13 +65,6 @@ fi
 
 log() {
     printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${WATCHER_LOG}"
-}
-
-# Run a remote command in a LOGIN shell so PBS binaries (qsub/qstat) are on
-# PATH — IITD's PBS Pro wires them via /etc/profile.d, which a plain
-# non-interactive ssh never sources. See hpc_launch.sh:hpc_ssh for detail.
-hpc_ssh() {
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "$1"
 }
 
 _notify() {
@@ -87,30 +86,15 @@ echo "SMOKE_JOBID=${SMOKE_JOBID}" > "${STATE_FILE}"
 echo "STATE=polling" >> "${STATE_FILE}"
 
 # ---------------------------------------------------------------------------
-# Poll qstat until every array element is terminal.
+# Poll qstat until every array element is terminal (two-hop, via compute_ssh).
 # ---------------------------------------------------------------------------
-#
-# Output of `qstat -Jt <jobid>` on PBS Pro (array):
-#   Job id  Name  User  Time Use  S  Queue
-#   ------  ----  ----  --------  -  -----
-#   ...[]   ...   ...   ...       F  ...           <-- master
-#   ...[1]  ...   ...   ...       F  ...           <-- element 1
-#
-# We fall back to `qstat -x -f -F json <jobid>` for a structured status if
-# available; else parse the plain `qstat -t` table. Element is terminal iff
-# state is F, X, or the row is absent.
-#
-# We detect exit status by looking at the ExitStatus of the master job via
-# `qstat -f -x <jobid> | grep Exit_status:` — PBS aggregates array element
-# exit codes into the master's exit status (non-zero if any element failed).
-
 _qstat_master_state() {
-    hpc_ssh "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *job_state = / {print \$3; exit}'" \
+    compute_ssh "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *job_state = / {print \$3; exit}'" \
         || echo "?"
 }
 
 _qstat_master_exit() {
-    hpc_ssh "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *Exit_status = / {print \$3; exit}'" \
+    compute_ssh "qstat -f -x '${SMOKE_JOBID}' 2>/dev/null | awk '/^ *Exit_status = / {print \$3; exit}'" \
         || echo ""
 }
 
@@ -131,14 +115,13 @@ while true; do
 done
 
 # ---------------------------------------------------------------------------
-# Rsync the smoke logs back regardless of outcome (small; helps debugging).
+# Fetch the smoke log's tail directly via compute_ssh — the lab machine
+# cannot rsync from the compute node's filesystem (only the login node can
+# reach it), so read the file remotely instead of pulling it locally.
 # ---------------------------------------------------------------------------
-log "pulling smoke logs back"
-mkdir -p "${LOG_DIR}/smoke"
-rsync -a --info=progress2 \
-    "${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/logs/" \
-    "${LOG_DIR}/smoke/" >> "${WATCHER_LOG}" 2>&1 || \
-    log "!! smoke log rsync failed"
+log "fetching smoke log tail (two-hop)"
+smoke_tail="$(compute_ssh "ls -t '${HPC_COMPUTE_REPO_ROOT}/logs'/pbs_*_1.out 2>/dev/null | head -1 | xargs -r tail -n 60" 2>/dev/null)"
+smoke_log_name="$(compute_ssh "ls -t '${HPC_COMPUTE_REPO_ROOT}/logs'/pbs_*_1.out 2>/dev/null | head -1" 2>/dev/null | tr -d '[:space:]')"
 
 # ---------------------------------------------------------------------------
 # Decide: success (exit_code == 0) or failure (anything else / unknown).
@@ -156,15 +139,15 @@ if [[ "${exit_code}" == "0" ]]; then
     if [[ -n "${HPC_PROJECT_CODE:-}" ]]; then
         qsub_extra="-P ${HPC_PROJECT_CODE}"
     fi
-    full_cmd="cd '${HPC_PROJECT_DIR}' && qsub \
+    full_cmd="cd '${HPC_COMPUTE_REPO_ROOT}' && qsub \
         -q '${HPC_QUEUE}' \
         -l '${HPC_SELECT}' \
         -l walltime='${HPC_WALLTIME}' \
         -J '${FULL_ARRAY_RANGE}' \
         ${qsub_extra} \
-        -v HPC_PROJECT_DIR='${HPC_PROJECT_DIR}',EPOCHS='${EPOCHS}',SMOKE_MODE=0,WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
+        -v HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}',HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}',HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}',HPC_USER='${HPC_USER}',HPC_HOST='${HPC_HOST}',PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}',EPOCHS='${EPOCHS}',SMOKE_MODE=0,WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
         scripts/hpc_pbs_job.pbs"
-    full_jobid="$(hpc_ssh "${full_cmd}" 2>&1 | tail -1 | tr -d '[:space:]')"
+    full_jobid="$(compute_ssh "${full_cmd}" 2>&1 | tail -1 | tr -d '[:space:]')"
     if [[ -z "${full_jobid}" ]]; then
         log "!! full array submit produced empty jobid"
         _notify "[FAIL] full array submit failed after smoke passed. Watcher log: ${WATCHER_LOG}"
@@ -194,13 +177,8 @@ if [[ "${exit_code}" == "0" ]]; then
 else
     echo "STATE=smoke_failed" >> "${STATE_FILE}"
     log "SMOKE FAILED — not launching full grid"
-    # Find the most recent pbs_*_1.out and grab its tail.
-    tail_txt="(no log found)"
-    latest_log="$(ls -t "${LOG_DIR}/smoke"/pbs_*_1.out 2>/dev/null | head -1 || true)"
-    if [[ -n "${latest_log}" ]]; then
-        tail_txt="$(tail -n 60 "${latest_log}")"
-    fi
+    tail_txt="${smoke_tail:-(no log found)}"
     _notify "$(printf '[FAIL] smoke run failed (job %s, exit=%s). Full grid NOT submitted.\nTail of %s:\n%s' \
-        "${SMOKE_JOBID}" "${exit_code:-?}" "${latest_log:-?}" "${tail_txt}")"
+        "${SMOKE_JOBID}" "${exit_code:-?}" "${smoke_log_name:-?}" "${tail_txt}")"
     exit 3
 fi

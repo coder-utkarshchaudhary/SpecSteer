@@ -2,7 +2,26 @@
 
 This document walks you through everything from "I just sat down at the lab machine" to "checkpoints are back and Utkarsh is notified." Read it top-to-bottom like a recipe — every step depends on the ones before it.
 
-You will touch exactly one script: **`bash scripts/hpc_launch.sh`**. Everything else is automated. If something breaks and this doc doesn't cover it, don't improvise — call Utkarsh.
+You will touch exactly two scripts: **`bash scripts/hpc_preflight.sh`** (read-only checks, run first) and **`bash scripts/hpc_launch.sh`** (does the actual work). Everything else is automated. If something breaks and this doc doesn't cover it, don't improvise — call Utkarsh.
+
+---
+
+## The two-node topology (read this once, it explains everything below)
+
+IITD's HPC is actually **two separate machines with two separate filesystems**:
+
+- The **login node** — what `HPC_HOST` in the config points at. Reached directly from the
+  lab as `ssh ${HPC_USER}@${HPC_HOST}`. This machine does **not** have `qsub` — it's purely a
+  staging/jump host.
+- The **compute node** — reached by first `ssh`-ing into the login node, and from *there*
+  running `ssh hpc` (or whatever `HPC_INNER_HOST` is set to in the config). This is where jobs
+  actually run and where `qsub`/`qstat`/`qdel` live.
+
+Everything in `scripts/hpc_launch.sh` therefore happens in two hops: repo/venv/data get pushed
+lab → login → compute; results come back compute → login → lab; Telegram notifications go
+lab → login → compute (a tunnel) and compute → login → lab (the messages themselves). You never
+have to manage this by hand — `scripts/hpc_common.sh` wraps both hops for every script — but
+when something looks stuck, knowing which hop it's stuck on is the first diagnostic question.
 
 ---
 
@@ -58,10 +77,24 @@ ssh YOUR_HPC_USER@THE_HPC_HOST 'echo ok'
 ```
 
 If it prints `ok` without asking for a password, you're set. If it still asks for a password, something went wrong — ask Kavinder or Utkarsh.
-Finally, log in to Weights & Biases on the lab machine (Utkarsh will give you the API key privately) using a new terminal window. Ensure the .prism-venv is activates using conda (`conda activate .prism-venv`)
+
+**Also verify the second hop** — once you're logged into the login node, `ssh hpc` (or whatever
+`HPC_INNER_HOST` is set to) must work *without a password* too, since that's how the launcher
+reaches the compute node where `qsub` actually lives:
 
 ```bash
-pip install wandb
+ssh YOUR_HPC_USER@THE_HPC_HOST 'ssh hpc echo ok'
+```
+
+If that doesn't print `ok`, ask Kavinder — the login node's own SSH key needs to be authorized
+on the compute node, which is a one-time setup on the HPC side, not something this repo's
+scripts can fix.
+
+Finally, log in to Weights & Biases on the lab machine (Utkarsh will give you the API key privately) using a new terminal window. This repo's Python environment lives in `.venv/` (a plain venv, not conda) — activate it first:
+
+```bash
+source .venv/bin/activate
+pip install wandb   # only if wandb isn't already in .venv
 wandb login
 # Paste the API key when prompted.
 ```
@@ -83,7 +116,9 @@ Open `scripts/hpc_config.env` in VS Code. Every line that says `FILL_ME` needs t
 - `HPC_USER` — your IITD login username.
 - `HPC_HOST` — the HPC login node (typically `padum.iitd.ac.in`). Confirm with Kavinder.
 - `HPC_HOME` — run `ssh YOUR_USER@THE_HOST 'echo $HOME'` and paste what it prints.
-- `HPC_SCRATCH` — run `ssh YOUR_USER@THE_HOST 'ls -d /scratch/YOUR_USER'` and paste the path.
+- `HPC_INNER_HOST` — what you type after `ssh` once you're already logged into the login node to
+  reach the compute node (default `hpc`). Verify with
+  `ssh YOUR_USER@THE_HOST 'ssh HPC_INNER_HOST echo ok'` — see "Before you begin" above.
 
 **PBS queue (ask Utkarsh):**
 
@@ -116,11 +151,25 @@ The launcher will rsync `data/processed/` to the HPC. Confirm it exists locally:
 ls "${LAB_DATA_ROOT}"
 ```
 
-You should see subdirectories: `IIRS`, `M3`, `AVIRIS`, `crims`. If any are missing, **stop and call Utkarsh** — do not proceed without the full dataset.
+You should see subdirectories: `IIRS`, `M3`, `AVIRIS`, `CRIMS` (exact case — a lowercase `crims` or `m3` will silently fail the on-HPC data check later). If any are missing, **stop and call Utkarsh** — do not proceed without the full dataset.
 
 ---
 
-## Step 5 — Launch
+## Step 5 — Preflight (read-only, always run this first)
+
+```bash
+bash scripts/hpc_preflight.sh
+```
+
+This checks, without changing anything: that you can reach the login node, that the login node
+can reach the compute node, that both nodes have the tools the launcher needs, and — if this
+repo's `.venv/` has already been pushed to the HPC — that it actually imports `torch` and
+`wandb` there. Fix anything it reports as `FAIL` before continuing; `WARN` lines are fine to
+proceed past (they're usually "not pushed yet," which is expected on a first run).
+
+---
+
+## Step 6 — Launch
 In a new terminal window run the following command from repo root:
 ```bash
 bash scripts/hpc_launch.sh
@@ -128,15 +177,22 @@ bash scripts/hpc_launch.sh
 
 That's it. The script does everything automatically:
 
-1. Checks WiFi, config, SSH access, local data.
-2. Downloads pip wheels for the HPC platform (5–15 min first time; instant on subsequent runs).
-3. Rsyncs the repo, wheels, and processed data to the HPC (**this is the slow step — 1 to 3 hours over lab WiFi**).
-4. Runs the HPC bootstrap (creates the Python environment from the wheels, offline).
-5. Starts the Telegram relay on the lab machine.
-6. Opens a reverse SSH tunnel so HPC notifications reach the lab. (This might ask for the lab system password, I am not sure yet. If it does just ask any faculty.)
-7. Starts the login-node message forwarder inside tmux on the HPC.
-8. Submits a **smoke run** — one slot, 5 epochs — to verify the environment works.
-9. Starts a background watcher that waits for the smoke to finish.
+1. Checks WiFi, config, SSH access to both nodes, local data.
+2. Skips the pip-wheel build entirely (this repo ships a prebuilt `.venv/` — see
+   `USE_SHIPPED_VENV` in the config; only set that to `0` if Utkarsh tells you to).
+3. Rsyncs the repo, `.venv/`, and processed data from the **lab to the login node** — each of
+   the three is pushed independently and only if it's missing or looks broken on the login node
+   (**this is the slow step when it does run — 1 to 3 hours over lab WiFi for the data**).
+4. Rsyncs the same three things again, this time from the **login node to the compute node**
+   (the two machines don't share a filesystem).
+5. Runs the HPC bootstrap **on the compute node** (verifies the shipped `.venv` works; only
+   falls back to an offline pip install if you set `USE_SHIPPED_VENV=0`).
+6. Starts the Telegram relay on the lab machine, a reverse tunnel chained lab → login → compute,
+   a message forwarder in tmux **on the compute node**, and a results collector in tmux **on the
+   login node**. (Opening the tunnel might ask for the lab system password — if it does, ask any
+   faculty.)
+7. Submits a **smoke run** — one slot, 5 epochs — to verify the environment works.
+8. Starts a background watcher that waits for the smoke to finish.
 
 **What happens after the smoke:**
 
@@ -159,13 +215,16 @@ As long as you see the rsync progress bar moving, things are fine. Once you've c
 
 ---
 
-## Step 6 — Monitor
+## Step 7 — Monitor
 
 Utkarsh will receive Telegram messages throughout the run:
 
 - **[START]** — one per run, showing the hyperparameters.
 - **[HB]** — every 10 epochs, with current loss / MSE / SAM / KLD metrics, wall time, and ETA.
 - **[OK]** / **[FAIL]** / **[STOP]** — when a run finishes.
+- **[XFER]** — whether that run's checkpoint/logs made it from the compute node back to the
+  login node (only appears if `PUSH_RESULTS_FROM_JOB=1`; otherwise the login-node collector
+  moves results on its own timer and you won't see this per-run).
 
 If you want to check status from the lab machine:
 
@@ -173,33 +232,37 @@ If you want to check status from the lab machine:
 bash scripts/hpc_launch.sh --status
 ```
 
-This shows whether the tunnel, relay, watcher, and PBS job are alive.
+This shows whether the tunnel, relay, both watchers, the compute-node forwarder, the login-node
+collector, and the PBS job are alive — it handles the two-hop `qstat` for you.
 
-If you want to watch logs on the HPC:
+If you want to watch logs on the HPC, you now need two hops (login, then compute):
 
 ```bash
-# PBS array queue (use -t so qstat is on PATH via the login shell):
-ssh -t YOUR_USER@THE_HOST 'qstat -t $(cat ~/prism/logs/hpc_jobid)'
+# PBS array queue:
+ssh -t YOUR_USER@THE_HOST 'ssh hpc "qstat -t \$(cat ~/prism/logs/hpc_jobid)"'
 
-# A specific run's log:
-ssh YOUR_USER@THE_HOST 'tail -f ~/prism/logs/train_*.log'
+# A specific run's log (lives on the COMPUTE node, pushed/pulled to login over time):
+ssh YOUR_USER@THE_HOST 'ssh hpc "tail -f ~/prism/logs/train_*.log"'
 
-# The forwarder (detach with Ctrl-b then d):
-ssh YOUR_USER@THE_HOST 'tmux attach -t specsteer_forwarder'
+# The compute-node forwarder (detach with Ctrl-b then d):
+ssh YOUR_USER@THE_HOST 'ssh hpc "tmux attach -t prism_forwarder"'
+
+# The login-node collector:
+ssh YOUR_USER@THE_HOST 'tmux attach -t prism_collector'
 ```
 
 ---
 
-## Step 7 — Pull results back
+## Step 8 — Pull results back
 
-When all 28 runs are done (you'll get 28 `[OK]` messages on Telegram, or check `qstat` shows them all finished):
+When all 28 runs are done (you'll get 28 `[OK]` messages on Telegram, or check `qstat` shows them all finished — the login-node collector will already have pulled most of them back automatically as each slot finished):
 
 ```bash
-cd ~/specsteer
 bash scripts/hpc_pull_results.sh
 ```
 
-This rsyncs the checkpoints, wandb offline runs, and logs from the HPC to the lab machine.
+This rsyncs the checkpoints, wandb offline runs, and logs from the HPC **login node** to the lab
+machine (final catch-all sweep — the grid watcher already did this per-slot as runs finished).
 
 Then push the wandb runs to the server:
 
@@ -226,7 +289,9 @@ If something is wrong and you need to kill everything:
 bash scripts/hpc_launch.sh --stop
 ```
 
-This kills the local relay, tunnel, and watcher; kills the HPC forwarder tmux session; and `qdel`s both the smoke and full PBS jobs. All array elements terminate.
+This kills the local relay and both watchers; kills the login→compute tunnel and the login-node
+collector tmux session; kills the compute-node forwarder tmux session; and `qdel`s both the
+smoke and full PBS jobs (via the two-hop `compute_ssh`). All array elements terminate.
 
 ---
 
@@ -234,25 +299,31 @@ This kills the local relay, tunnel, and watcher; kills the HPC forwarder tmux se
 
 **"cannot ssh to ..."** — Passwordless key auth isn't set up. Go back to Step 2.
 
-**Rsync stalls** — Reconnect to `mlr lab 5g`. Re-run `bash scripts/hpc_launch.sh` — it resumes.
+**"login node cannot reach the compute node"** — The second hop (`ssh hpc` from the login node) isn't set up passwordlessly, or `HPC_INNER_HOST` is wrong. Run `bash scripts/hpc_preflight.sh` — probe 2 dumps the login node's `~/.ssh/config` entry for the name you configured. Ask Kavinder to fix key auth between the two HPC nodes; this repo's scripts can't do that part for you.
 
-**qsub says "no matching queue"** — Wrong `HPC_QUEUE` in the config. Run `ssh -t YOUR_USER@HOST 'qstat -q'` and pick a valid GPU queue. Ask Utkarsh.
+**Rsync stalls** — Reconnect to `mlr lab 5g`. Re-run `bash scripts/hpc_launch.sh` — it resumes, and it also skips any of the three pushes (repo/.venv/data) that already landed intact, on both the login *and* the compute node.
+
+**qsub says "no matching queue"** — Wrong `HPC_QUEUE` in the config. Run `ssh -t YOUR_USER@THE_HOST 'ssh hpc "qstat -q"'` and pick a valid GPU queue. Ask Utkarsh.
 
 **qsub says "resources not available"** — A100 nodes are busy. PBS will schedule when slots free. Nothing to do.
 
-**"qsub: command not found" / "/opt/pbs/.../bin/qsub: No such file or directory"** — On IITD's PBS Pro the scheduler binaries (`qsub`/`qstat`/`qdel`) are only put on `PATH` by the login profile (`/etc/profile.d`), which a plain non-interactive `ssh HOST 'cmd'` does not source. The launcher and watchers handle this internally (they run PBS commands through a login shell). If you run `qstat`/`qsub` by hand, use `ssh -t YOUR_USER@HOST '...'` (the `-t` gives you a login shell) — a plain `ssh YOUR_USER@HOST 'qstat ...'` will report the binary as missing even though it exists.
+**"qsub: command not found"** — Expected if you ran `qsub` by hand on the *login* node — it genuinely isn't there; you have to be on the compute node. From the login node: `ssh hpc 'qstat -q'`. If you're already on the compute node and still see this, PBS Pro's scheduler binaries are only put on `PATH` by the login profile (`/etc/profile.d`), which a plain non-interactive `ssh HOST 'cmd'` doesn't source — `scripts/hpc_common.sh`'s `compute_ssh` handles this internally (login-shell + a `PBS_EXEC` PATH fallback), so the launcher/watchers never hit it; only matters if you're running commands by hand.
 
-**"reverse tunnel failed to start"** — Two causes. Either your lab→HPC SSH key has a passphrase (the backgrounded tunnel can't type it), or the HPC login node blocks port-forwarding. For the first: make a passphraseless key, or run `eval $(ssh-agent); ssh-add ~/.ssh/id_ed25519` once, then re-launch. For the second, call Utkarsh — it needs a config change on his side. Note: the tunnel logs in *to the HPC* using your HPC key — it never asks for the lab machine's password.
+**"shipped .venv failed to import torch/wandb"** — Almost always means the `.venv` push got its excludes wrong and silently dropped a site-packages subfolder (the venv's `wandb/`, `logs/`, `model/` etc. subdirectories share names with repo-root excludes). `scripts/hpc_launch.sh` now anchors those excludes and gives `.venv/` its own rsync pass, so a fresh push should fix it — re-run `bash scripts/hpc_launch.sh`, then `bash scripts/hpc_preflight.sh` (probe 4) to confirm. If the venv's base Python (check `.venv/pyvenv.cfg`'s `home =` line) genuinely doesn't exist on the compute node, tell Utkarsh — the venv needs to be rebuilt for that cluster's Python, or `USE_SHIPPED_VENV` needs to go back to `0` for the offline-wheels path.
 
-**"tunnel is up but the HPC could not reach the relay"** — The launcher warns about this but keeps going. Telegram messages are not lost — they queue on the HPC in `logs/notify_queue.jsonl` and flush automatically once the tunnel works. If messages never arrive, the login node is blocking forwarding; tell Utkarsh.
+**"reverse tunnel failed to start"** — Two causes for the lab→login leg. Either your lab→HPC SSH key has a passphrase (the backgrounded tunnel can't type it), or the login node blocks port-forwarding. For the first: make a passphraseless key, or run `eval $(ssh-agent); ssh-add ~/.ssh/id_ed25519` once, then re-launch. For the second, call Utkarsh — it needs a config change on his side. Note: the tunnel logs in *to the HPC* using your HPC key — it never asks for the lab machine's password. There's now a second, inner leg (login→compute) supervised in a login-node tmux session (`prism_inner_tunnel`) — if Telegram works but is delayed, that's usually the one that needs a poke; `bash scripts/hpc_launch.sh --status` shows both.
 
-**No Telegram messages arriving** — Check `logs/relay.log` and the tunnel: `bash scripts/hpc_launch.sh --status`. If the tunnel died, just re-run the launcher — it restarts it.
+**"tunnel is up but the compute node could not reach the relay"** — The launcher warns about this but keeps going. Telegram messages are not lost — they queue on the compute node in `logs/notify_queue.jsonl` and flush automatically once the tunnel works. If messages never arrive, one of the two hops is blocking forwarding; tell Utkarsh.
 
-**Smoke failed** — Read the Telegram failure message. Screenshot it and send to Utkarsh. Do not attempt to fix code yourself.
+**No Telegram messages arriving** — Check `logs/relay.log` and `bash scripts/hpc_launch.sh --status`. If a tunnel died, just re-run the launcher — it restarts both. Note: if `bash scripts/hpc_preflight.sh` (probe 5) found the compute node has direct outbound internet, the launcher skips the whole tunnel/relay/forwarder/collector setup and Telegram goes straight from the compute node — in that mode `--status` won't show a tunnel and that's correct, not a failure.
 
-**"wheels/ empty" during bootstrap** — The `PIP_PYTHON_VERSION` in the config doesn't match the HPC's python. Run `ssh YOUR_USER@HOST 'python3 --version'` and update `PIP_PYTHON_VERSION` and `PIP_ABI` to match.
+**Smoke failed** — Read the Telegram failure message (its log tail is fetched directly from the compute node, no rsync needed). Screenshot it and send to Utkarsh. Do not attempt to fix code yourself.
+
+**"wheels/ empty" during bootstrap** — Only relevant if `USE_SHIPPED_VENV=0` in the config (the shipped-venv path, the default, never touches wheels/). If you did set it to `0`: the `PIP_PYTHON_VERSION` in the config doesn't match the HPC's python. Run `ssh YOUR_USER@THE_HOST 'ssh hpc "python3 --version"'` and update `PIP_PYTHON_VERSION` and `PIP_ABI` to match.
 
 **A single run failed but others passed** — That's expected for edge cases. The other 27 runs continue independently. Tell Utkarsh about the failure; he'll decide whether to re-run it.
+
+**Results aren't showing up on the lab machine even though Telegram says [OK]** — Results move compute→login either immediately (if `PUSH_RESULTS_FROM_JOB=1` and that push succeeds) or within `COLLECTOR_INTERVAL` seconds (default 120s) via the login-node collector tmux session, which is the fallback path and the one that's always eventually correct. Then the lab-side grid watcher pulls login→lab on its own poll cycle (`GRID_POLL_INTERVAL`, default 600s). So there can be a few-minutes lag between "[OK]" and the file appearing locally — that's normal, not a bug. If it's been much longer, check `ssh YOUR_USER@THE_HOST 'tmux attach -t prism_collector'` for errors.
 
 ---
 
@@ -260,12 +331,13 @@ This kills the local relay, tunnel, and watcher; kills the HPC forwarder tmux se
 
 1. Connect to `mlr lab 5g`.
 2. `git checkout hpc && git pull origin hpc`.
-3. One-time only: install packages, SSH keys, `wandb login`.
-4. Fill `scripts/hpc_config.env` (ask Utkarsh / Kavinder for every `FILL_ME`).
+3. One-time only: install packages, SSH keys to **both** HPC nodes, `wandb login`.
+4. Fill `scripts/hpc_config.env` (ask Utkarsh / Kavinder for every `FILL_ME`, including `HPC_INNER_HOST`).
 5. Confirm data exists at `LAB_DATA_ROOT`.
-6. `bash scripts/hpc_launch.sh` — sit for 1–1.5 h during rsync.
-7. Wait for Telegram messages.
-8. `bash scripts/hpc_pull_results.sh` + `wandb sync wandb/offline-run-*`.
-9. Tell Utkarsh.
+6. `bash scripts/hpc_preflight.sh` — fix anything marked `FAIL`.
+7. `bash scripts/hpc_launch.sh` — sit for 1–1.5 h if the data push actually runs (it's skipped if already present on both remote nodes).
+8. Wait for Telegram messages.
+9. `bash scripts/hpc_pull_results.sh` + `wandb sync wandb/offline-run-*`.
+10. Tell Utkarsh.
 
 If it's not in this list, don't do it. If something fails, call Utkarsh.

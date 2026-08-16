@@ -4,14 +4,21 @@
 # Lab-side background watcher launched by scripts/hpc_smoke_watcher.sh right
 # after it submits the full 28-run array. Responsibilities:
 #
-#   1. Poll `qstat -f -x -t <full_jobid>` for the per-array-element state of
-#      every slot in the grid.
-#   2. The moment a slot (array index) goes terminal (F/X), immediately pull
-#      ONLY that slot's payload back to the lab machine:
+#   1. Each poll cycle, first check the LOGIN node for
+#      logs/grid_done/<idx> markers (written either by scripts/hpc_push_results.sh
+#      right after a successful compute->login push, or by the login-node
+#      collector tmux session — see scripts/hpc_collector.sh). Any slot with
+#      a marker is pulled immediately, without waiting on qstat.
+#   2. Otherwise, poll `qstat -f -x -t <full_jobid>` (two-hop, via
+#      scripts/hpc_common.sh's compute_ssh) for the per-array-element state of
+#      every slot in the grid, and pull any slot that just went terminal.
+#   3. Pulling a slot means:
 #        - bash scripts/hpc_pull_results.sh --only ckpt   (model/ + checkpoints/)
 #        - bash scripts/hpc_pull_results.sh --only logs   (pbs_*.out + train logs)
-#      and send a Telegram ping with the slot's (model, dataset, loss, exit).
-#   3. Once every slot in the range is accounted for, do one final
+#      — both of which pull from the LOGIN node, never the compute node
+#      directly (the lab machine cannot reach the compute node's filesystem).
+#      Then send a Telegram ping with the slot's (model, dataset, loss, exit).
+#   4. Once every slot in the range is accounted for, do one final
 #      `--only all` sweep (wandb/ included) and exit.
 #
 # Why per-slot instead of one pull at the very end: the full grid runs for
@@ -44,8 +51,11 @@ fi
 # shellcheck source=/dev/null
 set -a; source "${CONFIG_FILE}"; set +a
 
-HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_HOME}/prism}"
-GRID_POLL_INTERVAL="${GRID_POLL_INTERVAL:-60}"     # every 60s — a 24h array job doesn't need 30s polling
+# shellcheck source=hpc_common.sh
+source "${SCRIPT_DIR}/hpc_common.sh"
+resolve_hpc_roots
+
+GRID_POLL_INTERVAL="${GRID_POLL_INTERVAL:-600}"    # a 24h array job doesn't need 30s polling
 GRID_EMPTY_STREAK_MAX=3                            # consecutive failed/empty qstat queries before giving up on a slot
 
 LOG_DIR="${REPO_ROOT}/logs"
@@ -81,13 +91,6 @@ log() {
     printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${WATCHER_LOG}"
 }
 
-# Run a remote command in a LOGIN shell so PBS binaries (qstat) are on PATH —
-# IITD's PBS Pro wires them via /etc/profile.d, which a plain non-interactive
-# ssh never sources. See hpc_launch.sh:hpc_ssh for detail.
-hpc_ssh() {
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "$1"
-}
-
 _notify() {
     local text="$1"
     (
@@ -107,12 +110,11 @@ echo "STATE=polling" >> "${STATE_FILE}"
 
 # ---------------------------------------------------------------------------
 # One qstat query -> lines "<idx> STATE <s>" / "<idx> EXIT <code>", one pair
-# per array element currently known to PBS. Mirrors the field-based parsing
-# hpc_smoke_watcher.sh already uses for the single-job case, extended to walk
-# every "Job Id: <jobid>[<idx>].host" block in `qstat -f -x -t` output.
+# per array element currently known to PBS. Two-hop via compute_ssh (only
+# the compute node has qstat).
 # ---------------------------------------------------------------------------
 _qstat_slots() {
-    hpc_ssh "qstat -f -x -t '${FULL_JOBID}' 2>/dev/null" | awk '
+    compute_ssh "qstat -f -x -t '${FULL_JOBID}' 2>/dev/null" | awk '
         /^Job Id: / {
             line = $0
             s = index(line, "["); e = index(line, "]")
@@ -122,6 +124,13 @@ _qstat_slots() {
         /^ *job_state = / { if (idx != "") print idx, "STATE", $3 }
         /^ *Exit_status = / { if (idx != "") print idx, "EXIT", $3 }
     '
+}
+
+# List logs/grid_done/<idx> markers already on the LOGIN node — the fast
+# path (hpc_push_results.sh or the collector already moved this slot's
+# results, no need to wait on qstat).
+_login_grid_done() {
+    login_ssh "ls '${HPC_LOGIN_REPO_ROOT}/logs/grid_done/' 2>/dev/null" 2>/dev/null
 }
 
 # pull_slot <idx> <exit_code> — pull one slot's ckpt + logs back, notify, mark done.
@@ -135,14 +144,15 @@ pull_slot() {
     ckpt_name="${rest#*|}"
 
     if [[ "${exitc}" == "0" ]]; then tag="OK"; else tag="FAIL"; fi
-    log "slot ${idx} terminal (exit=${exitc:-?}) -> ${model}/${dataset}/${loss} [${tag}] — pulling"
+    log "slot ${idx} -> ${model}/${dataset}/${loss} [exit=${exitc:-?}] — pulling from login node"
 
     # hpc_pull_results.sh swallows rsync errors internally and always exits 0
     # (it just echoes "!!! ... pull failed" and continues), so its exit code
     # can't tell us whether the checkpoint actually landed. Check the artifact
-    # itself instead. On a crashed run (exitc != 0) there may legitimately be
-    # no checkpoint to wait for, so mark it done regardless — the final
-    # catch-all sweep at the end still re-syncs anything that shows up late.
+    # itself instead. On a crashed run (exitc != 0, or exitc unknown "?" from
+    # the grid_done fast path) there may legitimately be no checkpoint to
+    # wait for, so mark it done regardless — the final catch-all sweep at the
+    # end still re-syncs anything that shows up late.
     bash "${SCRIPT_DIR}/hpc_pull_results.sh" --only ckpt >> "${WATCHER_LOG}" 2>&1
     bash "${SCRIPT_DIR}/hpc_pull_results.sh" --only logs >> "${WATCHER_LOG}" 2>&1
 
@@ -163,6 +173,22 @@ pull_slot() {
 # ---------------------------------------------------------------------------
 empty_streak=0
 while true; do
+    n_pulled=$(ls "${PULLED_DIR}" 2>/dev/null | wc -l | tr -d ' ')
+    if (( n_pulled >= SLOT_TOTAL )); then
+        log "all ${SLOT_TOTAL} slots pulled — done"
+        break
+    fi
+
+    # Fast path: anything the login node already flagged done, pull now.
+    done_now="$(_login_grid_done)"
+    if [[ -n "${done_now}" ]]; then
+        while read -r idx; do
+            [[ -z "${idx}" ]] && continue
+            [[ -f "${PULLED_DIR}/${idx}" ]] && continue
+            pull_slot "${idx}" "?"
+        done <<< "${done_now}"
+    fi
+
     n_pulled=$(ls "${PULLED_DIR}" 2>/dev/null | wc -l | tr -d ' ')
     if (( n_pulled >= SLOT_TOTAL )); then
         log "all ${SLOT_TOTAL} slots pulled — done"
@@ -219,7 +245,7 @@ done
 # Final catch-all sweep: wandb/ + any stragglers in logs/, once the whole
 # array is accounted for.
 # ---------------------------------------------------------------------------
-log "final full pull (wandb + logs + model)"
+log "final full pull (wandb + logs + model + model_smoke)"
 bash "${SCRIPT_DIR}/hpc_pull_results.sh" >> "${WATCHER_LOG}" 2>&1 || log "!! final pull failed"
 
 echo "STATE=grid_complete" >> "${STATE_FILE}"

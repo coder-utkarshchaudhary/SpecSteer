@@ -3,22 +3,39 @@
 # ---------------------
 # Single-entry-point launcher for the IITD HPC ablation run.
 #
+# TOPOLOGY: two separate hosts, two separate filesystems.
+#   LOGIN node   ssh ${HPC_USER}@${HPC_HOST}         — reachable from the lab.
+#                                                       No qsub here.
+#   COMPUTE node ssh ${HPC_INNER_HOST} (from login)  — has qsub. Reached via
+#                                                       scripts/hpc_common.sh's
+#                                                       compute_ssh (two hops).
+#
 # What this does, in order:
 #
-#   1. Sanity checks (wifi SSID, config env, local processed data, ssh key).
-#   2. Downloads pip wheels for the HPC's platform (once, cached).
-#   3. Rsyncs repo + wheels + data/processed/ to the HPC.
-#   4. Runs scripts/hpc_bootstrap.sh on the HPC login node (offline pip install).
-#   5. Starts utils/notify_relay.py on the lab machine (backgrounded).
-#   6. Brings up an autossh reverse tunnel: HPC :$PORT -> lab :$PORT.
-#   7. Starts scripts/notify_forwarder.py on the HPC login node inside tmux.
-#   8. qsubs scripts/hpc_pbs_job.pbs as an array over $HPC_ARRAY_RANGE.
-#   9. Prints the qstat / tail-monitoring commands.
+#   0. Preflight (see scripts/hpc_preflight.sh for the long-form version):
+#      lab->login, login->compute, tool availability, shipped-.venv sanity.
+#   1. Sanity checks (wifi SSID, config env, local processed data).
+#   2. Wheels: skipped when USE_SHIPPED_VENV=1 (default) — the whole point
+#      of shipping a .venv is not needing an offline pip install.
+#   3. lab -> login: THREE independent conditional rsyncs (repo / .venv /
+#      data), each skipped if already present+intact on the login node.
+#   4. login -> compute: same three pushes, run ON the login node (the lab
+#      cannot reach the compute node directly).
+#   5. Runs scripts/hpc_bootstrap.sh on the COMPUTE node.
+#   6. Telegram: relay (lab) + chained reverse tunnels (lab->login->compute)
+#      + forwarder tmux (on the compute node) + collector tmux (on the
+#      login node, pulls finished slots' results back).
+#   7. qsubs scripts/hpc_pbs_job.pbs (via compute_ssh) as a smoke run, then
+#      hands off to scripts/hpc_smoke_watcher.sh for the smoke->full handoff.
+#   8. Prints the qstat / tail-monitoring cheatsheet.
 #
 # Modes:
 #   bash scripts/hpc_launch.sh                 # full run
-#   bash scripts/hpc_launch.sh --dry-run       # sanity + print-only (no qsub, no rsync)
-#   bash scripts/hpc_launch.sh --stop          # kill tunnel + forwarder + relay + qdel array
+#   bash scripts/hpc_launch.sh --resume        # same, but never re-push data
+#                                               #  on a failed count (used by
+#                                               #  the old hpc_train.sh path)
+#   bash scripts/hpc_launch.sh --dry-run       # sanity + print-only
+#   bash scripts/hpc_launch.sh --stop          # kill everything + qdel
 #   bash scripts/hpc_launch.sh --status        # what's alive
 #
 # Everything is driven by scripts/hpc_config.env. Copy .example to .env,
@@ -53,13 +70,15 @@ fatal() { log_err "$*"; exit 1; }
 # Arg parsing
 # ---------------------------------------------------------------------------
 MODE="run"
+RESUME=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) MODE="dry-run"; shift ;;
         --stop)    MODE="stop"; shift ;;
         --status)  MODE="status"; shift ;;
+        --resume)  RESUME=1; shift ;;
         -h|--help)
-            sed -n '2,40p' "$0"
+            sed -n '2,45p' "$0"
             exit 0
             ;;
         *) fatal "unknown flag: $1" ;;
@@ -67,7 +86,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------------------------------------------------------------------------
-# Load config
+# Load config + shared helpers
 # ---------------------------------------------------------------------------
 CONFIG_FILE="${SCRIPT_DIR}/hpc_config.env"
 if [[ ! -f "${CONFIG_FILE}" ]]; then
@@ -77,6 +96,9 @@ See docs/hpc_wiki.md for how to obtain each value."
 fi
 # shellcheck source=/dev/null
 set -a; source "${CONFIG_FILE}"; set +a
+
+# shellcheck source=hpc_common.sh
+source "${SCRIPT_DIR}/hpc_common.sh"
 
 # ---- validate all required fields are filled -----------------------------
 _check_filled() {
@@ -90,16 +112,23 @@ See docs/hpc_wiki.md to learn how to obtain it."
 _check_filled HPC_USER
 _check_filled HPC_HOST
 _check_filled HPC_HOME
-_check_filled HPC_SCRATCH
 _check_filled HPC_QUEUE
+_check_filled HPC_SELECT
+_check_filled HPC_WALLTIME
+_check_filled LAB_DATA_ROOT
 _check_filled TELEGRAM_BOT_TOKEN
 _check_filled TELEGRAM_CHAT_ID
 _check_filled WANDB_API_KEY
-export HPC_PROJECT_DIR="${HPC_PROJECT_DIR:-${HPC_HOME}/prism}"
+
+resolve_hpc_roots   # fills HPC_LOGIN_REPO_ROOT / HPC_COMPUTE_REPO_ROOT / HPC_PROJECT_DIR
 export LAB_TUNNEL_PORT="${LAB_TUNNEL_PORT:-8765}"
 export LAB_REPO_ROOT="${LAB_REPO_ROOT:-${REPO_ROOT}}"
 export EPOCHS="${EPOCHS:-100}"
+export USE_SHIPPED_VENV="${USE_SHIPPED_VENV:-1}"
+export PUSH_RESULTS_FROM_JOB="${PUSH_RESULTS_FROM_JOB:-0}"
+export COLLECTOR_INTERVAL="${COLLECTOR_INTERVAL:-120}"
 HPC_ARRAY_RANGE="${HPC_ARRAY_RANGE:-1-28}"
+MIN_TOTAL_PATCHES=1000
 
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
@@ -108,28 +137,10 @@ LAUNCH_LOG="${LOG_DIR}/hpc_launch_${TS}.log"
 
 RELAY_PID_FILE="${LOG_DIR}/relay.pid"
 TUNNEL_PID_FILE="${LOG_DIR}/tunnel.pid"
+INNER_TUNNEL_SESSION="prism_inner_tunnel"   # tmux, on the LOGIN node
+FORWARDER_SESSION="prism_forwarder"         # tmux, on the COMPUTE node
+COLLECTOR_SESSION="prism_collector"         # tmux, on the LOGIN node
 JOBID_FILE="${LOG_DIR}/hpc_jobid"
-FORWARDER_SESSION="specsteer_forwarder"
-
-# ---------------------------------------------------------------------------
-# hpc_ssh — run a remote command in a LOGIN shell.
-#
-# IITD's PBS Pro only puts the scheduler binaries (qsub/qstat/qdel) on PATH via
-# /etc/profile.d, which a plain non-interactive `ssh host 'cmd'` never sources —
-# that's the "qsub: command not found" (/opt/pbs/.../bin/qsub missing) the
-# junior hit. Piping the command over stdin to `bash -l -s` sources the login
-# profile AND sidesteps nested-quoting issues in the command string. Use this
-# for anything that calls qsub/qstat/qdel; plain ssh is fine for tmux/tail/etc.
-# ---------------------------------------------------------------------------
-hpc_ssh() {
-    # Even `bash -l -s` may miss the PBS PATH when the scheduler binaries are
-    # added by an interactive-only rc guard (the actual "qsub: command not
-    # found" the junior hit). Prepend a best-effort fix: read PBS_EXEC from
-    # /etc/pbs.conf (present on every PBS Pro node) and fall back to the common
-    # install dirs. No-op for non-PBS commands (tmux/tail) since qsub is found.
-    local pbs_fix='if ! command -v qsub >/dev/null 2>&1; then [ -r /etc/pbs.conf ] && . /etc/pbs.conf; for d in "${PBS_EXEC:-/opt/pbs}/bin" /opt/pbs/bin /opt/pbs/default/bin; do [ -x "$d/qsub" ] && export PATH="$d:$PATH" && break; done; fi;'
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" 'bash -l -s' <<< "${pbs_fix} $1"
-}
 
 # ---------------------------------------------------------------------------
 # --stop and --status short-circuit here
@@ -155,16 +166,17 @@ if [[ "${MODE}" == "stop" ]]; then
     _kill_pidfile "${LOG_DIR}/smoke_watcher.pid"
     _kill_pidfile "${LOG_DIR}/grid_watcher.pid"
 
-    log_step "killing HPC forwarder tmux session"
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "tmux kill-session -t ${FORWARDER_SESSION} 2>/dev/null || true" || true
+    log_step "killing login-node inner tunnel + collector tmux sessions"
+    login_ssh "tmux kill-session -t ${INNER_TUNNEL_SESSION} 2>/dev/null || true; tmux kill-session -t ${COLLECTOR_SESSION} 2>/dev/null || true" || true
 
-    # Kill both smoke and full jobs if present.
+    log_step "killing compute-node forwarder tmux session"
+    compute_ssh "tmux kill-session -t ${FORWARDER_SESSION} 2>/dev/null || true" || true
+
     for jf in "${LOG_DIR}/hpc_jobid_smoke" "${LOG_DIR}/hpc_jobid_full" "${JOBID_FILE}"; do
         if [[ -s "${jf}" ]]; then
             local_job=$(cat "${jf}")
-            log_step "qdel ${local_job}"
-            hpc_ssh "qdel ${local_job} 2>/dev/null || true" || true
+            log_step "qdel ${local_job} (on compute node)"
+            compute_ssh "qdel ${local_job} 2>/dev/null || true" || true
         fi
     done
     log_ok "stop complete."
@@ -187,13 +199,15 @@ if [[ "${MODE}" == "status" ]]; then
         n_total=$(( ${status_re:-${status_rs:-1}} - ${status_rs:-1} + 1 ))
         echo "    grid pull-back progress: ${n_pulled}/${n_total} slots pulled so far (range ${status_range})"
     fi
-    log_step "HPC forwarder"
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "tmux has-session -t ${FORWARDER_SESSION} 2>/dev/null && echo alive || echo not running" \
-        || log_warn "could not ssh"
+    log_step "login-node inner tunnel + collector"
+    login_ssh "tmux has-session -t ${INNER_TUNNEL_SESSION} 2>/dev/null && echo 'inner tunnel: alive' || echo 'inner tunnel: not running'; tmux has-session -t ${COLLECTOR_SESSION} 2>/dev/null && echo 'collector: alive' || echo 'collector: not running'" \
+        || log_warn "could not ssh to login node"
+    log_step "compute-node forwarder"
+    compute_ssh "tmux has-session -t ${FORWARDER_SESSION} 2>/dev/null && echo alive || echo 'not running'" \
+        || log_warn "could not reach compute node"
     if [[ -s "${JOBID_FILE}" ]]; then
         log_step "PBS job $(cat "${JOBID_FILE}")"
-        hpc_ssh "qstat -t $(cat "${JOBID_FILE}") 2>&1 || echo '(job no longer in queue)'"
+        compute_ssh "qstat -t $(cat "${JOBID_FILE}") 2>&1 || echo '(job no longer in queue)'"
     fi
     exit 0
 fi
@@ -204,22 +218,24 @@ fi
 exec > >(tee -a "${LAUNCH_LOG}") 2>&1
 
 echo "=========================================="
-echo " HPC LAUNCH  (mode=${MODE})"
+echo " HPC LAUNCH  (mode=${MODE}, resume=${RESUME})"
 echo "  ts               : ${TS}"
 echo "  lab repo         : ${LAB_REPO_ROOT}"
 echo "  lab data root    : ${LAB_DATA_ROOT}"
-echo "  hpc target       : ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}"
+echo "  login node       : ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}"
+echo "  compute node     : ${HPC_INNER_HOST}:${HPC_COMPUTE_REPO_ROOT}"
 echo "  hpc queue        : ${HPC_QUEUE}"
 echo "  hpc array        : ${HPC_ARRAY_RANGE}"
 echo "  tunnel port      : ${LAB_TUNNEL_PORT}"
 echo "  epochs           : ${EPOCHS}"
+echo "  use_shipped_venv : ${USE_SHIPPED_VENV}"
 echo "  launch log       : ${LAUNCH_LOG}"
 echo "=========================================="
 
 # ---------------------------------------------------------------------------
-# 1. Sanity checks
+# 1/8  Sanity + preflight
 # ---------------------------------------------------------------------------
-log_step "1/9  Sanity checks"
+log_step "1/8  Sanity checks + preflight"
 
 # 1a. WiFi SSID (best-effort)
 if [[ "${LAB_WIFI_SSID:-}" != "" ]]; then
@@ -252,22 +268,31 @@ n_iirs=$(find "${LAB_DATA_ROOT}/IIRS"   -name '*.npy' 2>/dev/null | wc -l | tr -
 n_m3=$(find   "${LAB_DATA_ROOT}/M3"     -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
 n_av=$(find   "${LAB_DATA_ROOT}/AVIRIS" -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
 n_cr=$(find   "${LAB_DATA_ROOT}/CRIMS"  -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
-log_ok "patches: IIRS=${n_iirs}  M3=${n_m3}  AVIRIS=${n_av}  CRIMS=${n_cr}"
-if (( n_iirs + n_m3 + n_av + n_cr < 1000 )); then
+log_ok "lab patches: IIRS=${n_iirs}  M3=${n_m3}  AVIRIS=${n_av}  CRIMS=${n_cr}"
+if (( n_iirs + n_m3 + n_av + n_cr < MIN_TOTAL_PATCHES )); then
     fatal "very few patches under ${LAB_DATA_ROOT} — did preprocessing run?"
 fi
 
-# 1c. ssh reachability (BatchMode: fails fast if key auth isn't set up)
+# 1c. lab -> login reachability
 if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "${HPC_USER}@${HPC_HOST}" 'echo ok' >/dev/null 2>&1; then
     fatal "cannot ssh to ${HPC_USER}@${HPC_HOST} in BatchMode.
-Fix: set up passwordless key auth to the HPC.
+Fix: set up passwordless key auth to the login node.
   ssh-keygen -t ed25519           # if you don't have a key yet
   ssh-copy-id ${HPC_USER}@${HPC_HOST}
 Then re-run this script."
 fi
-log_ok "ssh key auth to ${HPC_USER}@${HPC_HOST} works"
+log_ok "ssh key auth to login node (${HPC_USER}@${HPC_HOST}) works"
 
-# 1d. required tools locally
+# 1d. login -> compute reachability (the second hop)
+inner_probe="$(login_ssh "ssh -o BatchMode=yes -o ConnectTimeout=10 ${HPC_INNER_HOST} echo ok" 2>/dev/null | tr -d '[:space:]')"
+if [[ "${inner_probe}" != "ok" ]]; then
+    fatal "login node cannot reach the compute node ('ssh ${HPC_INNER_HOST}' from ${HPC_HOST} failed).
+Run 'bash scripts/hpc_preflight.sh' for a detailed diagnosis (probe 2), or check
+HPC_INNER_HOST in ${CONFIG_FILE} and the login node's ~/.ssh/config."
+fi
+log_ok "login node can reach the compute node ('ssh ${HPC_INNER_HOST}')"
+
+# 1e. required tools locally
 for tool in rsync ssh autossh tmux python3; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         if [[ "${tool}" == "autossh" ]]; then
@@ -280,250 +305,370 @@ for tool in rsync ssh autossh tmux python3; do
     fi
 done
 
-# 1e. hpc has the tools we need
-# NOTE: qsub is intentionally NOT checked here. On IITD's PBS Pro the scheduler
-# binaries are not on the login-node PATH for non-interactive ssh sessions; the
-# queue is assigned automatically when a node becomes available. Probing for
-# qsub gives a false negative and blocks launch.
-missing_hpc=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-    'for t in python3 tmux; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
-if [[ -n "${missing_hpc}" ]]; then
-    fatal "HPC missing tools: ${missing_hpc}. Ask IITD HPC support / your PI."
+# 1f. tools on both remote nodes
+missing_login=$(login_ssh 'for t in rsync tmux ssh; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
+if [[ -n "${missing_login}" ]]; then
+    fatal "login node missing tools: ${missing_login}. Ask IITD HPC support / your PI."
 fi
-log_ok "hpc has python3, tmux"
+missing_compute=$(compute_ssh 'for t in python3 tmux rsync curl; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
+if [[ -n "${missing_compute}" ]]; then
+    fatal "compute node missing tools: ${missing_compute}. Ask IITD HPC support / your PI."
+fi
+log_ok "login + compute nodes have the tools this launcher needs"
+# NOTE: qsub is intentionally NOT probed directly — see hpc_common.sh's
+# _PBS_FIX for why a naive `command -v qsub` can false-negative.
+
+# 1g. shipped-.venv sanity, IF it's already on the compute node from a prior
+# run. If it isn't there yet, step 4 below will push it and there's nothing
+# to verify yet — that's expected on a first launch.
+if [[ "${USE_SHIPPED_VENV}" == "1" ]]; then
+    venv_probe="$(compute_ssh "test -x '${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' && echo present || echo absent" 2>/dev/null | tr -d '[:space:]')"
+    if [[ "${venv_probe}" == "present" ]]; then
+        import_probe="$(compute_ssh "'${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null)"
+        if echo "${import_probe}" | grep -q IMPORT_OK; then
+            log_ok "existing .venv on compute node imports torch+wandb — will be treated as intact (skip re-push)."
+        else
+            log_warn "existing .venv on compute node does NOT import torch/wandb cleanly — will be re-pushed in step 3/4."
+            echo "${import_probe}" | sed 's/^/      /'
+        fi
+    else
+        log_warn "no .venv on compute node yet — step 3/4 will push it (this is normal on a first launch)."
+    fi
+fi
 
 # ---------------------------------------------------------------------------
-# 2. Build wheels
+# 2/8  Wheels (skipped when USE_SHIPPED_VENV=1 — the default)
 # ---------------------------------------------------------------------------
-log_step "2/9  Build wheels for HPC platform"
+log_step "2/8  Build wheels for HPC platform"
 
 WHEEL_DIR="${REPO_ROOT}/wheels"
-mkdir -p "${WHEEL_DIR}"
-n_wheels=$(ls "${WHEEL_DIR}"/*.whl 2>/dev/null | wc -l | tr -d ' ')
-if (( n_wheels > 0 )); then
-    log_ok "${n_wheels} wheels already present in ${WHEEL_DIR}; skipping pip download"
+if [[ "${USE_SHIPPED_VENV}" == "1" ]]; then
+    log_ok "USE_SHIPPED_VENV=1 — skipping wheel build entirely (the shipped .venv is used as-is)."
 else
-    log_step "  pip download -> ${WHEEL_DIR}   (this can take 5-15 min)"
-    if [[ "${MODE}" == "dry-run" ]]; then
-        echo "    (dry-run: would run pip download)"
+    mkdir -p "${WHEEL_DIR}"
+    n_wheels=$(ls "${WHEEL_DIR}"/*.whl 2>/dev/null | wc -l | tr -d ' ')
+    if (( n_wheels > 0 )); then
+        log_ok "${n_wheels} wheels already present in ${WHEEL_DIR}; skipping pip download"
     else
-        python3 -m pip download \
-            --platform "${PIP_PLATFORM:-manylinux2014_x86_64}" \
-            --python-version "${PIP_PYTHON_VERSION:-311}" \
-            --abi "${PIP_ABI:-cp311}" \
-            --only-binary=:all: \
-            --dest "${WHEEL_DIR}" \
-            -r "${REPO_ROOT}/requirements.txt" || \
-            log_warn "some wheels could not be downloaded — the bootstrap step will surface the concrete missing package(s)."
+        log_step "  pip download -> ${WHEEL_DIR}   (this can take 5-15 min)"
+        if [[ "${MODE}" == "dry-run" ]]; then
+            echo "    (dry-run: would run pip download)"
+        else
+            python3 -m pip download \
+                --platform "${PIP_PLATFORM:-manylinux2014_x86_64}" \
+                --python-version "${PIP_PYTHON_VERSION:-311}" \
+                --abi "${PIP_ABI:-cp311}" \
+                --only-binary=:all: \
+                --dest "${WHEEL_DIR}" \
+                -r "${REPO_ROOT}/requirements.txt" || \
+                log_warn "some wheels could not be downloaded — the bootstrap step will surface the concrete missing package(s)."
+        fi
     fi
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Rsync repo + wheels + data
+# 3/8  lab -> login: three INDEPENDENT conditional rsyncs
 # ---------------------------------------------------------------------------
-log_step "3/9  Rsync to HPC (repo + wheels + processed data)"
+log_step "3/8  lab -> login node (repo / .venv / data — each pushed only if missing/stale)"
 
-RSYNC_OPTS=(-a --human-readable --info=progress2 --partial --compress)
-
-RSYNC_EXCLUDES=(
-    --exclude='.git/'
+# Anchored excludes for the repo push. UNANCHORED patterns (the old
+# behaviour) match rsync's "final path component at any depth" rule, so
+# --exclude='wandb/' would also match .venv/lib/.../site-packages/wandb/ and
+# silently gut the venv. Anchoring with a leading '/' ties each exclude to
+# the repo root only.
+REPO_RSYNC_EXCLUDES=(
+    --exclude='/.git/'
     --exclude='__pycache__/'
     --exclude='*.pyc'
-    --exclude='wandb/'
-    --exclude='logs/'
-    --exclude='checkpoints/'
-    --exclude='model/'
-    --exclude='data/'
-    --exclude='results/'
+    --exclude='/wandb/'
+    --exclude='/logs/'
+    --exclude='/checkpoints/'
+    --exclude='/model/'
+    --exclude='/model_smoke/'
+    --exclude='/data/'
+    --exclude='/results/'
+    --exclude='/wheels/'
+    --exclude='/.venv/'
     --exclude='notebooks/*_files/'
 )
+VENV_RSYNC_EXCLUDES=(--exclude='__pycache__/' --exclude='*.pyc')
+RSYNC_OPTS=(-a --human-readable --info=progress2 --partial --compress)
 
 if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run: would rsync)"
-    echo "    repo -> ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/"
-    echo "    wheels -> ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/wheels/"
-    echo "    data  -> ${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/data/processed/"
-else
-    # Ensure remote parents exist.
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "mkdir -p '${HPC_PROJECT_DIR}/data/processed' '${HPC_PROJECT_DIR}/wheels' '${HPC_PROJECT_DIR}/logs'"
+    echo "    (dry-run) checking login-node data + .venv state:"
+fi
 
-    log_step "  3a repo tree"
-    rsync "${RSYNC_OPTS[@]}" "${RSYNC_EXCLUDES[@]}" \
+n_login_iirs=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" IIRS)
+n_login_m3=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" M3)
+n_login_av=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" AVIRIS)
+n_login_cr=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" CRIMS)
+n_login_total=$(( n_login_iirs + n_login_m3 + n_login_av + n_login_cr ))
+log_ok "login-node patches: IIRS=${n_login_iirs} M3=${n_login_m3} AVIRIS=${n_login_av} CRIMS=${n_login_cr}"
+
+data_needs_push=1
+if (( n_login_total >= MIN_TOTAL_PATCHES )); then
+    data_needs_push=0
+    log_ok "data already present on the login node (${n_login_total} patches) — skipping the 1-3h data push."
+elif (( RESUME )); then
+    log_warn "--resume set and login-node data looks incomplete (${n_login_total} patches) — NOT re-pushing. Fix data on the login node manually, or drop --resume."
+    data_needs_push=0
+fi
+
+venv_needs_push=1
+venv_login_probe="$(login_ssh "'${HPC_LOGIN_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
+if echo "${venv_login_probe}" | grep -q IMPORT_OK; then
+    venv_needs_push=0
+    log_ok "login-node .venv already imports torch+wandb — skipping the .venv push."
+else
+    log_warn "login-node .venv missing or broken — will (re-)push it. Last probe output:"
+    echo "${venv_login_probe}" | sed 's/^/      /'
+fi
+
+if [[ "${MODE}" == "dry-run" ]]; then
+    echo "    (dry-run) repo         -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/  [always]"
+    (( venv_needs_push )) && echo "    (dry-run) .venv        -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/.venv/  [needed]" \
+        || echo "    (dry-run) .venv        -> SKIP (already intact)"
+    (( data_needs_push )) && echo "    (dry-run) data/processed -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/data/processed/  [needed]" \
+        || echo "    (dry-run) data/processed -> SKIP (already present)"
+else
+    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
+        "mkdir -p '${HPC_LOGIN_REPO_ROOT}/data/processed' '${HPC_LOGIN_REPO_ROOT}/logs'"
+
+    log_step "  3a repo tree (always — small, keeps scripts/train.py current)"
+    rsync "${RSYNC_OPTS[@]}" "${REPO_RSYNC_EXCLUDES[@]}" \
         "${LAB_REPO_ROOT}/" \
-        "${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/" \
+        "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/" \
         || fatal "rsync repo failed"
 
-    log_step "  3b wheels/"
-    rsync "${RSYNC_OPTS[@]}" \
-        "${WHEEL_DIR}/" \
-        "${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/wheels/" \
-        || fatal "rsync wheels failed"
+    if (( venv_needs_push )); then
+        log_step "  3b .venv/  (own rsync — only __pycache__/*.pyc excluded; ~5GB, can take a while)"
+        rsync "${RSYNC_OPTS[@]}" "${VENV_RSYNC_EXCLUDES[@]}" \
+            "${LAB_REPO_ROOT}/.venv/" \
+            "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/.venv/" \
+            || fatal "rsync .venv failed"
+    fi
 
-    log_step "  3c data/processed/  (this is the long one — expect 1-3 h over lab wifi)"
-    rsync "${RSYNC_OPTS[@]}" \
-        "${LAB_DATA_ROOT}/" \
-        "${HPC_USER}@${HPC_HOST}:${HPC_PROJECT_DIR}/data/processed/" \
-        || fatal "rsync data failed"
+    if (( data_needs_push )); then
+        log_step "  3c data/processed/  (this is the long one — expect 1-3 h over lab wifi)"
+        rsync "${RSYNC_OPTS[@]}" \
+            "${LAB_DATA_ROOT}/" \
+            "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/data/processed/" \
+            || fatal "rsync data failed"
+    fi
 fi
-log_ok "rsync complete"
+log_ok "lab -> login sync complete"
 
 # ---------------------------------------------------------------------------
-# 4. Bootstrap on HPC (offline pip install)
+# 4/8  login -> compute: same three pushes, run ON the login node
 # ---------------------------------------------------------------------------
-log_step "4/9  Running scripts/hpc_bootstrap.sh on HPC"
+log_step "4/8  login -> compute node (repo / .venv / data)"
 
 if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run: would ssh + run bootstrap)"
+    echo "    (dry-run) would run compute_rsync_push for repo, .venv (if needed), data (if needed)"
 else
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" bash <<EOF
-set -euo pipefail
-export HPC_PROJECT_DIR='${HPC_PROJECT_DIR}'
-export LAB_TUNNEL_PORT='${LAB_TUNNEL_PORT}'
-export TELEGRAM_BOT_TOKEN='${TELEGRAM_BOT_TOKEN}'
-export TELEGRAM_CHAT_ID='${TELEGRAM_CHAT_ID}'
-export WANDB_API_KEY='${WANDB_API_KEY}'
-export WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}'
-export WANDB_ENTITY='${WANDB_ENTITY:-}'
-cd '${HPC_PROJECT_DIR}'
-bash scripts/hpc_bootstrap.sh
-EOF
-    if [[ $? -ne 0 ]]; then
-        fatal "hpc_bootstrap.sh failed on the HPC — inspect the log above."
+    n_compute_total=0
+    for ds in IIRS M3 AVIRIS CRIMS; do
+        n=$(count_npy_remote compute "${HPC_COMPUTE_REPO_ROOT}/data/processed" "${ds}")
+        n_compute_total=$(( n_compute_total + n ))
+    done
+    log_ok "compute-node patches so far: ${n_compute_total}"
+
+    log_step "  4a repo tree -> compute"
+    compute_rsync_push "${HPC_LOGIN_REPO_ROOT}" "${HPC_COMPUTE_REPO_ROOT}" \
+        "--exclude='/.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='/wandb/' --exclude='/logs/' --exclude='/checkpoints/' --exclude='/model/' --exclude='/model_smoke/' --exclude='/data/' --exclude='/results/' --exclude='/wheels/' --exclude='/.venv/'" \
+        || fatal "login->compute repo rsync failed"
+
+    compute_venv_probe="$(compute_ssh "'${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
+    if echo "${compute_venv_probe}" | grep -q IMPORT_OK; then
+        log_ok "compute-node .venv already intact — skipping the .venv push."
+    else
+        log_step "  4b .venv/ -> compute  (~5GB)"
+        compute_rsync_push "${HPC_LOGIN_REPO_ROOT}/.venv" "${HPC_COMPUTE_REPO_ROOT}/.venv" \
+            "--exclude='__pycache__/' --exclude='*.pyc'" \
+            || fatal "login->compute .venv rsync failed"
+    fi
+
+    if (( n_compute_total < MIN_TOTAL_PATCHES )); then
+        log_step "  4c data/processed/ -> compute"
+        compute_rsync_push "${HPC_LOGIN_REPO_ROOT}/data/processed" "${HPC_COMPUTE_REPO_ROOT}/data/processed" \
+            || fatal "login->compute data rsync failed"
+    else
+        log_ok "compute-node data already present (${n_compute_total} patches) — skipping."
     fi
 fi
-log_ok "hpc bootstrap complete"
+log_ok "login -> compute sync complete"
 
 # ---------------------------------------------------------------------------
-# 5. Start local relay
+# 5/8  Bootstrap on the compute node
 # ---------------------------------------------------------------------------
-log_step "5/9  Start lab-side notify_relay.py (background)"
+log_step "5/8  Running scripts/hpc_bootstrap.sh on the compute node"
 
-if [[ -s "${RELAY_PID_FILE}" ]] && kill -0 "$(cat "${RELAY_PID_FILE}")" 2>/dev/null; then
-    log_ok "already running (pid=$(cat "${RELAY_PID_FILE}"))"
+if [[ "${MODE}" == "dry-run" ]]; then
+    echo "    (dry-run: would compute_ssh + run bootstrap)"
 else
-    if [[ "${MODE}" == "dry-run" ]]; then
-        echo "    (dry-run: would launch notify_relay.py)"
+    # TELEGRAM_RELAY_URL is deliberately left BLANK here regardless of which
+    # Telegram mode step 6 below ends up choosing: in "direct" mode
+    # notify.py's tier-2 direct sendMessage picks up the bot token/chat id on
+    # its own; in "tunnel" mode a relay URL wouldn't be reachable from the
+    # compute node anyway, so it falls through to the queue by design (see
+    # hpc_bootstrap.sh's comment on this same line).
+    bootstrap_cmd="export HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}' HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}' HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}' HPC_USER='${HPC_USER}' HPC_HOST='${HPC_HOST}' LAB_TUNNEL_PORT='${LAB_TUNNEL_PORT}' USE_SHIPPED_VENV='${USE_SHIPPED_VENV}' PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}' TELEGRAM_BOT_TOKEN='${TELEGRAM_BOT_TOKEN}' TELEGRAM_CHAT_ID='${TELEGRAM_CHAT_ID}' TELEGRAM_RELAY_URL='' WANDB_API_KEY='${WANDB_API_KEY}' WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}' WANDB_ENTITY='${WANDB_ENTITY:-}'; cd '${HPC_COMPUTE_REPO_ROOT}' && bash scripts/hpc_bootstrap.sh"
+    compute_ssh "${bootstrap_cmd}" || fatal "hpc_bootstrap.sh failed on the compute node — inspect the log above."
+fi
+log_ok "compute-node bootstrap complete"
+
+# ---------------------------------------------------------------------------
+# 6/8  Telegram: relay + chained tunnels + forwarder (compute) + collector (login)
+# ---------------------------------------------------------------------------
+log_step "6/8  Telegram delivery chain"
+
+# Decide direct-send vs chained-tunnel mode.
+HPC_TELEGRAM_MODE="tunnel"
+if [[ "${MODE}" != "dry-run" ]]; then
+    tg_code="$(compute_ssh 'curl -sS -m 5 -o /dev/null -w "%{http_code}" https://api.telegram.org 2>/dev/null || echo 000' | tr -d '[:space:]')"
+    if [[ "${tg_code}" =~ ^[234][0-9][0-9]$ ]]; then
+        HPC_TELEGRAM_MODE="direct"
+        log_ok "compute node has outbound internet (HTTP ${tg_code}) — using direct Telegram send, no tunnel needed."
     else
-        # Export creds so the relay's TelegramNotifier picks them up.
-        export TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
-        nohup python3 "${REPO_ROOT}/utils/notify_relay.py" \
-            --port "${LAB_TUNNEL_PORT}" --bind 127.0.0.1 \
-            >> "${LOG_DIR}/relay.log" 2>&1 &
-        relay_pid=$!
-        echo "${relay_pid}" > "${RELAY_PID_FILE}"
-        sleep 1
-        if kill -0 "${relay_pid}" 2>/dev/null; then
-            log_ok "relay pid=${relay_pid} (logs: ${LOG_DIR}/relay.log)"
-        else
-            fatal "relay failed to start. Check ${LOG_DIR}/relay.log"
-        fi
+        log_ok "compute node has no outbound internet (expected) — using the chained reverse-tunnel path."
     fi
 fi
 
-# ---------------------------------------------------------------------------
-# 6. Reverse SSH tunnel
-# ---------------------------------------------------------------------------
-log_step "6/9  Reverse SSH tunnel (HPC:${LAB_TUNNEL_PORT} -> lab:${LAB_TUNNEL_PORT})"
-
-if [[ -s "${TUNNEL_PID_FILE}" ]] && kill -0 "$(cat "${TUNNEL_PID_FILE}")" 2>/dev/null; then
-    log_ok "already running (pid=$(cat "${TUNNEL_PID_FILE}"))"
+if [[ "${HPC_TELEGRAM_MODE}" == "direct" ]]; then
+    # Compute node's .env already has real TELEGRAM_* creds from bootstrap and
+    # a blank TELEGRAM_RELAY_URL — utils/notify.py's tier-2 direct sendMessage
+    # handles everything. Still start the forwarder as a harmless no-op-ish
+    # safety net in case direct send transiently fails (it'll queue+drain).
+    log_ok "direct mode: no lab relay / tunnel / collector needed for Telegram."
 else
-    if [[ "${MODE}" == "dry-run" ]]; then
-        echo "    (dry-run: would open autossh tunnel)"
+    # --- lab relay -----------------------------------------------------
+    if [[ -s "${RELAY_PID_FILE}" ]] && kill -0 "$(cat "${RELAY_PID_FILE}")" 2>/dev/null; then
+        log_ok "lab relay already running (pid=$(cat "${RELAY_PID_FILE}"))"
     else
-        # The tunnel authenticates lab -> HPC using the SAME key that Step 1c
-        # already proved works in BatchMode. We repeat BatchMode=yes here so
-        # that if the key ever needs a passphrase, the tunnel dies immediately
-        # (which we detect below) instead of silently blocking on a hidden
-        # password prompt inside nohup.
-        #
-        # ExitOnForwardFailure=yes makes ssh exit non-zero if the HPC refuses
-        # the remote (-R) forward (e.g. sshd 'AllowTcpForwarding no'), so a
-        # forwarding-disabled login node is caught rather than looking "up".
-        COMMON_SSH_OPTS=(
-            -N -T
-            -o BatchMode=yes
-            -o ServerAliveInterval=30
-            -o ServerAliveCountMax=3
-            -o ExitOnForwardFailure=yes
-            -R "${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT}"
-        )
-        AUTOSSH_BIN="$(command -v autossh || command -v ssh)"
-        if [[ "$(basename "${AUTOSSH_BIN}")" == "autossh" ]]; then
-            AUTOSSH_GATETIME=0 nohup "${AUTOSSH_BIN}" -M 0 \
-                "${COMMON_SSH_OPTS[@]}" "${HPC_USER}@${HPC_HOST}" \
-                >> "${LOG_DIR}/tunnel.log" 2>&1 &
+        if [[ "${MODE}" == "dry-run" ]]; then
+            echo "    (dry-run: would launch notify_relay.py)"
         else
-            nohup "${AUTOSSH_BIN}" \
-                "${COMMON_SSH_OPTS[@]}" "${HPC_USER}@${HPC_HOST}" \
-                >> "${LOG_DIR}/tunnel.log" 2>&1 &
+            export TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+            nohup python3 "${REPO_ROOT}/utils/notify_relay.py" \
+                --port "${LAB_TUNNEL_PORT}" --bind 127.0.0.1 \
+                >> "${LOG_DIR}/relay.log" 2>&1 &
+            relay_pid=$!
+            echo "${relay_pid}" > "${RELAY_PID_FILE}"
+            sleep 1
+            if kill -0 "${relay_pid}" 2>/dev/null; then
+                log_ok "lab relay pid=${relay_pid} (logs: ${LOG_DIR}/relay.log)"
+            else
+                fatal "relay failed to start. Check ${LOG_DIR}/relay.log"
+            fi
         fi
-        tunnel_pid=$!
-        echo "${tunnel_pid}" > "${TUNNEL_PID_FILE}"
-        sleep 3
-        if ! kill -0 "${tunnel_pid}" 2>/dev/null; then
-            log_err "tunnel process exited immediately. Last lines of tunnel.log:"
-            tail -n 15 "${LOG_DIR}/tunnel.log" 2>/dev/null | sed 's/^/      /'
-            fatal "reverse tunnel failed to start.
+    fi
+
+    # --- outer tunnel: lab -> login --------------------------------------
+    if [[ -s "${TUNNEL_PID_FILE}" ]] && kill -0 "$(cat "${TUNNEL_PID_FILE}")" 2>/dev/null; then
+        log_ok "outer tunnel (lab->login) already running (pid=$(cat "${TUNNEL_PID_FILE}"))"
+    else
+        if [[ "${MODE}" == "dry-run" ]]; then
+            echo "    (dry-run: would open autossh outer tunnel lab->login)"
+        else
+            COMMON_SSH_OPTS=(
+                -N -T
+                -o BatchMode=yes
+                -o ServerAliveInterval=30
+                -o ServerAliveCountMax=3
+                -o ExitOnForwardFailure=yes
+                -R "${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT}"
+            )
+            AUTOSSH_BIN="$(command -v autossh || command -v ssh)"
+            if [[ "$(basename "${AUTOSSH_BIN}")" == "autossh" ]]; then
+                AUTOSSH_GATETIME=0 nohup "${AUTOSSH_BIN}" -M 0 \
+                    "${COMMON_SSH_OPTS[@]}" "${HPC_USER}@${HPC_HOST}" \
+                    >> "${LOG_DIR}/tunnel.log" 2>&1 &
+            else
+                nohup "${AUTOSSH_BIN}" \
+                    "${COMMON_SSH_OPTS[@]}" "${HPC_USER}@${HPC_HOST}" \
+                    >> "${LOG_DIR}/tunnel.log" 2>&1 &
+            fi
+            tunnel_pid=$!
+            echo "${tunnel_pid}" > "${TUNNEL_PID_FILE}"
+            sleep 3
+            if ! kill -0 "${tunnel_pid}" 2>/dev/null; then
+                log_err "outer tunnel process exited immediately. Last lines of tunnel.log:"
+                tail -n 15 "${LOG_DIR}/tunnel.log" 2>/dev/null | sed 's/^/      /'
+                fatal "reverse tunnel (lab->login) failed to start.
 Most likely causes:
-  * your lab->HPC SSH key has a passphrase (make a passphraseless key, or
-    load it into an agent: eval \$(ssh-agent); ssh-add ~/.ssh/id_ed25519), or
-  * the HPC login node forbids remote port-forwarding (AllowTcpForwarding no).
+  * your lab->login SSH key has a passphrase, or
+  * the login node forbids remote port-forwarding (AllowTcpForwarding no).
 Check ${LOG_DIR}/tunnel.log and ask Utkarsh."
+            fi
+            log_ok "outer tunnel pid=${tunnel_pid}"
+        fi
+    fi
+
+    # --- inner tunnel: login -> compute, supervised in a login-node tmux --
+    if [[ "${MODE}" == "dry-run" ]]; then
+        echo "    (dry-run: would start inner tunnel tmux session on the login node)"
+    else
+        inner_alive="$(login_ssh "tmux has-session -t ${INNER_TUNNEL_SESSION} 2>/dev/null && echo yes || echo no" | tr -d '[:space:]')"
+        if [[ "${inner_alive}" == "yes" ]]; then
+            log_ok "inner tunnel (login->compute) tmux session already running"
+        else
+            login_ssh "tmux new-session -d -s '${INNER_TUNNEL_SESSION}' \
+                \"autossh -M 0 -N -T -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -R ${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT} ${HPC_INNER_HOST} 2>&1 | tee -a logs/inner_tunnel.log || ssh -N -T -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -R ${LAB_TUNNEL_PORT}:localhost:${LAB_TUNNEL_PORT} ${HPC_INNER_HOST} 2>&1 | tee -a logs/inner_tunnel.log\"" \
+                || log_warn "could not start inner tunnel tmux session"
+            sleep 3
+            log_ok "inner tunnel (login->compute) tmux session started"
         fi
 
-        # End-to-end probe: from the HPC login node, curl the relay THROUGH the
-        # reverse tunnel. This is the only check that proves the -R forward is
-        # actually live (a running ssh process alone does not guarantee it).
-        log_step "  verifying tunnel end-to-end (HPC -> relay /healthz)"
-        probe=$(ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
+        log_step "  verifying end-to-end tunnel (compute -> relay /healthz)"
+        probe=$(compute_ssh \
             "curl -s -m 8 http://localhost:${LAB_TUNNEL_PORT}/healthz 2>/dev/null || \
              (command -v python3 >/dev/null && python3 -c \"import urllib.request,sys; sys.stdout.write(urllib.request.urlopen('http://localhost:${LAB_TUNNEL_PORT}/healthz', timeout=8).read().decode())\" 2>/dev/null) || echo PROBE_FAILED" \
             2>/dev/null | tr -d '[:space:]')
         if [[ "${probe}" == "ok" ]]; then
-            log_ok "tunnel verified end-to-end (pid=${tunnel_pid})"
+            log_ok "chained tunnel verified end-to-end (compute -> login -> lab relay)"
         else
-            log_warn "tunnel process is up (pid=${tunnel_pid}) but the HPC could not reach the relay through it (probe='${probe:-empty}')."
-            log_warn "Telegram may be delayed: messages still accumulate in logs/notify_queue.jsonl on the HPC and flush once the tunnel works."
-            log_warn "If this persists, the login node likely blocks remote forwarding — tell Utkarsh; he may need a different relay path."
+            log_warn "chained tunnel is up but the compute node could not reach the relay through it (probe='${probe:-empty}')."
+            log_warn "Telegram may be delayed: messages queue in logs/notify_queue.jsonl on the compute node and flush once the tunnel works."
+        fi
+    fi
+
+    # --- forwarder: on the COMPUTE node now (that's where the queue is) ---
+    log_step "  forwarder tmux on the compute node (session=${FORWARDER_SESSION})"
+    if [[ "${MODE}" == "dry-run" ]]; then
+        echo "    (dry-run: would start compute-node forwarder tmux)"
+    else
+        fwd_alive="$(compute_ssh "tmux has-session -t ${FORWARDER_SESSION} 2>/dev/null && echo yes || echo no" | tr -d '[:space:]')"
+        if [[ "${fwd_alive}" == "yes" ]]; then
+            log_ok "forwarder already running on compute node"
+        else
+            compute_ssh "cd '${HPC_COMPUTE_REPO_ROOT}' && tmux new-session -d -s '${FORWARDER_SESSION}' \
+                \"'${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' scripts/notify_forwarder.py --queue '${HPC_COMPUTE_REPO_ROOT}/logs/notify_queue.jsonl' --url 'http://localhost:${LAB_TUNNEL_PORT}/notify' --interval 3 2>&1 | tee -a logs/forwarder.log\"" \
+                && log_ok "forwarder running on compute node" \
+                || log_warn "forwarder tmux setup failed — heartbeats will still queue in logs/notify_queue.jsonl on the compute node."
+        fi
+    fi
+
+    # --- collector: on the LOGIN node, pulls results from compute --------
+    log_step "  collector tmux on the login node (session=${COLLECTOR_SESSION})"
+    if [[ "${MODE}" == "dry-run" ]]; then
+        echo "    (dry-run: would start login-node collector tmux)"
+    else
+        coll_alive="$(login_ssh "tmux has-session -t ${COLLECTOR_SESSION} 2>/dev/null && echo yes || echo no" | tr -d '[:space:]')"
+        if [[ "${coll_alive}" == "yes" ]]; then
+            log_ok "collector already running on login node"
+        else
+            login_ssh "cd '${HPC_LOGIN_REPO_ROOT}' && tmux new-session -d -s '${COLLECTOR_SESSION}' \
+                \"bash scripts/hpc_collector.sh --inner-host '${HPC_INNER_HOST}' --compute-root '${HPC_COMPUTE_REPO_ROOT}' --login-root '${HPC_LOGIN_REPO_ROOT}' --interval '${COLLECTOR_INTERVAL}' 2>&1 | tee -a logs/collector.log\"" \
+                && log_ok "collector running on login node" \
+                || log_warn "collector tmux setup failed — results will only come back via the job's own push (if PUSH_RESULTS_FROM_JOB=1) or manual scripts/hpc_pull_results.sh."
         fi
     fi
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Start HPC-side forwarder in tmux
+# 7/8  Submit smoke run (slot 1 only) and launch watcher
 # ---------------------------------------------------------------------------
-log_step "7/9  Start HPC forwarder in tmux (session=${FORWARDER_SESSION})"
-
-if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run: would start tmux forwarder)"
-else
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" bash <<EOF
-set -uo pipefail
-cd '${HPC_PROJECT_DIR}'
-if tmux has-session -t '${FORWARDER_SESSION}' 2>/dev/null; then
-    echo '    forwarder tmux session already exists — leaving as-is.'
-    exit 0
-fi
-tmux new-session -d -s '${FORWARDER_SESSION}' \\
-    "source .venv/bin/activate && python scripts/notify_forwarder.py \\
-        --queue '${HPC_PROJECT_DIR}/logs/notify_queue.jsonl' \\
-        --url 'http://localhost:${LAB_TUNNEL_PORT}/notify' \\
-        --interval 3 2>&1 | tee -a logs/forwarder.log"
-echo "    tmux session '${FORWARDER_SESSION}' started."
-EOF
-    if [[ $? -ne 0 ]]; then
-        log_warn "forwarder tmux setup failed. Heartbeats will still land in logs/notify_queue.jsonl on the HPC — pull them back and drain manually."
-    else
-        log_ok "forwarder running on HPC (attach: ssh ${HPC_USER}@${HPC_HOST} 'tmux attach -t ${FORWARDER_SESSION}')"
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# 8. Submit smoke run (slot 1 only, few epochs) and launch watcher
-# ---------------------------------------------------------------------------
-log_step "8/9  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
+log_step "7/8  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
 
 SMOKE_EPOCHS="${SMOKE_EPOCHS:-5}"
 SMOKE_DELAY_SECS="${SMOKE_DELAY_SECS:-600}"
@@ -531,7 +676,7 @@ FULL_ARRAY_RANGE="${FULL_ARRAY_RANGE:-${HPC_ARRAY_RANGE}}"
 WATCHER_PID_FILE="${LOG_DIR}/smoke_watcher.pid"
 
 if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run: would submit smoke job for slot 1)"
+    echo "    (dry-run: would submit smoke job for slot 1 via compute_ssh)"
     echo ""
     echo "    grid preview:"
     # shellcheck source=/dev/null
@@ -543,28 +688,25 @@ else
         qsub_extra+=(-P "${HPC_PROJECT_CODE}")
     fi
 
-    smoke_qsub_cmd="cd '${HPC_PROJECT_DIR}' && qsub \
+    smoke_qsub_cmd="cd '${HPC_COMPUTE_REPO_ROOT}' && qsub \
         -q '${HPC_QUEUE}' \
         -l '${HPC_SELECT}' \
         -l walltime='01:00:00' \
         -J '1-1' \
         ${qsub_extra[*]:-} \
-        -v HPC_PROJECT_DIR='${HPC_PROJECT_DIR}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
+        -v HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}',HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}',HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}',HPC_USER='${HPC_USER}',HPC_HOST='${HPC_HOST}',PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
         scripts/hpc_pbs_job.pbs"
 
-    SMOKE_JOBID=$(hpc_ssh "${smoke_qsub_cmd}") || \
-        fatal "qsub smoke failed"
+    SMOKE_JOBID=$(compute_ssh "${smoke_qsub_cmd}") || fatal "qsub smoke failed"
 
     # A login shell may print module-load / MOTD banners before qsub's output;
-    # the job id is the LAST non-empty line. (Mirrors the full-array capture in
-    # hpc_smoke_watcher.sh.)
+    # the job id is the LAST non-empty line.
     SMOKE_JOBID=$(echo "${SMOKE_JOBID}" | tail -1 | xargs)
     echo "${SMOKE_JOBID}" > "${LOG_DIR}/hpc_jobid_smoke"
     echo "${SMOKE_JOBID}" > "${JOBID_FILE}"
     log_ok "smoke job submitted: ${SMOKE_JOBID}"
     log_step "  if smoke passes, watcher will wait ${SMOKE_DELAY_SECS}s then submit full grid (${FULL_ARRAY_RANGE})"
 
-    # Launch the watcher in the background (nohup'd so the junior can close the terminal).
     export HPC_SMOKE_JOBID="${SMOKE_JOBID}"
     export SMOKE_DELAY_SECS FULL_ARRAY_RANGE EPOCHS EXTRA_TRAIN_ARGS
     nohup bash "${REPO_ROOT}/scripts/hpc_smoke_watcher.sh" \
@@ -575,9 +717,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Print monitoring cheatsheet
+# 8/8  Print monitoring cheatsheet
 # ---------------------------------------------------------------------------
-log_step "9/9  Monitoring cheatsheet"
+log_step "8/8  Monitoring cheatsheet"
 
 cat <<EOF
 
@@ -590,18 +732,18 @@ cat <<EOF
     Watch grid pull-back watcher (after smoke passes, per-run checkpoint pulls):
       tail -f ${LOG_DIR}/grid_watcher.log
 
-    Watch job queue status (qstat needs a login shell for PATH -> use ssh -t):
-      ssh -t ${HPC_USER}@${HPC_HOST} "qstat -t $(cat "${JOBID_FILE}" 2>/dev/null)"
+    Watch job queue status (two hops — this wraps compute_ssh for you):
+      bash scripts/hpc_launch.sh --status
 
-    Attach to the HPC forwarder:
-      ssh ${HPC_USER}@${HPC_HOST} 'tmux attach -t ${FORWARDER_SESSION}'
+    Attach to the compute-node forwarder:
+      ssh ${HPC_USER}@${HPC_HOST} 'ssh ${HPC_INNER_HOST} "tmux attach -t ${FORWARDER_SESSION}"'
         (detach with Ctrl-b then d)
 
-    Tail a specific run's log (once it starts on a compute node):
-      ssh ${HPC_USER}@${HPC_HOST} 'tail -f ${HPC_PROJECT_DIR}/logs/train_*.log'
+    Attach to the login-node collector:
+      ssh ${HPC_USER}@${HPC_HOST} 'tmux attach -t ${COLLECTOR_SESSION}'
 
-    Manual full pull (grid watcher already does this per-slot automatically;
-    use this only for a one-off refresh, e.g. to grab wandb/ mid-run):
+    Manual full pull (grid watcher + collector already do this automatically;
+    use this only for a one-off refresh):
       bash scripts/hpc_pull_results.sh
 
     Emergency stop everything:
@@ -611,15 +753,16 @@ cat <<EOF
       bash scripts/hpc_launch.sh --status
 
     What happens next (automated):
-      1. Smoke watcher polls qstat for the smoke job to finish.
-      2. If smoke passes → waits ${SMOKE_DELAY_SECS:-600}s → submits full ${FULL_ARRAY_RANGE:-1-28} grid.
+      1. Smoke watcher polls qstat (two-hop) for the smoke job to finish.
+      2. If smoke passes -> waits ${SMOKE_DELAY_SECS:-600}s -> submits full ${FULL_ARRAY_RANGE:-1-28} grid.
          (Telegram: "[LAUNCHED] Full ablation grid submitted")
-         → starts the grid watcher, which polls each array slot and, the moment
-           a slot finishes, immediately pulls its checkpoint + logs back to the
-           lab machine (Telegram: "[OK]"/"[FAIL] slot N/M done: ...") — so a
-           later failure (tunnel drop, HPC outage, lab machine reboot) only
-           risks runs still in flight, never runs that already finished.
-      3. If smoke fails  → pulls logs → Telegrams the tail → does NOT launch full grid.
+         -> starts the grid watcher, which polls each array slot and, the
+            moment a slot finishes, pulls its checkpoint + logs back to the
+            lab machine via the login node (Telegram: "[OK]"/"[FAIL]" per
+            slot, plus "[XFER]" for the compute->login leg) — so a later
+            failure only risks runs still in flight, never ones that
+            already finished.
+      3. If smoke fails -> pulls logs -> Telegrams the tail -> does NOT launch full grid.
          (fix the issue, re-run this script)
 
 EOF

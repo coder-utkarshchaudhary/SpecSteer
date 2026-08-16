@@ -1,6 +1,6 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-08-04  
+> **Last updated:** 2026-08-16  
 > **Status:** All 4 ablation models + downstream experiments implemented and byte-compiled.
 > IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay added.
 > Training loop performance-tuned (BF16 on Ampere+, channels_last, per-epoch metric sync).  
@@ -306,34 +306,86 @@ project instructions). Before your first full training run:
 ## 8. HPC / IITD (PBS Pro)
 
 The 28-run ablation grid targets IITD's Padum HPC (PBS Pro, A100 80GB
-compute nodes). Compute nodes have **no outbound internet**, so:
+compute nodes). **Two separate hosts, two separate filesystems**:
 
-- **pip** — the lab machine runs `pip download` for the HPC's platform;
-  `wheels/` is rsynced; the HPC installs offline via `pip install --no-index`.
-- **wandb** — `WANDB_MODE=offline` on the HPC. The lab machine runs
+- **login node** (`${HPC_USER}@${HPC_HOST}`) — reachable directly from the
+  lab. No `qsub` here; it's a staging/jump host only.
+- **compute node** (`${HPC_INNER_HOST}`, default alias `hpc`) — reached by
+  `ssh`-ing into the login node and, from there, `ssh hpc`. `qsub`/`qstat`/
+  `qdel` and the running jobs live here. Compute nodes have **no outbound
+  internet**.
+
+`scripts/hpc_common.sh` provides the two-hop primitives every other HPC
+script builds on: `login_ssh "<cmd>"` (one hop), `compute_ssh "<cmd>"` (two
+hops — base64-encodes the payload before the first hop so nested quoting in
+`<cmd>` never has to survive two shell re-parses), `compute_rsync_push`, and
+`resolve_hpc_roots` (fills `HPC_LOGIN_REPO_ROOT` / `HPC_COMPUTE_REPO_ROOT`
+with back-compat fallback from `HPC_PROJECT_DIR`).
+
+Consequences of the split filesystem:
+
+- **Python env** — this repo ships a prebuilt `.venv/` (`USE_SHIPPED_VENV=1`,
+  the default) that gets pushed lab→login→compute and used **as-is**;
+  `scripts/hpc_bootstrap.sh` verifies it imports `torch`+`wandb` on the
+  compute node rather than reinstalling anything. The old `pip download` /
+  offline-wheels path (`USE_SHIPPED_VENV=0`) still exists as a fallback.
+  **Invariant: never `source .venv/bin/activate`** anywhere in the HPC
+  path — a venv rsynced from another machine has a dead `VIRTUAL_ENV` path
+  baked into `bin/activate`, so activation silently no-ops and `python`
+  resolves to the wrong interpreter. Always invoke `.venv/bin/python` by
+  absolute path (it *is* relocatable — it derives its prefix from the
+  adjacent `pyvenv.cfg`).
+- **Rsync excludes must be anchored** (`/logs/`, `/model/`, `/data/`, …,
+  with a leading `/`). An unanchored `--exclude='wandb/'` matches rsync's
+  "final path component at any depth" rule and silently drops
+  `.venv/lib/.../site-packages/wandb/` along with the repo's `wandb/` —
+  `.venv/` gets its own rsync pass with only `__pycache__/`/`*.pyc` excluded.
+- **wandb** — `WANDB_MODE=offline` on the compute node. The lab machine runs
   `wandb sync wandb/offline-run-*` after `hpc_pull_results.sh` completes.
-- **Telegram** — three-tier fallback in `utils/notify.py`:
-  1. `TELEGRAM_RELAY_URL` (lab-side HTTP relay), then
-  2. Direct `sendMessage` API, then
-  3. JSONL queue at `logs/notify_queue.jsonl`.
-  On HPC compute nodes only (3) works, so a login-node forwarder
-  (`scripts/notify_forwarder.py`) tails the queue on shared FS and POSTs
-  each line to `http://localhost:${LAB_TUNNEL_PORT}/notify` — which is
-  reverse-tunneled from the lab machine's `utils/notify_relay.py`.
+- **Telegram** — `hpc_preflight.sh` probe 5 checks whether the compute node
+  has direct outbound internet; if so, `utils/notify.py`'s tier-2 direct
+  `sendMessage` handles everything with no tunnel. Otherwise, chained
+  reverse tunnels: lab→login (`autossh`, background process) and
+  login→compute (`autossh`, tmux session `prism_inner_tunnel` on the login
+  node). The message forwarder (`scripts/notify_forwarder.py`) now runs
+  **on the compute node** in tmux session `prism_forwarder` — that's where
+  `logs/notify_queue.jsonl` actually gets written (CWD-relative in
+  `utils/notify.py`, and jobs `cd` to the compute root) — and drains it
+  through the chained tunnel to the lab's `utils/notify_relay.py`.
+- **Result return** (compute→login→lab) — each PBS array element ends by
+  calling `scripts/hpc_push_results.sh`, which **unconditionally** writes a
+  `logs/pending_push/<idx>` marker on the compute node *before* attempting
+  anything (so a fallback path always has ground truth), then — only if
+  `PUSH_RESULTS_FROM_JOB=1` (set only when preflight probe 6 confirms
+  compute→login connectivity) — tries to rsync its checkpoint/logs/wandb
+  straight to the login node and clears the marker on success. Whether or
+  not that push runs, `scripts/hpc_collector.sh` (tmux session
+  `prism_collector` on the login node, started by `hpc_launch.sh`) polls
+  the compute node for `pending_push/` markers on `COLLECTOR_INTERVAL`
+  seconds and **pulls** anything still marked — pull, not push, because
+  login→compute is the direction already proven to work. The lab-side
+  `hpc_grid_watcher.sh` then pulls login→lab as before, now also fast-pathed
+  by checking `logs/grid_done/<idx>` markers before falling back to qstat.
 
 ### Entry point
 
-The junior runs exactly one script on the lab machine:
+The junior runs two scripts on the lab machine — preflight first, always:
 
 ```bash
-bash scripts/hpc_launch.sh
+bash scripts/hpc_preflight.sh   # read-only: both hops, tools, shipped-venv sanity
+bash scripts/hpc_launch.sh      # does the actual work
 ```
 
-That sanity-checks the WiFi (`mlr lab 5g`), builds `wheels/`, rsyncs
-repo + wheels + `data/processed/`, ssh's into the HPC login node to run
-`hpc_bootstrap.sh` (offline pip install + `.env`), starts the relay +
-reverse tunnel on the lab machine, launches the forwarder tmux session
-on the HPC login node, and `qsub`'s the array job.
+`hpc_launch.sh` sanity-checks the WiFi (`mlr lab 5g`) and both SSH hops,
+skips the wheel build (shipped-venv default), independently rsyncs repo /
+`.venv/` / `data/processed/` lab→login then login→compute (each of the
+three skipped if already present+intact on the target), runs
+`hpc_bootstrap.sh` **on the compute node** via `compute_ssh`, brings up the
+Telegram chain (§ above), and `qsub`'s the smoke + full array jobs via
+`compute_ssh`. `scripts/hpc_train.sh` is now a thin wrapper —
+`exec bash scripts/hpc_launch.sh --resume "$@"` — kept for anyone with the
+old command memorized; the "skip what's already staged" behaviour it used
+to duplicate is now native to `hpc_launch.sh` itself.
 
 Config lives in `scripts/hpc_config.env` (copied from
 `.example`) — every runtime-fill value is marked `FILL_ME` with an
@@ -389,12 +441,24 @@ The PBS script picks its slot from `${PBS_ARRAY_INDEX}` via `grid_lookup`.
 
 ### Compile-pass caveat for new bash / .pbs
 
-All new bash scripts (`hpc_launch.sh`, `hpc_bootstrap.sh`, `hpc_pull_results.sh`,
-`grid_manifest.sh`, `hpc_pbs_job.pbs`) and Python files (`notify_relay.py`,
-`notify_forwarder.py`, updated `train.py` / `notify.py` / `logging_setup.py` /
-`dataloader.py` / `slice.py`) have been passed through `python -m py_compile`
-and `bash -n`. **They have not been executed on a real HPC.** The wiki's
-smoke-test flow (`HPC_ARRAY_RANGE=1-1`) is the recommended first run.
+All bash scripts (`hpc_common.sh`, `hpc_preflight.sh`, `hpc_launch.sh`,
+`hpc_bootstrap.sh`, `hpc_pbs_job.pbs`, `hpc_push_results.sh`,
+`hpc_collector.sh`, `hpc_smoke_watcher.sh`, `hpc_grid_watcher.sh`,
+`hpc_pull_results.sh`, `hpc_train.sh`, `grid_manifest.sh`) and Python files
+(`notify_relay.py`, `notify_forwarder.py`, updated `train.py` / `notify.py` /
+`logging_setup.py` / `dataloader.py` / `slice.py`) have been passed through
+`python -m py_compile` and `bash -n`. The two-hop `login_ssh`/`compute_ssh`
+plumbing in `hpc_common.sh` was additionally exercised against a local mock
+SSH chain (verifying the base64 payload round-trips correctly through the
+login→compute hop) and `hpc_launch.sh --dry-run` / `hpc_preflight.sh` were
+run end-to-end against that mock without a crash. **None of this has been
+executed against the real IITD cluster.** The wiki's smoke-test flow
+(`HPC_ARRAY_RANGE=1-1`, i.e. what `hpc_launch.sh` submits first) is the
+recommended first real run — and `bash scripts/hpc_preflight.sh` should be
+run before it every time, since it's the one check that can only be
+answered against the real cluster (whether the shipped `.venv`'s
+interpreter actually exists on the compute node, whether the two SSH hops
+are passwordless, etc).
 
 ## 9. Phase 2 (Future)
 
