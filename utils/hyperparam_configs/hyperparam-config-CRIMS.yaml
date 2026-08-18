@@ -6,7 +6,7 @@
 # --- Optimization ---
 epochs: 100
 lr: 1.0e-3
-batch_size: 16         # scaled down from AVIRIS(16) — CRIMS activations ~1.28x larger spatially, ~1.65x spectrally
+batch_size: 4 # scaled down from AVIRIS(16) — CRIMS activations ~1.28x larger spatially, ~1.65x spectrally
 num_workers: 4
 beta: 1.0e-3
 lambda_physics: 0.3
@@ -15,6 +15,6 @@ weight_decay: 1.0e-5
 early_stopping_patience: 7
 
 # --- Baseline capacity (matches vae-our at CRIMS = 72.99M within +/-1%) ---
-vae_standard_base_ch: 229                  # analytic: 72.82M (-0.24%)
-vae_3d_base_ch: 134                        # analytic: 72.44M (-0.76%)
-vae_1d_hidden_dims: [7184, 3592, 1796]     # analytic: 72.53M (-0.64%)
+vae_standard_base_ch: 229 # analytic: 72.82M (-0.24%)
+vae_3d_base_ch: 134 # analytic: 72.44M (-0.76%)
+vae_1d_hidden_dims: [7184, 3592, 1796] # analytic: 72.53M (-0.64%)
