@@ -15,17 +15,19 @@
 #
 #   1. Sanity checks (wifi SSID, config env, SSH reachability, tool probes).
 #   2. Wheels: skipped when USE_SHIPPED_VENV=1 (default).
-#   3. Runs scripts/hpc_bootstrap.sh on the COMPUTE node.
-#   4. Telegram: relay (lab) + chained reverse tunnels (lab->login->compute)
+#   3. lab -> login: TWO independent conditional rsyncs (repo / .venv),
+#      each skipped if already present+intact on the login node.
+#   4. login -> compute: same two pushes, run ON the login node.
+#   5. Runs scripts/hpc_bootstrap.sh on the COMPUTE node.
+#   6. Telegram: relay (lab) + chained reverse tunnels (lab->login->compute)
 #      + forwarder tmux (on the compute node) + collector tmux (on the
 #      login node, pulls finished slots' results back).
-#   5. qsubs scripts/hpc_pbs_job.pbs (via compute_ssh) as a smoke run, then
+#   7. qsubs scripts/hpc_pbs_job.pbs (via compute_ssh) as a smoke run, then
 #      hands off to scripts/hpc_smoke_watcher.sh for the smoke->full handoff.
-#   6. Prints the qstat / tail-monitoring cheatsheet.
+#   8. Prints the qstat / tail-monitoring cheatsheet.
 #
 # NOTE: data is expected to be pre-transferred to the HPC filesystem.
-#       Steps 3 and 4 from the old launcher (lab->login and login->compute
-#       rsyncs) have been removed entirely.
+#       The data/processed/ rsyncs have been removed entirely.
 #
 # Modes:
 #   bash scripts/hpc_launch.sh                            # full run (all datasets)
@@ -231,9 +233,9 @@ echo "  launch log       : ${LAUNCH_LOG}"
 echo "=========================================="
 
 # ---------------------------------------------------------------------------
-# 1/6  Sanity + preflight
+# 1/8  Sanity + preflight
 # ---------------------------------------------------------------------------
-log_step "1/6  Sanity checks + preflight"
+log_step "1/8  Sanity checks + preflight"
 
 # 1a. WiFi SSID (best-effort)
 if [[ "${LAB_WIFI_SSID:-}" != "" ]]; then
@@ -323,9 +325,9 @@ if [[ "${USE_SHIPPED_VENV}" == "1" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2/6  Wheels (skipped when USE_SHIPPED_VENV=1 — the default)
+# 2/8  Wheels (skipped when USE_SHIPPED_VENV=1 — the default)
 # ---------------------------------------------------------------------------
-log_step "2/6  Build wheels for HPC platform"
+log_step "2/8  Build wheels for HPC platform"
 
 WHEEL_DIR="${REPO_ROOT}/wheels"
 if [[ "${USE_SHIPPED_VENV}" == "1" ]]; then
@@ -352,12 +354,92 @@ else
     fi
 fi
 
-# Steps 3 & 4 (data transfer) removed — data is pre-loaded on the HPC.
+# ---------------------------------------------------------------------------
+# 3/8  lab -> login: repo / .venv pushes
+# ---------------------------------------------------------------------------
+log_step "3/8  lab -> login node (repo / .venv)"
+
+REPO_RSYNC_EXCLUDES=(
+    --exclude='/.git/'
+    --exclude='__pycache__/'
+    --exclude='*.pyc'
+    --exclude='/wandb/'
+    --exclude='/logs/'
+    --exclude='/checkpoints/'
+    --exclude='/model/'
+    --exclude='/model_smoke/'
+    --exclude='/data/'
+    --exclude='/results/'
+    --exclude='/wheels/'
+    --exclude='/.venv/'
+    --exclude='notebooks/*_files/'
+)
+VENV_RSYNC_EXCLUDES=(--exclude='__pycache__/' --exclude='*.pyc')
+RSYNC_OPTS=(-a --human-readable --info=progress2 --partial --compress)
+
+venv_needs_push=1
+venv_login_probe="$(login_ssh "'${HPC_LOGIN_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
+if echo "${venv_login_probe}" | grep -q IMPORT_OK; then
+    venv_needs_push=0
+    log_ok "login-node .venv already imports torch+wandb — skipping the .venv push."
+else
+    log_warn "login-node .venv missing or broken — will (re-)push it. Last probe output:"
+    echo "${venv_login_probe}" | sed 's/^/      /'
+fi
+
+if [[ "${MODE}" == "dry-run" ]]; then
+    echo "    (dry-run) repo         -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/  [always]"
+    (( venv_needs_push )) && echo "    (dry-run) .venv        -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/.venv/  [needed]" \
+        || echo "    (dry-run) .venv        -> SKIP (already intact)"
+else
+    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
+        "mkdir -p '${HPC_LOGIN_REPO_ROOT}/logs'"
+
+    log_step "  3a repo tree (always — small, keeps scripts/train.py current)"
+    rsync "${RSYNC_OPTS[@]}" "${REPO_RSYNC_EXCLUDES[@]}" \
+        "${LAB_REPO_ROOT}/" \
+        "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/" \
+        || fatal "rsync repo failed"
+
+    if (( venv_needs_push )); then
+        log_step "  3b .venv/  (~5GB, can take a while)"
+        rsync "${RSYNC_OPTS[@]}" "${VENV_RSYNC_EXCLUDES[@]}" \
+            "${LAB_REPO_ROOT}/.venv/" \
+            "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/.venv/" \
+            || fatal "rsync .venv failed"
+    fi
+fi
+log_ok "lab -> login sync complete"
 
 # ---------------------------------------------------------------------------
-# 3/6  Bootstrap on the compute node
+# 4/8  login -> compute: repo / .venv pushes
 # ---------------------------------------------------------------------------
-log_step "3/6  Running scripts/hpc_bootstrap.sh on the compute node"
+log_step "4/8  login -> compute node (repo / .venv)"
+
+if [[ "${MODE}" == "dry-run" ]]; then
+    echo "    (dry-run) would run compute_rsync_push for repo and .venv (if needed)"
+else
+    log_step "  4a repo tree -> compute"
+    compute_rsync_push "${HPC_LOGIN_REPO_ROOT}" "${HPC_COMPUTE_REPO_ROOT}" \
+        "--exclude='/.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='/wandb/' --exclude='/logs/' --exclude='/checkpoints/' --exclude='/model/' --exclude='/model_smoke/' --exclude='/data/' --exclude='/results/' --exclude='/wheels/' --exclude='/.venv/'" \
+        || fatal "login->compute repo rsync failed"
+
+    compute_venv_probe="$(compute_ssh "'${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
+    if echo "${compute_venv_probe}" | grep -q IMPORT_OK; then
+        log_ok "compute-node .venv already intact — skipping the .venv push."
+    else
+        log_step "  4b .venv/ -> compute  (~5GB)"
+        compute_rsync_push "${HPC_LOGIN_REPO_ROOT}/.venv" "${HPC_COMPUTE_REPO_ROOT}/.venv" \
+            "--exclude='__pycache__/' --exclude='*.pyc'" \
+            || fatal "login->compute .venv rsync failed"
+    fi
+fi
+log_ok "login -> compute sync complete"
+
+# ---------------------------------------------------------------------------
+# 5/8  Bootstrap on the compute node
+# ---------------------------------------------------------------------------
+log_step "5/8  Running scripts/hpc_bootstrap.sh on the compute node"
 
 if [[ "${MODE}" == "dry-run" ]]; then
     echo "    (dry-run: would compute_ssh + run bootstrap)"
@@ -374,9 +456,9 @@ fi
 log_ok "compute-node bootstrap complete"
 
 # ---------------------------------------------------------------------------
-# 4/6  Telegram: relay + chained tunnels + forwarder (compute) + collector (login)
+# 6/8  Telegram: relay + chained tunnels + forwarder (compute) + collector (login)
 # ---------------------------------------------------------------------------
-log_step "4/6  Telegram delivery chain"
+log_step "6/8  Telegram delivery chain"
 
 # Decide direct-send vs chained-tunnel mode.
 HPC_TELEGRAM_MODE="tunnel"
@@ -522,9 +604,9 @@ Check ${LOG_DIR}/tunnel.log and ask Utkarsh."
 fi
 
 # ---------------------------------------------------------------------------
-# 5/6  Submit smoke run (slot 1 only) and launch watcher
+# 7/8  Submit smoke run (slot 1 only) and launch watcher
 # ---------------------------------------------------------------------------
-log_step "5/6  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
+log_step "7/8  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
 
 SMOKE_EPOCHS="${SMOKE_EPOCHS:-5}"
 SMOKE_DELAY_SECS="${SMOKE_DELAY_SECS:-600}"
@@ -573,9 +655,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6/6  Print monitoring cheatsheet
+# 8/8  Print monitoring cheatsheet
 # ---------------------------------------------------------------------------
-log_step "6/6  Monitoring cheatsheet"
+log_step "8/8  Monitoring cheatsheet"
 
 cat <<EOF
 
