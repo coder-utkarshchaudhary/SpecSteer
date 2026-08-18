@@ -370,7 +370,6 @@ REPO_RSYNC_EXCLUDES=(
     --exclude='/model_smoke/'
     --exclude='/data/'
     --exclude='/results/'
-    --exclude='/wheels/'
     --exclude='/.venv/'
     --exclude='notebooks/*_files/'
 )
@@ -421,7 +420,7 @@ if [[ "${MODE}" == "dry-run" ]]; then
 else
     log_step "  4a repo tree -> compute"
     compute_rsync_push "${HPC_LOGIN_REPO_ROOT}" "${HPC_COMPUTE_REPO_ROOT}" \
-        "--exclude='/.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='/wandb/' --exclude='/logs/' --exclude='/checkpoints/' --exclude='/model/' --exclude='/model_smoke/' --exclude='/data/' --exclude='/results/' --exclude='/wheels/' --exclude='/.venv/'" \
+        "--exclude='/.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='/wandb/' --exclude='/logs/' --exclude='/checkpoints/' --exclude='/model/' --exclude='/model_smoke/' --exclude='/data/' --exclude='/results/' --exclude='/.venv/'" \
         || fatal "login->compute repo rsync failed"
 
     compute_venv_probe="$(compute_ssh "'${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
