@@ -42,40 +42,13 @@ echo "=========================================="
 VENV_PY="${HPC_PROJECT_DIR}/.venv/bin/python"
 
 # --- 1. environment ---------------------------------------------------------
-if [[ "${USE_SHIPPED_VENV}" == "1" && -x "${VENV_PY}" ]]; then
-    echo ">>> USE_SHIPPED_VENV=1 and ${VENV_PY} exists — verifying it imports torch+wandb"
-    if "${VENV_PY}" -c "import sys, torch, wandb; print('    python :', sys.version.splitlines()[0]); print('    torch  :', torch.__version__, ' cuda_available:', torch.cuda.is_available()); print('    wandb  :', wandb.__version__)"; then
-        echo ">>> shipped .venv verified — skipping venv creation and pip entirely."
-    else
-        echo "!!! shipped .venv failed to import torch/wandb."
-        echo "!!! Likely cause: the venv was rsynced with unanchored excludes that dropped a"
-        echo "!!! site-packages subfolder (e.g. wandb/) named the same as a repo-root exclude."
-        echo "!!! Fix on the lab side: re-push .venv (scripts/hpc_launch.sh now uses anchored"
-        echo "!!! excludes for the repo push and a separate, minimally-excluded push for .venv)."
-        echo "!!! Falling back to the offline-wheels path below, if wheels/ is present."
-        USE_SHIPPED_VENV=0
-    fi
+if [[ ! -x "${VENV_PY}" ]]; then
+    echo "!!! ERROR: ${VENV_PY} not found or not executable."
+    echo "!!! The .venv was not successfully transferred from your laptop to the HPC compute node."
+    exit 1
 fi
 
-if [[ "${USE_SHIPPED_VENV}" != "1" ]]; then
-    if [[ ! -d wheels || $(ls wheels/*.whl 2>/dev/null | wc -l) -eq 0 ]]; then
-        echo "!!! USE_SHIPPED_VENV=0 (or the shipped venv failed) AND wheels/ is missing or empty."
-        echo "!!! Nothing to bootstrap from. Either:"
-        echo "!!!   (a) fix/re-push .venv and set USE_SHIPPED_VENV=1, or"
-        echo "!!!   (b) run scripts/hpc_launch.sh with the wheel-build step enabled."
-        exit 3
-    fi
-    echo ">>> offline-wheels path: creating/using .venv/ and installing from wheels/"
-    if [[ ! -d .venv ]]; then
-        echo ">>> creating .venv/"
-        python3 -m venv .venv
-    fi
-    "${VENV_PY}" -m pip install --upgrade --no-index --find-links wheels/ pip 2>/dev/null || \
-        echo "    (pip self-upgrade skipped: no matching wheel — safe to ignore)"
-    echo ">>> installing requirements from wheels/ (offline)"
-    "${VENV_PY}" -m pip install --no-index --find-links wheels/ -r requirements.txt
-fi
-
+echo ">>> Using transferred .venv as-is (bypassed all creation/fallback logic)."
 echo ">>> venv python (absolute, never activated): ${VENV_PY}"
 
 # --- 2. write .env --------------------------------------------------------
