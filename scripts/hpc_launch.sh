@@ -2,6 +2,7 @@
 # scripts/hpc_launch.sh
 # ---------------------
 # Single-entry-point launcher for the IITD HPC ablation run.
+# Data is assumed to already be present on the HPC — no rsync steps.
 #
 # TOPOLOGY: two separate hosts, two separate filesystems.
 #   LOGIN node   ssh ${HPC_USER}@${HPC_HOST}         — reachable from the lab.
@@ -12,31 +13,26 @@
 #
 # What this does, in order:
 #
-#   0. Preflight (see scripts/hpc_preflight.sh for the long-form version):
-#      lab->login, login->compute, tool availability, shipped-.venv sanity.
-#   1. Sanity checks (wifi SSID, config env, local processed data).
-#   2. Wheels: skipped when USE_SHIPPED_VENV=1 (default) — the whole point
-#      of shipping a .venv is not needing an offline pip install.
-#   3. lab -> login: THREE independent conditional rsyncs (repo / .venv /
-#      data), each skipped if already present+intact on the login node.
-#   4. login -> compute: same three pushes, run ON the login node (the lab
-#      cannot reach the compute node directly).
-#   5. Runs scripts/hpc_bootstrap.sh on the COMPUTE node.
-#   6. Telegram: relay (lab) + chained reverse tunnels (lab->login->compute)
+#   1. Sanity checks (wifi SSID, config env, SSH reachability, tool probes).
+#   2. Wheels: skipped when USE_SHIPPED_VENV=1 (default).
+#   3. Runs scripts/hpc_bootstrap.sh on the COMPUTE node.
+#   4. Telegram: relay (lab) + chained reverse tunnels (lab->login->compute)
 #      + forwarder tmux (on the compute node) + collector tmux (on the
 #      login node, pulls finished slots' results back).
-#   7. qsubs scripts/hpc_pbs_job.pbs (via compute_ssh) as a smoke run, then
+#   5. qsubs scripts/hpc_pbs_job.pbs (via compute_ssh) as a smoke run, then
 #      hands off to scripts/hpc_smoke_watcher.sh for the smoke->full handoff.
-#   8. Prints the qstat / tail-monitoring cheatsheet.
+#   6. Prints the qstat / tail-monitoring cheatsheet.
+#
+# NOTE: data is expected to be pre-transferred to the HPC filesystem.
+#       Steps 3 and 4 from the old launcher (lab->login and login->compute
+#       rsyncs) have been removed entirely.
 #
 # Modes:
-#   bash scripts/hpc_launch.sh                 # full run
-#   bash scripts/hpc_launch.sh --resume        # same, but never re-push data
-#                                               #  on a failed count (used by
-#                                               #  the old hpc_train.sh path)
-#   bash scripts/hpc_launch.sh --dry-run       # sanity + print-only
-#   bash scripts/hpc_launch.sh --stop          # kill everything + qdel
-#   bash scripts/hpc_launch.sh --status        # what's alive
+#   bash scripts/hpc_launch.sh                            # full run (all datasets)
+#   bash scripts/hpc_launch.sh --datasets M3,CRIMS        # grid filtered to named datasets
+#   bash scripts/hpc_launch.sh --dry-run                  # sanity + print-only
+#   bash scripts/hpc_launch.sh --stop                     # kill everything + qdel
+#   bash scripts/hpc_launch.sh --status                   # what's alive
 #
 # Everything is driven by scripts/hpc_config.env. Copy .example to .env,
 # fill the FILL_ME blanks, then run this script. Don't touch anything else.
@@ -71,12 +67,14 @@ fatal() { log_err "$*"; exit 1; }
 # ---------------------------------------------------------------------------
 MODE="run"
 RESUME=0
+DATASETS_SUBSET=""   # e.g. "M3,CRIMS" — empty means all
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run) MODE="dry-run"; shift ;;
-        --stop)    MODE="stop"; shift ;;
-        --status)  MODE="status"; shift ;;
-        --resume)  RESUME=1; shift ;;
+        --dry-run)  MODE="dry-run"; shift ;;
+        --stop)     MODE="stop"; shift ;;
+        --status)   MODE="status"; shift ;;
+        --resume)   RESUME=1; shift ;;
+        --datasets) DATASETS_SUBSET="$2"; shift 2 ;;
         -h|--help)
             sed -n '2,45p' "$0"
             exit 0
@@ -128,7 +126,7 @@ export USE_SHIPPED_VENV="${USE_SHIPPED_VENV:-1}"
 export PUSH_RESULTS_FROM_JOB="${PUSH_RESULTS_FROM_JOB:-0}"
 export COLLECTOR_INTERVAL="${COLLECTOR_INTERVAL:-120}"
 HPC_ARRAY_RANGE="${HPC_ARRAY_RANGE:-1-28}"
-MIN_TOTAL_PATCHES=1000
+export DATASETS_SUBSET
 
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "${LOG_DIR}"
@@ -218,14 +216,14 @@ fi
 exec > >(tee -a "${LAUNCH_LOG}") 2>&1
 
 echo "=========================================="
-echo " HPC LAUNCH  (mode=${MODE}, resume=${RESUME})"
+echo " HPC LAUNCH  (mode=${MODE})"
 echo "  ts               : ${TS}"
 echo "  lab repo         : ${LAB_REPO_ROOT}"
-echo "  lab data root    : ${LAB_DATA_ROOT}"
 echo "  login node       : ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}"
 echo "  compute node     : ${HPC_INNER_HOST}:${HPC_COMPUTE_REPO_ROOT}"
 echo "  hpc queue        : ${HPC_QUEUE}"
 echo "  hpc array        : ${HPC_ARRAY_RANGE}"
+echo "  datasets         : ${DATASETS_SUBSET:-<all>}"
 echo "  tunnel port      : ${LAB_TUNNEL_PORT}"
 echo "  epochs           : ${EPOCHS}"
 echo "  use_shipped_venv : ${USE_SHIPPED_VENV}"
@@ -233,9 +231,9 @@ echo "  launch log       : ${LAUNCH_LOG}"
 echo "=========================================="
 
 # ---------------------------------------------------------------------------
-# 1/8  Sanity + preflight
+# 1/6  Sanity + preflight
 # ---------------------------------------------------------------------------
-log_step "1/8  Sanity checks + preflight"
+log_step "1/6  Sanity checks + preflight"
 
 # 1a. WiFi SSID (best-effort)
 if [[ "${LAB_WIFI_SSID:-}" != "" ]]; then
@@ -251,27 +249,15 @@ if [[ "${LAB_WIFI_SSID:-}" != "" ]]; then
         if [[ "${current_ssid}" == "${LAB_WIFI_SSID}" ]]; then
             log_ok "wifi = '${current_ssid}'"
         else
-            log_warn "wifi = '${current_ssid}' (expected '${LAB_WIFI_SSID}'). Continuing — but if uploads stall, switch networks."
+            log_warn "wifi = '${current_ssid}' (expected '${LAB_WIFI_SSID}'). Continuing."
         fi
     else
         log_warn "could not detect wifi SSID; skipping check."
     fi
 fi
 
-# 1b. Local processed data present
-if [[ ! -d "${LAB_DATA_ROOT}" ]]; then
-    fatal "processed data not found at:
-         ${LAB_DATA_ROOT}
-Is the external drive mounted? Adjust LAB_DATA_ROOT in ${CONFIG_FILE}."
-fi
-n_iirs=$(find "${LAB_DATA_ROOT}/IIRS"   -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
-n_m3=$(find   "${LAB_DATA_ROOT}/M3"     -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
-n_av=$(find   "${LAB_DATA_ROOT}/AVIRIS" -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
-n_cr=$(find   "${LAB_DATA_ROOT}/CRIMS"  -name '*.npy' 2>/dev/null | wc -l | tr -d ' ')
-log_ok "lab patches: IIRS=${n_iirs}  M3=${n_m3}  AVIRIS=${n_av}  CRIMS=${n_cr}"
-if (( n_iirs + n_m3 + n_av + n_cr < MIN_TOTAL_PATCHES )); then
-    fatal "very few patches under ${LAB_DATA_ROOT} — did preprocessing run?"
-fi
+# 1b. Data is pre-transferred — verify it exists on the compute node.
+log_ok "data transfer skipped — data assumed pre-loaded on HPC."
 
 # 1c. lab -> login reachability
 if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "${HPC_USER}@${HPC_HOST}" 'echo ok' >/dev/null 2>&1; then
@@ -337,9 +323,9 @@ if [[ "${USE_SHIPPED_VENV}" == "1" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2/8  Wheels (skipped when USE_SHIPPED_VENV=1 — the default)
+# 2/6  Wheels (skipped when USE_SHIPPED_VENV=1 — the default)
 # ---------------------------------------------------------------------------
-log_step "2/8  Build wheels for HPC platform"
+log_step "2/6  Build wheels for HPC platform"
 
 WHEEL_DIR="${REPO_ROOT}/wheels"
 if [[ "${USE_SHIPPED_VENV}" == "1" ]]; then
@@ -366,142 +352,12 @@ else
     fi
 fi
 
-# ---------------------------------------------------------------------------
-# 3/8  lab -> login: three INDEPENDENT conditional rsyncs
-# ---------------------------------------------------------------------------
-log_step "3/8  lab -> login node (repo / .venv / data — each pushed only if missing/stale)"
-
-# Anchored excludes for the repo push. UNANCHORED patterns (the old
-# behaviour) match rsync's "final path component at any depth" rule, so
-# --exclude='wandb/' would also match .venv/lib/.../site-packages/wandb/ and
-# silently gut the venv. Anchoring with a leading '/' ties each exclude to
-# the repo root only.
-REPO_RSYNC_EXCLUDES=(
-    --exclude='/.git/'
-    --exclude='__pycache__/'
-    --exclude='*.pyc'
-    --exclude='/wandb/'
-    --exclude='/logs/'
-    --exclude='/checkpoints/'
-    --exclude='/model/'
-    --exclude='/model_smoke/'
-    --exclude='/data/'
-    --exclude='/results/'
-    --exclude='/wheels/'
-    --exclude='/.venv/'
-    --exclude='notebooks/*_files/'
-)
-VENV_RSYNC_EXCLUDES=(--exclude='__pycache__/' --exclude='*.pyc')
-RSYNC_OPTS=(-a --human-readable --info=progress2 --partial --compress)
-
-if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run) checking login-node data + .venv state:"
-fi
-
-n_login_iirs=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" IIRS)
-n_login_m3=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" M3)
-n_login_av=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" AVIRIS)
-n_login_cr=$(count_npy_remote login "${HPC_LOGIN_REPO_ROOT}/data/processed" CRIMS)
-n_login_total=$(( n_login_iirs + n_login_m3 + n_login_av + n_login_cr ))
-log_ok "login-node patches: IIRS=${n_login_iirs} M3=${n_login_m3} AVIRIS=${n_login_av} CRIMS=${n_login_cr}"
-
-data_needs_push=1
-if (( n_login_total >= MIN_TOTAL_PATCHES )); then
-    data_needs_push=0
-    log_ok "data already present on the login node (${n_login_total} patches) — skipping the 1-3h data push."
-elif (( RESUME )); then
-    log_warn "--resume set and login-node data looks incomplete (${n_login_total} patches) — NOT re-pushing. Fix data on the login node manually, or drop --resume."
-    data_needs_push=0
-fi
-
-venv_needs_push=1
-venv_login_probe="$(login_ssh "'${HPC_LOGIN_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
-if echo "${venv_login_probe}" | grep -q IMPORT_OK; then
-    venv_needs_push=0
-    log_ok "login-node .venv already imports torch+wandb — skipping the .venv push."
-else
-    log_warn "login-node .venv missing or broken — will (re-)push it. Last probe output:"
-    echo "${venv_login_probe}" | sed 's/^/      /'
-fi
-
-if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run) repo         -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/  [always]"
-    (( venv_needs_push )) && echo "    (dry-run) .venv        -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/.venv/  [needed]" \
-        || echo "    (dry-run) .venv        -> SKIP (already intact)"
-    (( data_needs_push )) && echo "    (dry-run) data/processed -> ${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/data/processed/  [needed]" \
-        || echo "    (dry-run) data/processed -> SKIP (already present)"
-else
-    ssh -o BatchMode=yes "${HPC_USER}@${HPC_HOST}" \
-        "mkdir -p '${HPC_LOGIN_REPO_ROOT}/data/processed' '${HPC_LOGIN_REPO_ROOT}/logs'"
-
-    log_step "  3a repo tree (always — small, keeps scripts/train.py current)"
-    rsync "${RSYNC_OPTS[@]}" "${REPO_RSYNC_EXCLUDES[@]}" \
-        "${LAB_REPO_ROOT}/" \
-        "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/" \
-        || fatal "rsync repo failed"
-
-    if (( venv_needs_push )); then
-        log_step "  3b .venv/  (own rsync — only __pycache__/*.pyc excluded; ~5GB, can take a while)"
-        rsync "${RSYNC_OPTS[@]}" "${VENV_RSYNC_EXCLUDES[@]}" \
-            "${LAB_REPO_ROOT}/.venv/" \
-            "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/.venv/" \
-            || fatal "rsync .venv failed"
-    fi
-
-    if (( data_needs_push )); then
-        log_step "  3c data/processed/  (this is the long one — expect 1-3 h over lab wifi)"
-        rsync "${RSYNC_OPTS[@]}" \
-            "${LAB_DATA_ROOT}/" \
-            "${HPC_USER}@${HPC_HOST}:${HPC_LOGIN_REPO_ROOT}/data/processed/" \
-            || fatal "rsync data failed"
-    fi
-fi
-log_ok "lab -> login sync complete"
+# Steps 3 & 4 (data transfer) removed — data is pre-loaded on the HPC.
 
 # ---------------------------------------------------------------------------
-# 4/8  login -> compute: same three pushes, run ON the login node
+# 3/6  Bootstrap on the compute node
 # ---------------------------------------------------------------------------
-log_step "4/8  login -> compute node (repo / .venv / data)"
-
-if [[ "${MODE}" == "dry-run" ]]; then
-    echo "    (dry-run) would run compute_rsync_push for repo, .venv (if needed), data (if needed)"
-else
-    n_compute_total=0
-    for ds in IIRS M3 AVIRIS CRIMS; do
-        n=$(count_npy_remote compute "${HPC_COMPUTE_REPO_ROOT}/data/processed" "${ds}")
-        n_compute_total=$(( n_compute_total + n ))
-    done
-    log_ok "compute-node patches so far: ${n_compute_total}"
-
-    log_step "  4a repo tree -> compute"
-    compute_rsync_push "${HPC_LOGIN_REPO_ROOT}" "${HPC_COMPUTE_REPO_ROOT}" \
-        "--exclude='/.git/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='/wandb/' --exclude='/logs/' --exclude='/checkpoints/' --exclude='/model/' --exclude='/model_smoke/' --exclude='/data/' --exclude='/results/' --exclude='/wheels/' --exclude='/.venv/'" \
-        || fatal "login->compute repo rsync failed"
-
-    compute_venv_probe="$(compute_ssh "'${HPC_COMPUTE_REPO_ROOT}/.venv/bin/python' -c 'import torch, wandb' 2>&1 && echo IMPORT_OK" 2>/dev/null || true)"
-    if echo "${compute_venv_probe}" | grep -q IMPORT_OK; then
-        log_ok "compute-node .venv already intact — skipping the .venv push."
-    else
-        log_step "  4b .venv/ -> compute  (~5GB)"
-        compute_rsync_push "${HPC_LOGIN_REPO_ROOT}/.venv" "${HPC_COMPUTE_REPO_ROOT}/.venv" \
-            "--exclude='__pycache__/' --exclude='*.pyc'" \
-            || fatal "login->compute .venv rsync failed"
-    fi
-
-    if (( n_compute_total < MIN_TOTAL_PATCHES )); then
-        log_step "  4c data/processed/ -> compute"
-        compute_rsync_push "${HPC_LOGIN_REPO_ROOT}/data/processed" "${HPC_COMPUTE_REPO_ROOT}/data/processed" \
-            || fatal "login->compute data rsync failed"
-    else
-        log_ok "compute-node data already present (${n_compute_total} patches) — skipping."
-    fi
-fi
-log_ok "login -> compute sync complete"
-
-# ---------------------------------------------------------------------------
-# 5/8  Bootstrap on the compute node
-# ---------------------------------------------------------------------------
-log_step "5/8  Running scripts/hpc_bootstrap.sh on the compute node"
+log_step "3/6  Running scripts/hpc_bootstrap.sh on the compute node"
 
 if [[ "${MODE}" == "dry-run" ]]; then
     echo "    (dry-run: would compute_ssh + run bootstrap)"
@@ -518,9 +374,9 @@ fi
 log_ok "compute-node bootstrap complete"
 
 # ---------------------------------------------------------------------------
-# 6/8  Telegram: relay + chained tunnels + forwarder (compute) + collector (login)
+# 4/6  Telegram: relay + chained tunnels + forwarder (compute) + collector (login)
 # ---------------------------------------------------------------------------
-log_step "6/8  Telegram delivery chain"
+log_step "4/6  Telegram delivery chain"
 
 # Decide direct-send vs chained-tunnel mode.
 HPC_TELEGRAM_MODE="tunnel"
@@ -666,9 +522,9 @@ Check ${LOG_DIR}/tunnel.log and ask Utkarsh."
 fi
 
 # ---------------------------------------------------------------------------
-# 7/8  Submit smoke run (slot 1 only) and launch watcher
+# 5/6  Submit smoke run (slot 1 only) and launch watcher
 # ---------------------------------------------------------------------------
-log_step "7/8  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
+log_step "5/6  Submit smoke run (slot 1, ${SMOKE_EPOCHS:-5} epochs)"
 
 SMOKE_EPOCHS="${SMOKE_EPOCHS:-5}"
 SMOKE_DELAY_SECS="${SMOKE_DELAY_SECS:-600}"
@@ -694,7 +550,7 @@ else
         -l walltime='01:00:00' \
         -J '1-1' \
         ${qsub_extra[*]:-} \
-        -v HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}',HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}',HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}',HPC_USER='${HPC_USER}',HPC_HOST='${HPC_HOST}',PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}' \
+        -v HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}',HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}',HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}',HPC_USER='${HPC_USER}',HPC_HOST='${HPC_HOST}',PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}',DATASETS_SUBSET='${DATASETS_SUBSET:-}' \
         scripts/hpc_pbs_job.pbs"
 
     SMOKE_JOBID=$(compute_ssh "${smoke_qsub_cmd}") || fatal "qsub smoke failed"
@@ -704,11 +560,11 @@ else
     SMOKE_JOBID=$(echo "${SMOKE_JOBID}" | tail -1 | xargs)
     echo "${SMOKE_JOBID}" > "${LOG_DIR}/hpc_jobid_smoke"
     echo "${SMOKE_JOBID}" > "${JOBID_FILE}"
-    log_ok "smoke job submitted: ${SMOKE_JOBID}"
+    log_ok "smoke job submitted: ${SMOKE_JOBID}  (datasets=${DATASETS_SUBSET:-<all>})"
     log_step "  if smoke passes, watcher will wait ${SMOKE_DELAY_SECS}s then submit full grid (${FULL_ARRAY_RANGE})"
 
     export HPC_SMOKE_JOBID="${SMOKE_JOBID}"
-    export SMOKE_DELAY_SECS FULL_ARRAY_RANGE EPOCHS EXTRA_TRAIN_ARGS
+    export SMOKE_DELAY_SECS FULL_ARRAY_RANGE EPOCHS EXTRA_TRAIN_ARGS DATASETS_SUBSET
     nohup bash "${REPO_ROOT}/scripts/hpc_smoke_watcher.sh" \
         >> "${LOG_DIR}/smoke_watcher.log" 2>&1 &
     watcher_pid=$!
@@ -717,9 +573,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 8/8  Print monitoring cheatsheet
+# 6/6  Print monitoring cheatsheet
 # ---------------------------------------------------------------------------
-log_step "8/8  Monitoring cheatsheet"
+log_step "6/6  Monitoring cheatsheet"
 
 cat <<EOF
 
