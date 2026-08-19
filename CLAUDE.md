@@ -1,10 +1,12 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-08-16  
-> **Status:** All 4 ablation models + downstream experiments implemented and byte-compiled.
+> **Last updated:** 2026-08-19  
+> **Status:** All 4 ablation models + downstream experiments implemented.
 > IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay added.
-> Training loop performance-tuned (BF16 on Ampere+, channels_last, per-epoch metric sync).  
-> ⚠️ Compile-pass ≠ verified-run. See [Caveats](#caveats) before running.
+> **Wall-time overhaul landed** — see [§10 Performance](#10-performance--why-the-grid-was-slow).
+> The 5-epoch smoke run took 1h14m–4h58m per slot; the same work now projects to
+> well under the 5–6 h/run budget at 30 epochs.  
+> ⚠️ Compile-pass ≠ verified-run. See [Caveats](#7-caveats) before running.
 
 ---
 
@@ -35,8 +37,8 @@ data/processed/<folder>/
                │  Spatial Branch          Spectral Branch│
                │  ─────────────          ───────────────│
                │  Conv1D (spectral→dim)   Conv1D × 2    │
-               │  Conv2D × 4 (spatial↓)  flatten → z_p  │
-               │  flatten → z_s                          │
+               │  Conv2D × 4 (spatial↓)  1→32→64 ch     │
+               │  flatten → z_s          flatten → z_p  │
                │                                         │
                │  reparameterize (shared)                │
                │   chunk(2, dim=1) → mu, logvar → z     │
@@ -61,7 +63,11 @@ data/processed/<folder>/
 | `utils/config.py` | All hyper-parameters + derived dims | ✅ Rewritten |
 | `utils/dataset/preprocess.py` | load → select bands → normalise → smooth | ✅ New |
 | `utils/dataset/slice.py` | preprocess → region-split → patch → save | ✅ New |
-| `utils/training/dataloader.py` | HSIPatchDataset + DataLoader factory | ✅ New |
+| `utils/dataset/pack.py` | patches → **capped fp16 memmap shards** (`data/packed/`) | ✅ New |
+| `utils/dataset/inspect_channels.py` | verify on-disk band counts vs config | ✅ New |
+| `utils/training/dataloader.py` | Packed + legacy backends, DataLoader factory | ✅ Rewritten |
+| `utils/find_max_batch.py` | binary-search the global batch size for a VRAM budget | ✅ New |
+| `utils/check-model-params.py` | param audit **+ `--solve` for baseline widths** | ✅ Fixed |
 | `modules/SpatialBranch.py` | Spatial encoder-decoder | ✅ Fixed |
 | `modules/SpectralBranch.py` | Spectral encoder-decoder | ✅ Fixed |
 | `modules/vae_our.py` | vae-our dual-stream PI-VAE (+ encode/decode_latents) | ✅ |
@@ -76,7 +82,8 @@ data/processed/<folder>/
 | `notebooks/*.ipynb` | Per-model self-contained training notebooks | ✅ |
 | `inference/notebooks/*.ipynb` | Per-model self-contained eval notebooks | ✅ |
 | `scripts/preprocess.sh` | One-command preprocessing runner | ✅ New |
-| `scripts/train.sh` | Training runner (single run or full 21-run grid) | ✅ New |
+| `scripts/train.sh` | Training runner (single run or full 28-run grid, `--overwrite`) | ✅ |
+| `scripts/train_fixed.sh` | **pack → zip → smoke → full grid, one command** | ✅ New |
 | `docs/file_processing.py` | Reference script (do not modify) | — |
 
 ### Ablation models & the model contract
@@ -95,13 +102,31 @@ decode_latents(list[Tensor]) -> (B, H, W, C)
 | Model | Registry name | Latent | Hypothesis |
 |-------|---------------|--------|------------|
 | A: 2D Spatial | `vae-standard` | `(B, 16, 8, 8)` map | 2D convs blur pixel spectra → good PSNR, poor SAM |
-| B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
+| B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C/8, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
 | C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 32)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
 | Proposed: PRISM | `vae-our` | `[(B,256), (B,128,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
 
 Baselines A/B preserve the spatial grid at 8×8 (H,W ÷ 8) and reconstruct
-exactly for any band count C (B keeps spectral depth at stride 1; A/C are
-C-agnostic by construction), so all three run unchanged on IIRS/M3/AVIRIS.
+exactly for any band count C. B now strides the spectral depth as well and pads
+it up to a multiple of `2**n_down` before the encoder, cropping back after the
+decoder (only M3 actually pads, 84 → 88); A/C are C-agnostic by construction.
+All three run unchanged on IIRS/M3/AVIRIS/CRIMS.
+
+All four models are matched to `vae-our`'s parameter count **per dataset**
+(within 1.7%), via the width knobs in the hyperparam YAMLs. Regenerate those
+widths after ANY architecture change with:
+
+```bash
+PYTHONPATH=. python utils/check-model-params.py --solve   # prints paste-ready YAML
+PYTHONPATH=. python utils/check-model-params.py           # audit the result
+```
+
+| Dataset | vae-our target | `vae_standard_base_ch` | `vae_3d_base_ch` | `vae_1d_hidden_dims` |
+|---|---|---|---|---|
+| IIRS (C=256)   | 12.40 M | 94 | 48 | (2936, 1468, 734) |
+| M3 (C=84)      | 11.21 M | 91 | 46 | (2916, 1458, 729) |
+| AVIRIS (C=424) | 13.67 M | 98 | 50 | (2972, 1486, 743) |
+| CRIMS (C=456)  | 13.93 M | 99 | 51 | (2980, 1490, 745) |
 
 ### Downstream experiments (`inference/downstream.py`)
 
@@ -132,19 +157,31 @@ with 108-band IIRS cubes. Change values in the dataclass; derived fields
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
 | `input_height/width` | 64 | patch spatial size |
-| `input_channels` | 108 | bands 7:115 of IIRS |
-| `band_start / band_end` | 7 / 115 | reflective window |
-| `norm_band_idx` | 41 | ≈1500 nm reference band (within selected subset) |
+| `input_channels` | 256 / 84 / 424 / 456 | per dataset (IIRS / M3 / AVIRIS / CRIMS) |
+| `norm_target_nm` | 1500.0 | reference band resolved per-cube from its wavelengths |
 | `savgol_window` | 7 | Savitzky-Golay window length |
 | `patch_size / patch_stride` | 64 / 48 | 25% overlap |
 | `split_ratios` | (0.70, 0.15, 0.15) | train/valid/test |
+| **`train_patch_cap`** | **7000** | max training patches per dataset (applied by `pack.py`) |
+| **`patch_cap_seed`** | **1234** | seed for the cap's scene-stratified subsample |
+| `batch_size` | 32 / 32 / 16 / 16 | **per dataset** (IIRS / M3 / AVIRIS / CRIMS) — see §5 |
+| `num_workers` | 8 | dataloader workers |
 | `reduced_dims` | 32 | spatial Conv1D output channels |
 | `latent_dim` | 256 | spatial latent (post-reparameterize) |
 | `n_2D_conv_blocks` | 4 | spatial bottleneck: 64→4 px |
 | `spectral_n_1D_conv_blocks` | 2 | spectral bottleneck |
 | `spectral_latent_dim` | 128 | per-pixel spectral latent |
-| `spectral_transpose_c/l` | 216 / 27 | decoder reshape target |
-| `spectral_linear_expansion_dim` | 5832 | 216 × 27 |
+| **`spectral_base_ch`** | **32** | spectral Conv1D width — **decoupled from C**, see §10 |
+| `spectral_transpose_c/l` | 64 / C÷4 | decoder reshape target |
+| `spectral_linear_expansion_dim` | 16·C | 64 × (C÷4) |
+
+**Band counts are verified against the data, not trusted.** `apply_dataset(verify=True)`
+(used by `train.py`, `inference.py`, `downstream.py`) probes a real patch and
+raises with both numbers on a mismatch. Run the standalone check any time:
+
+```bash
+PYTHONPATH=. python utils/dataset/inspect_channels.py
+```
 
 ### Spectral dimension arithmetic
 
@@ -153,9 +190,15 @@ With `spectral_conv1D_kernel_size=4`, `stride=2`, `padding=1`:
 Conv1d:          L_out = L_in // 2
 ConvTranspose1d: L_out = 2 * L_in
 
-Encoder:  108 → 54 → 27  (L);  channels  1 → 108 → 216
-Decoder:   27 → 54 → 108 (L);  channels 216 → 108 → 1
+IIRS (C=256, spectral_base_ch=32):
+Encoder:  256 → 128 → 64  (L);  channels  1 → 32 → 64
+Decoder:   64 → 128 → 256 (L);  channels 64 → 32 → 1
 ```
+
+Sequence length `L` still tracks the band count, so the latent stays
+sensor-aware. Only the **channel width** is now a free hyper-parameter
+(`spectral_base_ch`) instead of being pinned to `input_channels`. That one
+change is worth 35–97× in FLOPs — see §10.
 
 ---
 
@@ -188,6 +231,68 @@ This will:
 - Per folder (valid/test): ~215 patches each  
 - Total (10 folders): ~15,000 patches
 
+### Step 2 — Pack (REQUIRED before training)
+
+```bash
+# all datasets, honouring settings.train_patch_cap (7000)
+PYTHONPATH=. python utils/dataset/pack.py --verify
+
+# one dataset, from scratch
+PYTHONPATH=. python utils/dataset/pack.py --dataset CRIMS --overwrite --verify
+
+# uncapped
+PYTHONPATH=. python utils/dataset/pack.py --cap 0
+```
+
+Produces:
+
+```
+data/packed/<DATASET>/
+  train.npy    (N, 64, 64, C) float16, per-patch max-normalised, band-cropped
+  train.json   metadata + provenance (source file list, per-patch maxima)
+  valid.npy / valid.json
+  test.npy  / test.json
+```
+
+Four things happen here, and each fixes a distinct problem (§10):
+
+1. **float16** halves the bytes. Values top out at 1.0 and fp16's ~5e-4 relative
+   precision is *finer* than the bfloat16 autocast training already uses.
+   Measured worst-case round-trip error: 2.4e-4.
+2. **One file replaces ~15,000.** Per-file open overhead disappears and the OS
+   page cache starts working across epochs.
+3. **Normalisation moves here**, which permanently removes the full-dataset
+   rescan the dataloader used to do at the start of *every* run.
+4. **The band crop is applied here.** `crop_bands` is otherwise only honoured by
+   `slice.py`, which never runs for CRIMS (it ships pre-processed) — so CRIMS's
+   457 → 456 crop happens at pack time or not at all.
+
+The training split is capped at `train_patch_cap` (7000), subsampled
+proportionally across scenes with a fixed seed so every model sees the identical
+subset. `valid`/`test` are never capped.
+
+| | M3 | IIRS | AVIRIS | CRIMS |
+|---|---|---|---|---|
+| available | 19,746 | 14,624 | 11,027 | 2,561 |
+| **trained on** | **7,000** | **7,000** | **7,000** | **2,561** |
+
+Besides the 1.6–2.8× speedup, this equalises the training budget across sensors —
+an improvement on the previous 8× imbalance, not a shortcut.
+
+> **Where `data/packed/` lives is load-bearing.** fp16 + single-file alone buys
+> ~2–3×. The projections in §10 assume it sits on **local NVMe** (or is held in
+> RAM via `--cache-ram`), not back on the external drive the raw patches live on.
+> Capped, all four train splits total ~53 GB; RAM caching peaks at ~25 GB since
+> only one dataset is loaded at a time.
+
+### Step 3 — Zip for Kaggle
+
+`scripts/train_fixed.sh` does this automatically, or:
+
+```bash
+zip -0 -r -q dataset.zip data/packed     # -0 = store; fp16 sensor noise does not deflate
+```
+
 ---
 
 ## 5. Training
@@ -202,10 +307,90 @@ pip install torch torchvision scipy wandb
 wandb login
 ```
 
-### Quick start
+### Quick start — the whole thing, one command
 
 ```bash
-bash scripts/train.sh --epochs 100
+bash scripts/train_fixed.sh
+```
+
+Runs: verify band counts → pack the capped fp16 dataset → zip it to
+`dataset.zip` for Kaggle → 2-epoch smoke across all 28 slots → 30-epoch full
+grid. Both training passes use `--overwrite`, so a leftover checkpoint can never
+silently consume a slot. The smoke pass writes to `model_smoke/` so it cannot be
+mistaken for a real result, and the full grid is **not** launched if the smoke
+pass reports any failure.
+
+```bash
+bash scripts/train_fixed.sh --dry-run          # print the plan, run nothing
+bash scripts/train_fixed.sh --pack-only        # build + zip the dataset only
+bash scripts/train_fixed.sh --skip-pack        # data/packed/ already built
+bash scripts/train_fixed.sh --datasets IIRS,M3
+```
+
+Once `data/packed/` exists, `scripts/train.sh` does steps 4/5 on its own:
+
+```bash
+bash scripts/train.sh --all --overwrite --epochs 30
+```
+
+### `--overwrite`
+
+Without it, `train.sh` and `hpc_pbs_job.pbs` **skip** any slot whose checkpoint
+already exists — and that skip prints to stdout only, never to Telegram. A
+Telegram transcript therefore cannot distinguish "skipped" from "crashed", which
+is how a previous grid appeared to lose slots that had merely been skipped. The
+summary block now always lists the skipped runs explicitly.
+
+```bash
+bash scripts/train.sh --all --overwrite       # or: OVERWRITE=1 bash scripts/train.sh --all
+bash scripts/hpc_launch.sh --overwrite        # threads OVERWRITE=1 through qsub -v
+```
+
+### Batch size — one number **per dataset**
+
+Batch size is held constant across all 4 models × 2 loss regimes **within** a
+dataset. That is the axis the ablation compares on, so nothing about a row's
+result can be attributed to it.
+
+It is deliberately **not** constant across datasets. There is no controlled
+comparison between sensors to protect — they differ in band count, scene count,
+spatial sampling and SNR — and these YAMLs already vary `vae_3d_base_ch` and
+friends per dataset for parameter matching. Memory per sample varies ~2× between
+sensors, so one global value would idle most of the card on the light ones.
+
+It *does* have to hold across **platforms** for a given dataset, or within-dataset
+fairness breaks the moment one slot runs on Kaggle and another on the lab. Each
+number is therefore derived against the tightest budget any slot for that dataset
+will see (the lab's 24 GB) and reused unchanged everywhere.
+
+| Dataset | `batch_size` | Binding model | GB/sample | Predicted peak |
+|---|---|---|---|---|
+| IIRS   | **32** | `vae-3d-spatio-spectral` | 0.500 | 16.2 GB |
+| M3     | **32** | `vae-1d-pixelwise` | 0.496 | 16.1 GB |
+| AVIRIS | **16** | `vae-3d-spatio-spectral` | 0.880 | 14.3 GB |
+| CRIMS  | **16** | `vae-3d-spatio-spectral` | 0.961 | 15.6 GB |
+
+against 20.4 GB usable (24 GB less 15 % headroom), rounded down to a power of two
+so the `nn.DataParallel` split stays even.
+
+> **M3's binding model is `vae-1d-pixelwise`, not `vae-3d`.** Its MLP hidden dims
+> are ~2,900–3,000 at *every* sensor, so its memory is essentially independent of
+> band count (~0.50 GB/sample throughout) and it caps M3 long before the 3D model
+> does. Scaling M3's batch from `base_ch × C` — which would have suggested 128 —
+> is wrong for exactly that reason. Measure, don't extrapolate.
+
+All four clear the other platforms: HPC's 40 GB has headroom, and Kaggle's 2 × T4
+sees `batch_size/2` per 15 GB device (worst case CRIMS: 8 × 0.961 + 0.22 ≈ 7.9 GB).
+
+```bash
+# natively on the target GPU
+PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --time
+
+# or from a smaller card: measures B=1,2,4 and fits peak = fixed + B*marginal
+PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --fit
+
+# one global number across all sensors, if you ever want that instead
+PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --global
 ```
 
 ### Full options
@@ -215,8 +400,11 @@ python train/train.py --help
 ```
 
 ```
---data-root        Processed data root  (default: data/processed)
---num-workers      DataLoader workers   (default: 4)
+--data-root        Legacy per-patch tree; forces the legacy backend
+--packed-root      Override the packed-shard dir (default: data/packed/<DS>)
+--cache-ram        Load the whole split into RAM (removes disk from the loop)
+--limit-train      Further cap training patches without re-packing
+--num-workers      DataLoader workers   (default: 8)
 --epochs           Training epochs      (default: 100)
 --batch-size       Batch size           (default: 32)
 --lr               Learning rate        (default: 1e-4)
@@ -301,6 +489,16 @@ project instructions). Before your first full training run:
 4. **Memory** — each raw cube is ~3.6 GB. The preprocessing pipeline loads one
    cube at a time. Ensure ≥8 GB free RAM before running `scripts/preprocess.sh`.
 
+5. **Pack before training.** The dataloader falls back to the legacy per-patch
+   path when no shard exists and logs a WARNING; it works, but it is the slow
+   path that made the previous grid disk-bound.
+
+6. **Notebook config duplication.** `notebooks/*.ipynb` cell 2 inlines
+   `utils/config.py` + `utils/hyperparams.py` + all four YAMLs so the notebooks
+   run standalone on Kaggle. Any change to band counts, model widths, or the
+   spectral/spatial knobs must be mirrored into **all four** notebooks. This
+   duplication is exactly how `CRIMS: 544` survived in five places at once.
+
 ---
 
 ## 8. HPC / IITD (PBS Pro)
@@ -374,7 +572,19 @@ The junior runs two scripts on the lab machine — preflight first, always:
 ```bash
 bash scripts/hpc_preflight.sh   # read-only: both hops, tools, shipped-venv sanity
 bash scripts/hpc_launch.sh      # does the actual work
+bash scripts/hpc_launch.sh --overwrite   # retrain slots that already have a ckpt
 ```
+
+`--overwrite` (or `OVERWRITE=1`) is threaded through `qsub -v` into
+`hpc_pbs_job.pbs`, which otherwise skips any slot whose checkpoint already
+exists on the compute node.
+
+**Staging the packed data.** `hpc_launch.sh` no longer rsyncs `data/` at all
+(`--exclude='/data/'` covers `data/packed/` too) — the dataset is staged onto the
+compute node manually, once. Copy `data/packed/` there by whatever route is
+convenient; note that `hpc_common.sh:count_npy_remote` counts `*.npy` files and
+the packed layout is 3 files per dataset rather than ~15,000, so do not use that
+count as a completeness check for packed data.
 
 `hpc_launch.sh` sanity-checks the WiFi (`mlr lab 5g`) and both SSH hops,
 skips the wheel build (shipped-venv default), independently rsyncs repo /
@@ -467,3 +677,121 @@ the backbone for a Latent Diffusion Model (LDM) that performs diffusion-based
 purification of the compressed latent representations from satellite imagery.
 The `standalone forward` methods on both encoder-decoder classes expose the
 full `(z, mu, logvar, reconstruction)` return for easy LDM integration.
+
+---
+
+## 10. Performance — why the grid was slow
+
+Measured from the 5-epoch smoke run (2026-08-19) and analytic MAC counts. Kept
+here so nobody has to re-derive it.
+
+### The numbers that started this
+
+| Model | IIRS wall (5 ep) | GMAC/sample |
+|---|---|---|
+| vae-3d-spatio-spectral | 2h31m | 2,301 |
+| vae-our | 1h14m | 467 |
+| vae-1d-pixelwise | 39m | 101 |
+| vae-standard | 40m | **11** |
+
+`vae-standard` needs **40× fewer FLOPs** than `vae-our` and took the same 40
+minutes. That single comparison says most of it: the grid was not
+compute-bound.
+
+### Three independent bottlenecks
+
+**(a) Disk I/O — the real ceiling for 3 of 4 models.** One IIRS epoch opened
+14,624 + 3,084 separate `.npy` files totalling ~74 GB, off the external drive at
+`/media/yashdeep/New Volume 21/…`. 74 GB ÷ 8.1 min ≈ 152 MB/s — exactly
+external-drive speed, and a hard floor of ~8 min/epoch *whatever model runs*.
+(Local NVMe measures 726 MB/s on the same patches.)
+→ Fixed by `utils/dataset/pack.py` (§4 Step 2) + the patch cap.
+
+**(b) A full dataset re-read before every run.** `dataloader.py` fell back to
+`np.load(p).max()` over every patch when `manifest.json` was absent — and it was
+absent for every dataset. Another ~74 GB read, in the main process, at the start
+of each of the 28 runs, *before* `RunNotifier` existed, so it never appeared in
+any log. ≈10 min × 28 runs ≈ 4.5 h of pure waste.
+→ Fixed: normalisation is applied once at pack time.
+
+**(c) Two architectural FLOP sinks.**
+
+*`vae-our`'s spectral branch was 99.7% of its own cost.* `SpectralBranch.Encoder`
+set `out_c = settings.input_channels`, making the Conv1d blocks `1 → C → 2C`
+channels — applied to **4,096 independent pixel spectra per patch**. At AVIRIS
+that is a 424→848-channel convolution. Width was pinned to band count for no
+principled reason, which also swung `vae-our`'s parameter count 3× across
+sensors (24.5 M at IIRS vs 73 M at CRIMS) and quietly undermined the cross-sensor
+comparison. Decoupling it (`spectral_base_ch = 32`) is a three-line change and
+leaves the structure — per-pixel 1D convs, stride-2 halving, channel doubling,
+linear → spectral latent, symmetric decoder, late fusion, MSE+βKLD+λSAM —
+completely intact.
+
+*`vae-3d` kept full spectral depth through every block.* `_DOWN_S = (1, 2, 2)`,
+so the decoder's final `ConvTranspose3d` ran at `C × 64 × 64` (~500 G of the
+AVIRIS total on its own). Now `(2, 2, 2)` with `_DOWN_K = (4, 4, 4)`.
+
+> The kernel change is **required**, not cosmetic. With depth `k=3, s=2, p=1`
+> the forward gives `ceil(L/2)` but the transpose gives `2L − 1`, compounding
+> over three blocks to `53 → 105 → 209 → 417` at AVIRIS — short of 424, so no
+> crop can recover it. `k=4, s=2, p=1` halves and doubles exactly.
+
+CLAUDE.md previously described stride-1 depth as a *"design choice for
+robustness"* — i.e. arithmetic convenience for arbitrary `C`. The baseline's
+actual stated hypothesis is that 3D kernels inevitably average neighbouring
+bands together with neighbouring pixels; striding the depth axis strengthens
+that, and the pad/crop keeps the round-trip exact for every sensor.
+
+### Result
+
+| | IIRS | M3 | AVIRIS | CRIMS |
+|---|---|---|---|---|
+| vae-our GMAC/sample **before** | 467 | 21 | 2,021 | 2,512 |
+| vae-our GMAC/sample **after** | **14.3** | **5.0** | **23.9** | **25.8** |
+| vae-3d GMAC/sample **before** | 2,301 | 362 | 7,576 | 12,114 |
+| vae-3d GMAC/sample **after** (param-matched) | ~459 | ~130 | ~825 | ~923 |
+| vae-our params **before** | 24.5 M | 12.2 M | 48.5 M | 73.0 M |
+| vae-our params **after** | 12.4 M | 11.2 M | 13.7 M | 13.9 M |
+
+`vae-our` drops out of the critical path entirely and becomes I/O-bound like the
+baselines. `vae-3d` remains the long pole.
+
+**Estimated** at the lab GPU's back-derived throughput (~111 TFLOPS effective,
+from dividing the analytic MAC count for the old `vae-3d` by its observed smoke
+wall time) and 7,000 patches/epoch, `vae-3d` lands around 3 min/epoch at IIRS and
+5 min at AVIRIS — 1.5–3 h for 30 epochs, inside the target with margin.
+
+Treat that as an estimate, not a measurement. The analytic 3D MAC count was ~2.4×
+higher than the observed wall time implied (predicted ~6 h, observed 2h31m), and
+the 111 TFLOPS figure absorbs that error, so the projection inherits it. The
+error direction is safe — if the analytic count was high, the real runs are
+*faster* than stated. **The smoke pass gives the true number two epochs in:**
+`grep 'wall ' logs/train_*.log`.
+
+### Why CRIMS produced nothing at all
+
+Two config bugs, plus one reason you never saw them:
+
+- `processed_root` was `data/processed/crims` (lowercase); the lab directory is
+  `CRIMS`. Linux is case-sensitive → `FileNotFoundError`.
+- `input_channels` said **544**; the patches are **457** (verified across all 15
+  scenes). 457 is prime, so the spectral round-trip can never be exact
+  (`457 // 4 = 114 → 456 ≠ 457`). Now cropped to 456, exactly as M3 is cropped
+  85 → 84.
+- **The silence was its own bug.** `RunNotifier` was constructed *after* the
+  dataloaders and model were built, and the `try/except` that emits `[FAIL]`
+  opened later still. Anything throwing during setup sent zero Telegram output.
+  `RunNotifier` + `send_start()` now run **before** any disk access, and the
+  `try` covers dataloader and model construction, so setup failures report with
+  a traceback instead of vanishing.
+
+### Still open — not addressed here
+
+`sam = 1.5708` (**exactly π/2**, i.e. reconstruction orthogonal to input —
+decoder collapsed toward a constant) appears in three smoke runs:
+`vae-standard|IIRS|standard`, `vae-3d|IIRS|standard`, `vae-3d|AVIRIS|standard`.
+Only on `standard` runs — no SAM term to prevent it — with
+`mse ≈ 0.0030 ≈ mean(x²)`, which is consistent with collapse. Five epochs is too
+few to call it, but if it persists at 30 those baselines produce nothing usable
+however fast they run, and the ~4× batch-size increase interacts with it. Worth
+checking after the first full grid.

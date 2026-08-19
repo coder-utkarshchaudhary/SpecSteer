@@ -37,6 +37,7 @@ set -uo pipefail
 : "${EPOCHS:=100}"
 : "${SMOKE_MODE:=0}"     # 1 -> writes to model_smoke/, uses SMOKE_EPOCHS
 : "${SMOKE_EPOCHS:=5}"
+: "${OVERWRITE:=0}"      # 1 -> retrain even when a checkpoint already exists
 
 cd "${HPC_COMPUTE_REPO_ROOT}"
 
@@ -87,10 +88,18 @@ echo "  loss       : ${LOSS}"
 echo "  ckpt_name  : ${CKPT_NAME}"
 echo "  ckpt_path  : ${CKPT_PATH}"
 echo "  epochs     : ${RUN_EPOCHS}"
+echo "  overwrite  : ${OVERWRITE}"
 
 # ---- skip if a ckpt is already present -----------------------------------
-if [[ -s "${CKPT_PATH}" ]]; then
+# Pass OVERWRITE=1 through `qsub -v` to force a retrain. Without it a leftover
+# checkpoint from an earlier partial grid silently consumes the slot — the skip
+# is only visible in this PBS log, never in the Telegram stream.
+if [[ -s "${CKPT_PATH}" && "${OVERWRITE}" == "1" ]]; then
+    echo ">>> [overwrite] ${CKPT_PATH} exists; retraining (OVERWRITE=1)."
+fi
+if [[ -s "${CKPT_PATH}" && "${OVERWRITE}" != "1" ]]; then
     echo ">>> [skip] ${CKPT_PATH} exists; nothing to do."
+    echo ">>>        re-submit with -v OVERWRITE=1 to retrain this slot."
     # Still worth a push attempt: this slot's ckpt could exist locally on the
     # compute node from an earlier partial run that never made it back to the
     # login node (e.g. a prior push/collector failure). Cheap and idempotent.

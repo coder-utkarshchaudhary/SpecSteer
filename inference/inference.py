@@ -106,6 +106,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True, choices=list(MODEL_NAMES))
     parser.add_argument("--dataset", required=True, choices=sorted(DATASETS))
     parser.add_argument("--loss", default="physics", choices=["standard", "physics"])
+    parser.add_argument("--packed-root", default=None,
+                        help="Override the packed-shard dir (data/packed/<DS>).")
     parser.add_argument("--data-root", default=None,
                         help="Override the dataset's processed root.")
     parser.add_argument("--ckpt-dir", default="model",
@@ -124,7 +126,10 @@ def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    apply_dataset(args.dataset)
+    # verify=True cross-checks the configured band count against what is
+    # actually on disk, so a mismatch fails here with both numbers rather
+    # than as an opaque assert inside SpectralBranch.forward.
+    apply_dataset(args.dataset, verify=True, processed_root=args.data_root)
 
     logger = get_run_logger(
         "inference", args.model, args.dataset, loss=args.loss, ts=timestamp(),
@@ -152,6 +157,7 @@ def main():
     loader = build_dataloader(
         args.dataset, args.split,
         processed_root=args.data_root,
+        packed_root=args.packed_root,
         batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
     )
 

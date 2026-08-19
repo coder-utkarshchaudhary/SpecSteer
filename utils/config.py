@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -12,13 +15,22 @@ class Settings:
     Spectral arithmetic (with spectral_conv1D_kernel_size=4, stride=2, padding=1):
       Conv1d:          L_out = L_in // 2
       ConvTranspose1d: L_out = 2 * L_in
-    With n=2 blocks and input_channels=108:
-      Encoder:  108 → 54 → 27  (L);  channels  1 → 108 → 216
-      Decoder:   27 → 54 → 108 (L);  channels 216 → 108 → 1
+    With n=2 blocks, spectral_base_ch=32 and input_channels=256 (IIRS):
+      Encoder:  256 → 128 → 64  (L);  channels  1 → 32 → 64
+      Decoder:   64 → 128 → 256 (L);  channels 64 → 32 → 1
+    Sequence length L still tracks the band count (so the latent stays
+    sensor-aware); only the channel width is now a free hyper-parameter.
 
-    NOTE: input_channels varies per dataset (IIRS=256, M3=84, AVIRIS=424) — see
-    DATASETS / make_settings() below. Every dataset needs its own Settings
-    instance (and therefore its own model instance) since band count differs.
+    NOTE: input_channels varies per dataset (IIRS=256, M3=84, AVIRIS=424,
+    CRIMS=456) — see DATASETS / make_settings() below. Every dataset needs its
+    own Settings instance (and therefore its own model instance) since band
+    count differs.
+
+    PERF NOTE: the spectral branch's conv width is `spectral_base_ch`, NOT
+    `input_channels`. Tying the width to the band count (as the original code
+    did) made the branch cost scale as O(C^2) per pixel spectrum — 99.7% of
+    vae-our's total FLOPs — and made vae-our's parameter count swing 3x across
+    sensors for no principled reason. See CLAUDE.md §10.
     """
 
     # ------------------------------------------------------------------
@@ -54,12 +66,30 @@ class Settings:
     # ------------------------------------------------------------------
     data_original_root: str = "data/original"
     data_processed_root: str = "data/processed"
+    # Packed fp16 memmap shards written by utils/dataset/pack.py. One file per
+    # (dataset, split) replaces ~15k individual .npy patches — see CLAUDE.md §4.
+    data_packed_root: str = "data/packed"
 
     # ------------------------------------------------------------------
     # Training
     # ------------------------------------------------------------------
-    batch_size: int = 32
-    num_workers: int = 4
+    # Fallback only — the real value is per-dataset in the hyperparam YAMLs
+    # (IIRS 32, M3 32, AVIRIS 16, CRIMS 16). Batch size is held constant across
+    # all 4 models x 2 loss regimes WITHIN a dataset, which is the axis the
+    # ablation compares on; across sensors there is no controlled comparison to
+    # protect, and a single global value would idle the GPU on the lighter ones.
+    # Re-derive with: python utils/find_max_batch.py --budget-gb 24 [--fit]
+    batch_size: int = 16
+    num_workers: int = 8
+
+    # Cap on the number of *training* patches per dataset. Applied by
+    # utils/dataset/pack.py with a fixed seed, stratified across scenes, so every
+    # model sees the identical subset. valid/test splits are never capped.
+    # None disables the cap.
+    train_patch_cap: int | None = 7000
+    # Seed for the cap's subsampling. Deliberately separate from the training
+    # seed so changing one never silently reshuffles the other.
+    patch_cap_seed: int = 1234
 
     # ------------------------------------------------------------------
     # Spatial branch
@@ -83,6 +113,10 @@ class Settings:
     #   ConvTranspose1d: L_out = 2 * L_in
     spectral_conv1D_kernel_size: int = 4
     spectral_latent_dim: int = 128    # per-pixel spectral latent (after reparameterize chunk)
+    # Conv1d width of the spectral branch's first block; doubles each block.
+    # Mirrors `reduced_dims` on the spatial branch. Decoupled from
+    # input_channels — see the class docstring's PERF NOTE.
+    spectral_base_ch: int = 32
 
     # Derived spectral (computed in __post_init__)
     spectral_linear_expansion_dim: int = field(init=False)
@@ -92,17 +126,19 @@ class Settings:
     # ------------------------------------------------------------------
     # Baseline capacity knobs (overridden per-dataset by hyperparam YAML
     # so each baseline matches vae-our's param count at that dataset).
-    # Defaults here are the IIRS picks.
+    # Defaults here are the IIRS picks, re-solved against the current vae-our
+    # (12.40M at IIRS). Regenerate after ANY architecture change with:
+    #     python utils/check-model-params.py --solve
     # ------------------------------------------------------------------
-    vae_standard_base_ch: int = 134
+    vae_standard_base_ch: int = 94
     vae_standard_n_down: int = 3
     vae_standard_latent_ch: int = 16
 
-    vae_3d_base_ch: int = 78
+    vae_3d_base_ch: int = 48
     vae_3d_n_down: int = 3
     vae_3d_latent_ch: int = 8
 
-    vae_1d_hidden_dims: tuple = (4224, 2112, 1056)
+    vae_1d_hidden_dims: tuple = (2936, 1468, 734)
     vae_1d_latent_dim: int = 32
 
     def __post_init__(self):
@@ -113,9 +149,10 @@ class Settings:
 
         # ---- Spectral derived fields ----
         # Encoder Conv1d final channel count:
-        #   Block i goes from (in_c → out_c) where out_c doubles each step starting at input_channels.
-        #   After n blocks: final channel = input_channels * 2^(n-1)
-        self.spectral_transpose_c = self.input_channels * (
+        #   Block i goes from (in_c → out_c) where out_c doubles each step
+        #   starting at spectral_base_ch.
+        #   After n blocks: final channel = spectral_base_ch * 2^(n-1)
+        self.spectral_transpose_c = self.spectral_base_ch * (
             2 ** (self.spectral_n_1D_conv_blocks - 1)
         )
 
@@ -146,36 +183,51 @@ settings = Settings()   # default: IIRS-shaped (input_channels=256)
 #   M3     : 85 bands natively — NOT divisible by 4 (85 → 21 → 84 ≠ 85 on the
 #            decoder round-trip). Cropped to 84 (drop the last band).
 #   AVIRIS : 424 bands, divides cleanly by 4 → no crop.
-#   CRIMS  : 544 bands, divides cleanly by 4 → no crop. Already-preprocessed
-#            patches delivered to data/processed/crims/ via Google Drive.
+#   CRIMS  : 457 bands on disk — 457 is prime, so the spectral round-trip can
+#            never be exact (457 // 4 = 114 → 456 ≠ 457). Cropped to 456,
+#            exactly as M3 crops 85 → 84. Already-preprocessed patches
+#            delivered to data/processed/CRIMS/ via Google Drive.
+#
+# `crop_bands` is applied by utils/dataset/slice.py for the sensors it
+# preprocesses, and by utils/dataset/pack.py for every sensor (including CRIMS,
+# which slice.py never sees). `raw_channels` records what is actually on disk so
+# the crop-aware verification in inspect_channels() has something to compare to.
 DATASETS = {
     "IIRS": {
         "input_channels": 256,
+        "raw_channels": 256,
         "raw_root": "data/original - IIRS",
         "processed_root": "data/processed/IIRS",
+        "packed_root": "data/packed/IIRS",
         "fill_value": None,        # no sentinel fill value; only non-finite pixels are invalid
         "crop_bands": None,
     },
     "M3": {
         "input_channels": 84,
+        "raw_channels": 84,        # slice.py already applied the 85 -> 84 crop
         "raw_root": "data/original - m3",
         "processed_root": "data/processed/M3",
+        "packed_root": "data/packed/M3",
         "fill_value": -999.0,
         "crop_bands": 84,          # drop the last of 85 native bands
     },
     "AVIRIS": {
         "input_channels": 424,
+        "raw_channels": 424,
         "raw_root": "data/original - AVIRIS",
         "processed_root": "data/processed/AVIRIS",
+        "packed_root": "data/packed/AVIRIS",
         "fill_value": -9999.0,
         "crop_bands": None,
     },
     "CRIMS": {
-        "input_channels": 544,
+        "input_channels": 456,
+        "raw_channels": 457,       # on-disk band count; pack.py crops to 456
         "raw_root": "data/original - CRIMS",   # unused; CRIMS ships pre-processed
-        "processed_root": "data/processed/crims",
+        "processed_root": "data/processed/CRIMS",
+        "packed_root": "data/packed/CRIMS",
         "fill_value": None,
-        "crop_bands": None,
+        "crop_bands": 456,         # drop the last of 457 bands (457 is prime)
     },
 }
 
@@ -198,7 +250,95 @@ def make_settings(dataset: str) -> Settings:
     return Settings(input_channels=DATASETS[key]["input_channels"])
 
 
-def apply_dataset(dataset: str) -> Settings:
+def probe_channels(dataset: str, processed_root: str | None = None) -> int | None:
+    """
+    Read the band count of one on-disk patch for ``dataset``.
+
+    Looks at the packed shard first (``data/packed/<DS>/train.npy``, whose header
+    carries the shape without reading the payload), then falls back to the first
+    per-scene ``.npy`` under the processed root.
+
+    Returns the RAW on-disk band count, or None if nothing is readable (no data
+    staged yet — callers treat that as "cannot verify", not as an error).
+    """
+    import numpy as np
+
+    key = dataset.upper()
+    meta = DATASETS[key]
+
+    packed = Path(meta["packed_root"]) / "train.npy"
+    if packed.is_file():
+        try:
+            return int(np.load(packed, mmap_mode="r").shape[-1])
+        except (OSError, ValueError):
+            pass
+
+    root = Path(processed_root or meta["processed_root"])
+    if not root.exists():
+        return None
+    for split in ("train", "valid", "test"):
+        for p in root.glob(f"**/{split}/*.npy"):
+            try:
+                return int(np.load(p, mmap_mode="r").shape[-1])
+            except (OSError, ValueError):
+                return None
+    return None
+
+
+def effective_channels(dataset: str, raw_c: int) -> int:
+    """Band count the model actually sees: ``crop_bands`` if set, else ``raw_c``."""
+    crop = DATASETS[dataset.upper()].get("crop_bands")
+    return int(crop) if crop else int(raw_c)
+
+
+def verify_channels(dataset: str, processed_root: str | None = None) -> None:
+    """
+    Raise a readable error if the on-disk band count disagrees with the config.
+
+    Crop-aware: compares ``crop_bands`` (when set) against the raw on-disk count,
+    and the post-crop count against ``input_channels``. Silently returns when no
+    data is staged — there is nothing to check in that case.
+
+    This exists because the failure it catches used to surface 500 frames deep as
+    an opaque assertion in SpectralBranch.forward (CRIMS: config said 544, disk
+    had 457).
+    """
+    key = dataset.upper()
+    meta = DATASETS[key]
+    raw_c = probe_channels(key, processed_root)
+    if raw_c is None:
+        return
+
+    expected_raw = meta.get("raw_channels")
+    if expected_raw is not None and raw_c != expected_raw:
+        raise ValueError(
+            f"{key}: on-disk patches have {raw_c} bands but DATASETS['{key}']"
+            f"['raw_channels'] says {expected_raw}.\n"
+            f"  probed under : {processed_root or meta['processed_root']}\n"
+            f"Fix utils/config.py (and re-derive crop_bands / input_channels), "
+            f"or point --data-root at the right directory.\n"
+            f"Run `python utils/dataset/inspect_channels.py` for the full table."
+        )
+
+    eff = effective_channels(key, raw_c)
+    if eff != meta["input_channels"]:
+        raise ValueError(
+            f"{key}: effective band count is {eff} "
+            f"(raw {raw_c}, crop_bands={meta.get('crop_bands')}) but "
+            f"input_channels says {meta['input_channels']}."
+        )
+
+    n_blocks = settings.spectral_n_1D_conv_blocks
+    if eff % (2 ** n_blocks):
+        raise ValueError(
+            f"{key}: {eff} bands is not divisible by 2**spectral_n_1D_conv_blocks "
+            f"= {2 ** n_blocks}, so the spectral encoder/decoder round-trip cannot "
+            f"be exact. Set crop_bands to {eff - eff % (2 ** n_blocks)}."
+        )
+
+
+def apply_dataset(dataset: str, verify: bool = False,
+                  processed_root: str | None = None) -> Settings:
     """
     Reconfigure the module-global ``settings`` in place for the given dataset.
 
@@ -210,7 +350,12 @@ def apply_dataset(dataset: str) -> Settings:
     Call this once before building a model / dataloader for a given dataset.
 
     Args:
-        dataset : one of "IIRS", "M3", "AVIRIS", "CRIMS" (case-insensitive)
+        dataset        : one of "IIRS", "M3", "AVIRIS", "CRIMS" (case-insensitive)
+        verify         : cross-check the configured band count against what is
+                         actually on disk, and raise early with a readable
+                         message on mismatch.
+        processed_root : override for the probe's search root (mirrors
+                         --data-root); ignored when ``verify`` is False.
 
     Returns:
         The (mutated) module-global ``settings`` instance.
@@ -220,4 +365,6 @@ def apply_dataset(dataset: str) -> Settings:
         raise ValueError(f"Unknown dataset '{dataset}'. Choose from {sorted(DATASETS)}.")
     settings.input_channels = DATASETS[key]["input_channels"]
     settings.__post_init__()   # recompute all derived spatial/spectral dims
+    if verify:
+        verify_channels(key, processed_root)
     return settings

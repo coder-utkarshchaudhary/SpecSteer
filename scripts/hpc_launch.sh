@@ -32,6 +32,7 @@
 # Modes:
 #   bash scripts/hpc_launch.sh                            # full run (all datasets)
 #   bash scripts/hpc_launch.sh --datasets M3,CRIMS        # grid filtered to named datasets
+#   bash scripts/hpc_launch.sh --overwrite               # retrain slots that already have a ckpt
 #   bash scripts/hpc_launch.sh --dry-run                  # sanity + print-only
 #   bash scripts/hpc_launch.sh --stop                     # kill everything + qdel
 #   bash scripts/hpc_launch.sh --status                   # what's alive
@@ -70,13 +71,17 @@ fatal() { log_err "$*"; exit 1; }
 MODE="run"
 RESUME=0
 DATASETS_SUBSET=""   # e.g. "M3,CRIMS" — empty means all
+# Forwarded to hpc_pbs_job.pbs via `qsub -v`. Without it, a slot whose
+# checkpoint already exists on the compute node is silently skipped.
+OVERWRITE="${OVERWRITE:-0}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run)  MODE="dry-run"; shift ;;
-        --stop)     MODE="stop"; shift ;;
-        --status)   MODE="status"; shift ;;
-        --resume)   RESUME=1; shift ;;
-        --datasets) DATASETS_SUBSET="$2"; shift 2 ;;
+        --dry-run)   MODE="dry-run"; shift ;;
+        --stop)      MODE="stop"; shift ;;
+        --status)    MODE="status"; shift ;;
+        --resume)    RESUME=1; shift ;;
+        --overwrite) OVERWRITE=1; shift ;;
+        --datasets)  DATASETS_SUBSET="$2"; shift 2 ;;
         -h|--help)
             sed -n '2,45p' "$0"
             exit 0
@@ -631,7 +636,7 @@ else
         -l walltime='01:00:00' \
         -J '1-1' \
         ${qsub_extra[*]:-} \
-        -v HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}',HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}',HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}',HPC_USER='${HPC_USER}',HPC_HOST='${HPC_HOST}',PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}',DATASETS_SUBSET='${DATASETS_SUBSET:-}' \
+        -v HPC_PROJECT_DIR='${HPC_COMPUTE_REPO_ROOT}',HPC_COMPUTE_REPO_ROOT='${HPC_COMPUTE_REPO_ROOT}',HPC_LOGIN_REPO_ROOT='${HPC_LOGIN_REPO_ROOT}',HPC_USER='${HPC_USER}',HPC_HOST='${HPC_HOST}',PUSH_RESULTS_FROM_JOB='${PUSH_RESULTS_FROM_JOB}',OVERWRITE='${OVERWRITE:-0}',EPOCHS='${SMOKE_EPOCHS}',SMOKE_MODE=1,SMOKE_EPOCHS='${SMOKE_EPOCHS}',WANDB_PROJECT='${WANDB_PROJECT:-hsi-pi-vae}',WANDB_ENTITY='${WANDB_ENTITY:-}',EXTRA_TRAIN_ARGS='${EXTRA_TRAIN_ARGS:-}',DATASETS_SUBSET='${DATASETS_SUBSET:-}' \
         scripts/hpc_pbs_job.pbs"
 
     SMOKE_JOBID=$(compute_ssh "${smoke_qsub_cmd}") || fatal "qsub smoke failed"
@@ -645,7 +650,7 @@ else
     log_step "  if smoke passes, watcher will wait ${SMOKE_DELAY_SECS}s then submit full grid (${FULL_ARRAY_RANGE})"
 
     export HPC_SMOKE_JOBID="${SMOKE_JOBID}"
-    export SMOKE_DELAY_SECS FULL_ARRAY_RANGE EPOCHS EXTRA_TRAIN_ARGS DATASETS_SUBSET
+    export SMOKE_DELAY_SECS FULL_ARRAY_RANGE EPOCHS EXTRA_TRAIN_ARGS DATASETS_SUBSET OVERWRITE
     nohup bash "${REPO_ROOT}/scripts/hpc_smoke_watcher.sh" \
         >> "${LOG_DIR}/smoke_watcher.log" 2>&1 &
     watcher_pid=$!

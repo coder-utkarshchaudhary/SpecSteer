@@ -1,18 +1,51 @@
-# IIRS (256 bands, ~15k train patches) — vae-our target = 24.47M params.
-# Every field is optional; unset keys fall back to CLI / Settings defaults.
+# IIRS (256 bands) — vae-our target = 12,395,585 params.
+#
+# Baseline widths RE-SOLVED on 2026-08-19 after two architecture-level perf
+# fixes (see CLAUDE.md §10):
+#   * vae-our's spectral branch width was decoupled from the band count
+#     (settings.spectral_base_ch = 32), which cut its FLOPs ~35x here and
+#     dropped its param count from 24.47M to 12,395,585.
+#   * vae-3d now strides the spectral (depth) axis, so vae_3d_base_ch below is
+#     much smaller than the old 78.
+# Regenerate with:  python utils/check-model-params.py --solve
+# Audit with:       python utils/check-model-params.py
 
 # --- Optimization ---
-epochs: 100
+epochs: 30
 lr: 1.0e-3
-batch_size: 4
-num_workers: 4
+
+# Batch size is held constant across all 4 models x 2 loss regimes WITHIN this
+# dataset — that is the axis the ablation compares on, so nothing about a row's
+# result can be attributed to it. It is NOT held constant across datasets:
+# there is no controlled comparison between sensors to protect (they differ in
+# band count, scene count, spatial sampling and SNR), and this file already
+# varies vae_3d_base_ch and friends per dataset for parameter matching. Forcing
+# one global value would just idle the GPU on the lighter sensors.
+#
+# It DOES have to hold across platforms for this dataset, or within-dataset
+# fairness breaks the moment one slot runs on Kaggle and another on the lab.
+# Derived against the tightest budget any slot here will see — the lab's 24 GB:
+#
+#   binding model : vae-3d-spatio-spectral
+#   memory        : ~0.500 GB/sample marginal, ~0.2 GB fixed
+#   at B=32       : ~16.2 GB of the 20.4 GB usable (24 GB less 15% headroom)
+#   HPC 40 GB     : headroom
+#   Kaggle 2xT4   : nn.DataParallel puts 16 per 15 GB device — clears
+#
+# Rounded DOWN to a power of two, which keeps the DataParallel split even and
+# leaves margin for fragmentation. Re-derive natively on the target GPU with:
+#     PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --time
+# or, from a smaller card, add --fit to extrapolate from B=1,2,4.
+batch_size: 32
+num_workers: 8
+
 beta: 1.0e-3
 lambda_physics: 0.3
 seed: 42
 weight_decay: 1.0e-5
 early_stopping_patience: 7
 
-# --- Baseline capacity (matches vae-our at IIRS within +/-2%) ---
-vae_standard_base_ch: 134
-vae_3d_base_ch: 78
-vae_1d_hidden_dims: [4224, 2112, 1056]
+# --- Baseline capacity (matched to vae-our within 0.38%) ---
+vae_standard_base_ch: 94        # 12,347,940 (-0.38%)
+vae_3d_base_ch: 48              # 12,399,569 (+0.03%)
+vae_1d_hidden_dims: [2936, 1468, 734]   # 12,379,964 (-0.13%)

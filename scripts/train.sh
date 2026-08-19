@@ -14,11 +14,20 @@
 #   bash scripts/train.sh --all --datasets IIRS,M3
 #   bash scripts/train.sh --all --datasets AVIRIS,CRIMS
 #
+#   # Retrain slots that already have a checkpoint:
+#   bash scripts/train.sh --all --overwrite
+#
 # The grid is defined once in scripts/grid_manifest.sh (28 slots).
 #
 # Environment overrides:
 #   CKPT_DIR   — checkpoint root directory   (default: model)
 #   EPOCHS     — passed through as --epochs  (default: 100 unless overridden)
+#   OVERWRITE  — 1 is equivalent to passing --overwrite
+#
+# Without --overwrite, a slot whose checkpoint already exists is SKIPPED. That
+# skip is printed to stdout only — it never reaches Telegram — which is how a
+# previous grid run appeared to lose slots that had in fact just been skipped.
+# The summary below now always reports the skip list explicitly.
 
 set -uo pipefail
 
@@ -45,11 +54,13 @@ if [[ "${1:-}" == "--all" ]]; then
     DATASETS_SUBSET=""
     EXTRA_ARGS=()
     HAS_EPOCHS=0
+    OVERWRITE="${OVERWRITE:-0}"
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --datasets) DATASETS_SUBSET="$2"; shift 2 ;;
-            --epochs)   HAS_EPOCHS=1; EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
-            *)          EXTRA_ARGS+=("$1"); shift ;;
+            --datasets)  DATASETS_SUBSET="$2"; shift 2 ;;
+            --epochs)    HAS_EPOCHS=1; EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
+            --overwrite) OVERWRITE=1; shift ;;
+            *)           EXTRA_ARGS+=("$1"); shift ;;
         esac
     done
     if (( HAS_EPOCHS == 0 )); then
@@ -71,6 +82,7 @@ if [[ "${1:-}" == "--all" ]]; then
     echo "  slots     : ${GRID_TOTAL}"
     echo "  datasets  : ${DATASETS_SUBSET:-<all>}"
     echo "  ckpt dir  : ${REPO_ROOT}/${CKPT_DIR}"
+    echo "  overwrite : ${OVERWRITE}"
     echo "  extra     : ${EXTRA_ARGS[*]:-<none>}"
     echo "=============================================="
 
@@ -80,6 +92,7 @@ datasets: ${DATASETS_SUBSET:-<all>}
 extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
 
     SKIPPED=()
+    OVERWRITTEN=()
     FAILED=()
     RETRIED=()
 
@@ -95,10 +108,15 @@ extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
         fi
 
         ckpt="${CKPT_DIR}/${ds}/${name}.pt"
-        if [[ -s "${ckpt}" ]]; then
+        if [[ -s "${ckpt}" && "${OVERWRITE}" != "1" ]]; then
             echo "[skip] slot ${slot}  ${m} | ${ds} | ${loss}  (ckpt exists: ${ckpt})"
+            echo "       pass --overwrite (or OVERWRITE=1) to retrain it anyway."
             SKIPPED+=("${m}|${ds}|${loss}")
             continue
+        fi
+        if [[ -s "${ckpt}" ]]; then
+            echo "[overwrite] slot ${slot}  ${m} | ${ds} | ${loss}  (replacing ${ckpt})"
+            OVERWRITTEN+=("${m}|${ds}|${loss}")
         fi
 
         attempt=1
@@ -129,8 +147,13 @@ extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
     echo " Ablation grid complete."
     echo "  datasets              : ${DATASETS_SUBSET:-<all>}"
     echo "  skipped (ckpt exists) : ${#SKIPPED[@]}"
+    echo "  overwritten           : ${#OVERWRITTEN[@]}"
     echo "  retried (passed on 2) : ${#RETRIED[@]}"
     echo "  failed                : ${#FAILED[@]}"
+    if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+        echo "  skipped runs (re-run with --overwrite to force):"
+        for sk in "${SKIPPED[@]}"; do echo "    - ${sk}"; done
+    fi
     if [[ ${#RETRIED[@]} -gt 0 ]]; then
         echo "  retried runs:"
         for r in "${RETRIED[@]}"; do echo "    - ${r}"; done
@@ -144,12 +167,23 @@ extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
     python utils/notify_cli.py --text "Ablation grid finished
 host: $(hostname)
 datasets: ${DATASETS_SUBSET:-<all>}
-skipped: ${#SKIPPED[@]}  retried: ${#RETRIED[@]}  failed: ${#FAILED[@]}" >/dev/null 2>&1 || true
+skipped: ${#SKIPPED[@]}  overwritten: ${#OVERWRITTEN[@]}  retried: ${#RETRIED[@]}  failed: ${#FAILED[@]}" >/dev/null 2>&1 || true
 
     exit $(( ${#FAILED[@]} > 0 ? 1 : 0 ))
 fi
 
 # --------------------------------------------------------------------------
 # Single run: forward all args straight through to train/train.py.
+#
+# --overwrite is a grid-level concept (it controls the "skip if a checkpoint
+# exists" branch above); a single run always trains and always writes its
+# checkpoint, so accept the flag and drop it rather than handing train.py an
+# argument it does not define.
 # --------------------------------------------------------------------------
-python train/train.py --ckpt-dir "${CKPT_DIR}" "$@"
+SINGLE_ARGS=()
+for a in "$@"; do
+    [[ "${a}" == "--overwrite" ]] && continue
+    SINGLE_ARGS+=("${a}")
+done
+
+python train/train.py --ckpt-dir "${CKPT_DIR}" "${SINGLE_ARGS[@]}"

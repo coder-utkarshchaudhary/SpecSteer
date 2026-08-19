@@ -8,8 +8,14 @@ class Encoder(nn.Module):
     def __init__(self):
         super().__init__()
         
+        # Conv width is `spectral_base_ch`, NOT input_channels. Tying it to the
+        # band count made this branch cost O(C^2) per pixel spectrum — 99.7% of
+        # vae-our's FLOPs — and swung vae-our's param count 3x across sensors.
+        # The structure (stride-2 halving, channel doubling per block) is
+        # unchanged; only the width is now a free hyper-parameter, exactly as
+        # `reduced_dims` already is on the spatial branch.
         in_c = 1
-        out_c = settings.input_channels
+        out_c = settings.spectral_base_ch
 
         conv1d_layers = []
         for _ in range(settings.spectral_n_1D_conv_blocks):

@@ -331,6 +331,8 @@ def parse_args() -> argparse.Namespace:
                         help="Loss regime of the baseline checkpoints to load "
                              "(vae-our is always physics).")
     parser.add_argument("--data-root", default=None, help="Override processed root.")
+    parser.add_argument("--packed-root", default=None,
+                        help="Override the packed-shard dir (data/packed/<DS>).")
     parser.add_argument("--ckpt-dir", default="model", help="Checkpoint root (per-dataset subfolders).")
     parser.add_argument("--ckpt", default=None,
                         help="Explicit checkpoint path (single-model runs only).")
@@ -364,7 +366,10 @@ def main():
     if args.ckpt is not None and len(args.models) != 1:
         raise SystemExit("--ckpt only makes sense with a single --models entry.")
 
-    apply_dataset(args.dataset)
+    # verify=True cross-checks the configured band count against what is
+    # actually on disk, so a mismatch fails here with both numbers rather
+    # than as an opaque assert inside SpectralBranch.forward.
+    apply_dataset(args.dataset, verify=True, processed_root=args.data_root)
     torch.manual_seed(args.seed)
     generator = torch.Generator(device=device).manual_seed(args.seed)
 
@@ -394,6 +399,7 @@ def main():
     loader = build_dataloader(
         args.dataset, args.split,
         processed_root=args.data_root,
+        packed_root=args.packed_root,
         batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
     )
     x = next(iter(loader)).to(device)

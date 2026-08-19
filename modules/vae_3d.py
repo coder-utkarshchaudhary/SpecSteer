@@ -16,10 +16,11 @@ bands together with neighbouring spatial pixels. It is also the most
 parameter-heavy of the ablation and prone to posterior collapse when squeezed
 into a small latent — the hypothesised failure modes.
 
-Design choice for robustness: the spatial dims (H, W) are downsampled by strided
-3D convs, but the spectral depth is preserved (stride 1, padding 1) so the
-encode→decode round-trip is exact for *any* band count (IIRS=256, M3=84,
-AVIRIS=424) without per-dataset spectral arithmetic.
+All three axes are downsampled by strided 3D convs (k=4, s=2, p=1 — exact
+halving/doubling). The depth axis is zero-padded up to a multiple of 2**n_down
+before the encoder and cropped back afterwards, so the encode→decode round-trip
+is exact for *any* band count (IIRS=256, M3=84→88, AVIRIS=424, CRIMS=456)
+without per-dataset spectral arithmetic.
 
 It satisfies the model-agnostic contract used by train/train.py and
 inference/inference.py (see modules/vae_our.py for the reference):
@@ -30,8 +31,8 @@ inference/inference.py (see modules/vae_our.py for the reference):
 
 plus the downstream-experiment contract (inference/downstream.py):
 
-    encode_latents(x) -> [ (B, Zc, C, h', w') ]  # deterministic (mu) latents
-    decode_latents([z]) -> (B, H, W, C)
+    encode_latents(x) -> [ (B, Zc, d, h', w') ]  # deterministic (mu) latents
+    decode_latents([z]) -> (B, H, W, C)          # d = C_padded / 2**n_down
 
 Loss (built from modules/losses.py):
     standard : mse + beta * kld
@@ -42,15 +43,30 @@ I/O convention: channels-last (B, H, W, C) throughout.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from modules.losses import spectral_angle_mapper_loss, kl_divergence
 from utils.config import settings
 
 
-# Kernel/stride tuples are (depth, height, width): depth (spectral) uses stride 1
-# so C is preserved; H/W use stride 2 to down/upsample by a factor of 2 per block.
-_DOWN_K = (3, 4, 4)
-_DOWN_S = (1, 2, 2)
+# Kernel/stride/padding tuples are (depth, height, width). All three axes use
+# k=4, s=2, p=1 — the same exact-halving/doubling convention SpectralBranch uses:
+#     Conv3d:          L_out = L_in // 2
+#     ConvTranspose3d: L_out = 2 * L_in
+#
+# The depth (spectral) axis was previously stride 1, which kept every block at
+# full spectral resolution and made this the heaviest model in the ablation by
+# far (7,576 GMAC/sample at AVIRIS; the decoder's final ConvTranspose3d alone was
+# ~500 G of it). Striding depth cuts that ~8x and, if anything, reinforces this
+# baseline's stated hypothesis — that 3D kernels inevitably average neighbouring
+# bands together with neighbouring pixels.
+#
+# k=4 rather than 3 on the depth axis is REQUIRED, not cosmetic: with k=3, s=2,
+# p=1 the forward gives ceil(L/2) but the transpose gives 2L-1, which compounds
+# over n_down blocks (AVIRIS: 53 -> 105 -> 209 -> 417, short of 424) so no crop
+# can recover the original band count.
+_DOWN_K = (4, 4, 4)
+_DOWN_S = (2, 2, 2)
 _DOWN_P = (1, 1, 1)
 
 
@@ -68,6 +84,19 @@ class VAE_3D_SpatioSpectral(nn.Module):
         n_down = settings.vae_3d_n_down
         latent_ch = settings.vae_3d_latent_ch
         self.latent_ch = latent_ch
+        self.n_down = n_down
+
+        # Depth must be a multiple of 2**n_down for the strided round-trip to be
+        # exact. Captured at build time (not read from the global at forward
+        # time) so a later apply_dataset() can't silently desync a live model.
+        self.input_channels = settings.input_channels
+        self._depth_mult = 2 ** n_down
+        self._depth_padded = (
+            -(-self.input_channels // self._depth_mult) * self._depth_mult
+        )
+        # IIRS 256 / AVIRIS 424 / CRIMS 456 are already multiples of 8; only
+        # M3 (84 -> 88) actually pads.
+        self._depth_pad = self._depth_padded - self.input_channels
 
         # ---- Encoder: (B, 1, C, H, W) -> (B, 2*latent_ch, C, h', w') ----
         enc = [nn.Conv3d(1, base_ch, kernel_size=3, stride=1, padding=1), nn.ReLU()]
@@ -105,14 +134,29 @@ class VAE_3D_SpatioSpectral(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std, mu, logvar
 
-    def forward(self, x):
-        """x: (B, H, W, C) -> recon (B, H, W, C), mu, logvar (B, Zc, C, h', w')."""
-        # (B, H, W, C) -> (B, 1, C, H, W): spectral is the volume's depth axis.
+    def _to_volume(self, x):
+        """(B, H, W, C) -> (B, 1, C_padded, H, W), replicating the edge band."""
         vol = x.permute(0, 3, 1, 2).unsqueeze(1)      # (B, 1, C, H, W)
-        params = self.encoder(vol)                    # (B, 2Zc, C, h', w')
-        z, mu, logvar = self.reparameterize(params)   # (B, Zc, C, h', w')
-        recon = torch.sigmoid(self.decoder(z))        # (B, 1, C, H, W)
-        recon = recon.squeeze(1).permute(0, 2, 3, 1)  # (B, H, W, C)
+        if self._depth_pad:
+            # Pad the depth axis only. F.pad's last-axis-first ordering means the
+            # depth pair sits third: (W_l, W_r, H_l, H_r, D_l, D_r).
+            vol = F.pad(vol, (0, 0, 0, 0, 0, self._depth_pad), mode="replicate")
+        return vol
+
+    def _from_volume(self, vol):
+        """(B, 1, C_padded, H, W) -> (B, H, W, C), cropping the depth padding."""
+        if self._depth_pad:
+            vol = vol[:, :, : self.input_channels]
+        return vol.squeeze(1).permute(0, 2, 3, 1)     # (B, H, W, C)
+
+    def forward(self, x):
+        """x: (B, H, W, C) -> recon (B, H, W, C), mu, logvar (B, Zc, d, h', w')."""
+        # (B, H, W, C) -> (B, 1, C, H, W): spectral is the volume's depth axis.
+        vol = self._to_volume(x)                      # (B, 1, C_pad, H, W)
+        params = self.encoder(vol)                    # (B, 2Zc, d, h', w')
+        z, mu, logvar = self.reparameterize(params)   # (B, Zc, d, h', w')
+        recon = torch.sigmoid(self.decoder(z))        # (B, 1, C_pad, H, W)
+        recon = self._from_volume(recon)              # (B, H, W, C)
         return recon, mu, logvar
 
     def loss_terms(self, x, beta=1e-3, lambda_physics=0.3, use_physics=False):
@@ -135,14 +179,13 @@ class VAE_3D_SpatioSpectral(nn.Module):
     # ------------------------------------------------------------------
     @torch.no_grad()
     def encode_latents(self, x):
-        """Deterministic latent volume (mu): [ (B, Zc, C, h', w') ]."""
-        vol = x.permute(0, 3, 1, 2).unsqueeze(1)
-        params = self.encoder(vol)
+        """Deterministic latent volume (mu): [ (B, Zc, C/2**n_down, h', w') ]."""
+        params = self.encoder(self._to_volume(x))
         mu, _ = torch.chunk(params, 2, dim=1)
         return [mu]
 
     @torch.no_grad()
     def decode_latents(self, latents):
-        """[ (B, Zc, C, h', w') ] -> recon (B, H, W, C)."""
+        """[ (B, Zc, C/2**n_down, h', w') ] -> recon (B, H, W, C)."""
         recon = torch.sigmoid(self.decoder(latents[0]))
-        return recon.squeeze(1).permute(0, 2, 3, 1)
+        return self._from_volume(recon)

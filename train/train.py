@@ -51,7 +51,7 @@ from modules.registry import (
     build_model,
     checkpoint_name,
 )
-from utils.config import DATASETS, apply_dataset, settings
+from utils.config import DATASETS, apply_dataset, settings, verify_channels
 from utils.hyperparams import apply_hyperparams, load_hyperparams
 from utils.logging_setup import (
     get_run_logger,
@@ -392,8 +392,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss", default="physics", choices=["standard", "physics"])
 
     # Data
-    parser.add_argument("--data-root", default=None)
+    parser.add_argument("--data-root", default=None,
+                        help="Legacy per-patch tree (forces the legacy backend). "
+                             "Omit to use the packed fp16 shards in data/packed/.")
+    parser.add_argument("--packed-root", default=None,
+                        help="Override the packed-shard directory for this dataset.")
     parser.add_argument("--num-workers", type=int, default=None)
+    parser.add_argument("--cache-ram", action="store_true",
+                        help="Load the whole packed split into RAM (5-25 GB per "
+                             "split post-cap). Removes disk from the loop entirely.")
+    parser.add_argument("--limit-train", type=int, default=None,
+                        help="Further cap training patches without re-packing. "
+                             "pack.py already applied settings.train_patch_cap.")
 
     # Hyper-parameters
     parser.add_argument("--epochs", type=int, default=None)
@@ -486,80 +496,20 @@ def main():
     logger.info(f"  debug_epochs  : {args.debug_epochs}")
     logger.info("==============================================")
 
-    # ---- Dataloaders ----
-    train_loader = build_dataloader(
-        args.dataset, "train",
-        processed_root=args.data_root,
-        batch_size=batch_size, shuffle=True, num_workers=num_workers,
-    )
-    val_loader = build_dataloader(
-        args.dataset, "valid",
-        processed_root=args.data_root,
-        batch_size=batch_size, shuffle=False, num_workers=num_workers,
-    )
-    logger.info(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
-
-    # ---- Model ----
-    raw_model = build_model(args.model).to(device)
-
-    # Materialize LazyLinear layers with a single dummy forward before training.
-    dummy = torch.randn(
-        2, settings.input_height, settings.input_width, settings.input_channels,
-        device=device,
-    )
-    with torch.no_grad():
-        raw_model(dummy)
-
-    model = _LossTermsAdapter(raw_model)
-
-    # Optional torch.compile — the training loop invokes model.forward, which
-    # routes into loss_terms via _LossTermsAdapter. Compiling the adapter
-    # means the compiled graph actually covers the hot path.
-    # Skipped for vae-3d-spatio-spectral where Dynamo frequently trips on the
-    # 3D transposed convs.
-    if args.compile:
-        if args.model == "vae-3d-spatio-spectral":
-            logger.info("--compile requested but skipped for vae-3d-spatio-spectral")
-        else:
-            try:
-                model = torch.compile(model, mode="reduce-overhead")
-                logger.info("torch.compile: enabled (mode=reduce-overhead)")
-            except Exception as e:
-                logger.warning("torch.compile failed to enable, continuing eager: %s", e)
-
-    if n_gpus > 1 and args.allow_multi_gpu:
-        logger.info(f"Wrapping in nn.DataParallel across {n_gpus} GPUs "
-                    f"(per-GPU batch: {batch_size // n_gpus}).")
-        model = nn.DataParallel(model)
-    elif n_gpus > 1:
-        logger.info(f"{n_gpus} GPUs visible; keeping single-GPU. Pass --allow-multi-gpu to enable DP.")
-
-    model.to(device)
-
     amp_dtype = _pick_amp_dtype(device, logger)
-
-    # Ampere+ perf: TF32 for the FP32 matmul paths that AMP doesn't cover
-    # (linear reparameterization, norm layers). Preserves math semantics
-    # closely enough for training but noticeably faster on Ampere/Hopper.
-    if device.type == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
-
-    # Memory-format hint. cuDNN uses channels-last kernels on Ampere+ when
-    # the model's parameters and inputs are both in channels_last. Safe no-op
-    # when the model's convs don't benefit (registry contract is 4D input).
-    mem_fmt = _memory_format_for(args.model)
-    try:
-        model.to(memory_format=mem_fmt)
-        logger.debug("memory_format applied: %s", mem_fmt)
-    except Exception as e:
-        logger.debug("memory_format apply failed, continuing default: %s", e)
 
     # Checkpoint destination
     ckpt_path = Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
     ckpt_meta = {"model": args.model, "dataset": args.dataset, "loss_type": args.loss}
 
+    # ---- Notifier FIRST -------------------------------------------------
+    # Everything below here — dataloader construction, band-count verification,
+    # model build, the LazyLinear dummy forward — can throw, and all of it used
+    # to sit ABOVE this point. A failure there produced zero Telegram output and
+    # was not caught by the [FAIL] handler: that is exactly why all seven CRIMS
+    # slots vanished silently instead of reporting FileNotFoundError. The
+    # notifier now exists, and the try block covers setup, before anything
+    # touches disk.
     notifier = RunNotifier(
         model=args.model,
         dataset=args.dataset,
@@ -581,35 +531,116 @@ def main():
         "amp_dtype": str(amp_dtype).replace("torch.", ""),
         "compile": bool(args.compile),
         "allow_multi_gpu": bool(args.allow_multi_gpu),
+        "cache_ram": bool(args.cache_ram),
     }
     notifier.send_start(resolved_cfg)
 
-    # ---- Weights & Biases ----
-    wandb_run = None
-    if _HAS_WANDB and not args.no_wandb:
-        try:
-            wandb_mode = os.environ.get("WANDB_MODE", "online")
-            run_name = f"{args.model}__{args.loss}__{args.dataset}"
-            wandb_run = wandb.init(
-                project=args.wandb_project,
-                entity=args.wandb_entity,
-                name=run_name,
-                mode=wandb_mode,
-                config=resolved_cfg,
-                tags=[args.model, args.dataset, args.loss],
-                reinit=True,
-            )
-            logger.info(f"wandb: initialised (mode={wandb_mode}, run={run_name})")
-        except Exception as e:
-            logger.warning("wandb init failed, continuing without: %s", e)
-            wandb_run = None
-    elif args.no_wandb:
-        logger.info("wandb: disabled by --no-wandb")
-    else:
-        logger.info("wandb: not installed; skipping")
-
     status = "fail"
+    wandb_run = None
     try:
+        # ---- Band-count sanity check ----
+        # Fails loudly here, with the dataset name and both numbers, rather than
+        # 500 frames deep as an opaque assert inside SpectralBranch.forward.
+        verify_channels(args.dataset, args.data_root)
+
+        # ---- Dataloaders ----
+        train_loader = build_dataloader(
+            args.dataset, "train",
+            processed_root=args.data_root,
+            packed_root=args.packed_root,
+            batch_size=batch_size, shuffle=True, num_workers=num_workers,
+            cache_ram=args.cache_ram, limit=args.limit_train,
+        )
+        val_loader = build_dataloader(
+            args.dataset, "valid",
+            processed_root=args.data_root,
+            packed_root=args.packed_root,
+            batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            cache_ram=args.cache_ram,
+        )
+        logger.info(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
+
+        # ---- Model ----
+        raw_model = build_model(args.model).to(device)
+
+        # Materialize LazyLinear layers with a single dummy forward before training.
+        dummy = torch.randn(
+            2, settings.input_height, settings.input_width, settings.input_channels,
+            device=device,
+        )
+        with torch.no_grad():
+            raw_model(dummy)
+
+        n_params = sum(p.numel() for p in raw_model.parameters())
+        logger.info(f"Model parameters: {n_params:,} ({n_params / 1e6:.2f}M)")
+
+        model = _LossTermsAdapter(raw_model)
+
+        # Optional torch.compile — the training loop invokes model.forward, which
+        # routes into loss_terms via _LossTermsAdapter. Compiling the adapter
+        # means the compiled graph actually covers the hot path.
+        # Skipped for vae-3d-spatio-spectral where Dynamo frequently trips on the
+        # 3D transposed convs.
+        if args.compile:
+            if args.model == "vae-3d-spatio-spectral":
+                logger.info("--compile requested but skipped for vae-3d-spatio-spectral")
+            else:
+                try:
+                    model = torch.compile(model, mode="reduce-overhead")
+                    logger.info("torch.compile: enabled (mode=reduce-overhead)")
+                except Exception as e:
+                    logger.warning("torch.compile failed to enable, continuing eager: %s", e)
+
+        if n_gpus > 1 and args.allow_multi_gpu:
+            logger.info(f"Wrapping in nn.DataParallel across {n_gpus} GPUs "
+                        f"(per-GPU batch: {batch_size // n_gpus}).")
+            model = nn.DataParallel(model)
+        elif n_gpus > 1:
+            logger.info(f"{n_gpus} GPUs visible; keeping single-GPU. Pass --allow-multi-gpu to enable DP.")
+
+        model.to(device)
+
+        # Ampere+ perf: TF32 for the FP32 matmul paths that AMP doesn't cover
+        # (linear reparameterization, norm layers). Preserves math semantics
+        # closely enough for training but noticeably faster on Ampere/Hopper.
+        if device.type == "cuda":
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cudnn.benchmark = True
+
+        # Memory-format hint. cuDNN uses channels-last kernels on Ampere+ when
+        # the model's parameters and inputs are both in channels_last. Safe no-op
+        # when the model's convs don't benefit (registry contract is 4D input).
+        mem_fmt = _memory_format_for(args.model)
+        try:
+            model.to(memory_format=mem_fmt)
+            logger.debug("memory_format applied: %s", mem_fmt)
+        except Exception as e:
+            logger.debug("memory_format apply failed, continuing default: %s", e)
+
+        # ---- Weights & Biases ----
+        if _HAS_WANDB and not args.no_wandb:
+            try:
+                wandb_mode = os.environ.get("WANDB_MODE", "online")
+                run_name = f"{args.model}__{args.loss}__{args.dataset}"
+                wandb_run = wandb.init(
+                    project=args.wandb_project,
+                    entity=args.wandb_entity,
+                    name=run_name,
+                    mode=wandb_mode,
+                    config={**resolved_cfg, "n_params": n_params},
+                    tags=[args.model, args.dataset, args.loss],
+                    reinit=True,
+                )
+                logger.info(f"wandb: initialised (mode={wandb_mode}, run={run_name})")
+            except Exception as e:
+                logger.warning("wandb init failed, continuing without: %s", e)
+                wandb_run = None
+        elif args.no_wandb:
+            logger.info("wandb: disabled by --no-wandb")
+        else:
+            logger.info("wandb: not installed; skipping")
+
         status = train_vae(
             model=model,
             dataloader=train_loader,
