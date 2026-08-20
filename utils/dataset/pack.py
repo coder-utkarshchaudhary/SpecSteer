@@ -290,6 +290,11 @@ def verify_split(dataset: str, split: str, processed_root: Path,
     idx = rng.choice(meta["n"], size=min(n_samples, meta["n"]), replace=False)
     crop = meta["crop_bands"]
     worst = 0.0
+    # Normalisation divides by the per-patch *signed* max, so the positive peak
+    # is 1.0 but negative reflectances are left un-clipped and can be several
+    # times larger in magnitude (see utils/training/dataloader.py). The fp16
+    # tolerance must therefore track the actual value range, not assume [0, 1].
+    peak = 1.0
     for i in idx:
         src = np.load(processed_root / meta["source_files"][i])
         norm, m = normalise(src, crop)
@@ -298,15 +303,22 @@ def verify_split(dataset: str, split: str, processed_root: Path,
             print(f"  [verify] {split}: FAIL row {i} shape {got.shape} != {norm.shape}")
             return False
         worst = max(worst, float(np.abs(got - norm).max()))
+        peak = max(peak, float(np.abs(norm).max()))
         if abs(m - meta["patch_max"][i]) > 1e-3 * max(m, 1.0):
             print(f"  [verify] {split}: FAIL row {i} max {m} != {meta['patch_max'][i]}")
             return False
 
-    # fp16 has ~11 bits of mantissa and values top out at 1.0, so the worst
-    # round-trip error should be under 2^-11 ~= 4.9e-4.
-    ok = worst < 1e-3
+    # fp16 keeps ~11 bits of mantissa, so its worst-case round-trip error is
+    # |value| * 2**-11. Scale the tolerance to the observed peak magnitude
+    # (2**-10 = one ULP of headroom over the 2**-11 half-ULP bound). A genuine
+    # row misalignment or crop error produces an O(1) error — ~1000x this tol —
+    # so this stays just as sensitive to real corruption as the old flat 1e-3,
+    # while no longer failing on legitimate rounding of large negative bands.
+    tol = peak * 2 ** -10
+    ok = worst < tol
     print(f"  [verify] {split}: {'OK ' if ok else 'FAIL'}  "
-          f"{len(idx)} rows sampled, max abs err {worst:.2e} (fp16 floor ~4.9e-4)")
+          f"{len(idx)} rows sampled, max abs err {worst:.2e} "
+          f"(tol {tol:.2e} @ peak |v|={peak:.2f})")
     return ok
 
 
