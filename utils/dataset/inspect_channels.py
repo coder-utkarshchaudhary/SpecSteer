@@ -74,24 +74,25 @@ def main() -> int:
 
     for ds in datasets:
         meta = DATASETS[ds]
-        packed = Path(meta["packed_root"]) / "train.npy"
-        source = "packed" if packed.is_file() else "raw"
 
-        raw_c = probe_channels(ds, args.processed_root)
+        # Single source of truth, shared with utils.config.verify_channels — the
+        # two used to compute `source` independently and disagreed, which is how
+        # inspect_channels passed while every CRIMS training slot failed.
+        raw_c, source, where = probe_channels(ds, args.processed_root)
         if raw_c is None:
             print(f"{ds:<8} {'-':<8} {'-':>6} {'-':>6} {'-':>6} "
                   f"{meta['input_channels']:>6} {'-':>5}  NO DATA (not staged here)")
             missing.append(ds)
             continue
 
-        # A packed shard is already cropped; a raw patch is not.
+        # A packed shard is already cropped; a processed patch is not.
         eff = int(raw_c) if source == "packed" else effective_channels(ds, raw_c)
         crop = meta.get("crop_bands")
         cfg_c = meta["input_channels"]
         divisible = (eff % mult) == 0
 
         notes = []
-        if source == "raw":
+        if source == "processed":
             expected_raw = meta.get("raw_channels")
             if expected_raw is not None and raw_c != expected_raw:
                 notes.append(f"raw C {raw_c} != raw_channels {expected_raw}")

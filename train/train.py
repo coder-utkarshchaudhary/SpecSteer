@@ -558,6 +558,19 @@ def main():
             batch_size=batch_size, shuffle=False, num_workers=num_workers,
             cache_ram=args.cache_ram,
         )
+        # Log the resolved storage backend explicitly. Which one was used had to
+        # be inferred from epoch timings after the last grid; it never should be.
+        def _describe(loader):
+            ds = loader.dataset
+            kind = type(ds).__name__
+            if kind == "PackedPatchDataset":
+                return (f"packed{'+RAM' if getattr(ds, 'cached', False) else ' (memmap)'} "
+                        f"{ds.npy_path}")
+            return f"legacy per-patch tree ({len(getattr(ds, 'patch_files', []))} files) — SLOW"
+
+        logger.info(f"Data backend  : {_describe(train_loader)}")
+        logger.info(f"Train patches : {len(train_loader.dataset)} "
+                    f"| Val patches: {len(val_loader.dataset)}")
         logger.info(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
         # ---- Model ----

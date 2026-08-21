@@ -1,11 +1,16 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-08-19  
+> **Last updated:** 2026-08-21  
 > **Status:** All 4 ablation models + downstream experiments implemented.
 > IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay added.
 > **Wall-time overhaul landed** — see [§10 Performance](#10-performance--why-the-grid-was-slow).
 > The 5-epoch smoke run took 1h14m–4h58m per slot; the same work now projects to
 > well under the 5–6 h/run budget at 30 epochs.  
+> **Latent rate matched to 64:1** across all four models — see
+> [§11 Controls](#11-experimental-controls--rate-and-parameters). The previous
+> config left rate floating 512x between models, and on M3 `vae-our`'s latent
+> was *larger than its input*.
+> **Falsification suite added** — see [§12 Probes](#12-falsification-suite).
 > ⚠️ Compile-pass ≠ verified-run. See [Caveats](#7-caveats) before running.
 
 ---
@@ -66,7 +71,9 @@ data/processed/<folder>/
 | `utils/dataset/pack.py` | patches → **capped fp16 memmap shards** (`data/packed/`) | ✅ New |
 | `utils/dataset/inspect_channels.py` | verify on-disk band counts vs config | ✅ New |
 | `utils/training/dataloader.py` | Packed + legacy backends, DataLoader factory | ✅ Rewritten |
-| `utils/find_max_batch.py` | binary-search the global batch size for a VRAM budget | ✅ New |
+| `utils/find_max_batch.py` | per-dataset batch size for a VRAM budget (`--fit` extrapolates) | ✅ |
+| `utils/match_latent_rate.py` | solve each model's bottleneck to a common latent rate | ✅ New |
+| `utils/dataset/audit_pack.py` | prove packing introduced no artifact; report backend | ✅ New |
 | `utils/check-model-params.py` | param audit **+ `--solve` for baseline widths** | ✅ Fixed |
 | `modules/SpatialBranch.py` | Spatial encoder-decoder | ✅ Fixed |
 | `modules/SpectralBranch.py` | Spectral encoder-decoder | ✅ Fixed |
@@ -78,7 +85,12 @@ data/processed/<folder>/
 | `modules/registry.py` | CLI name → model class; model contract | ✅ |
 | `train/train.py` | Training loop, wandb, CLI, checkpointing | ✅ Rewritten |
 | `inference/inference.py` | Reconstruction eval (MSE/SAM/PSNR/SSIM) | ✅ |
-| `inference/downstream.py` | Latent noise-injection + interpolation experiments | ✅ New |
+| `inference/downstream.py` | Latent noise-injection + interpolation experiments | ✅ |
+| `inference/probes.py` | **Falsification suite — 7 probes on frozen models** | ✅ New |
+| `inference/preregistration.yaml` | Thresholds, fixed before any run | ✅ New |
+| `inference/stats.py` | Paired bootstrap / permutation / Holm / effect sizes | ✅ New |
+| `inference/verdict.py` | probes.csv, stats.csv, VERDICT.txt | ✅ New |
+| `docs/preregistration.md` | Why each threshold is what it is | ✅ New |
 | `notebooks/*.ipynb` | Per-model self-contained training notebooks | ✅ |
 | `inference/notebooks/*.ipynb` | Per-model self-contained eval notebooks | ✅ |
 | `scripts/preprocess.sh` | One-command preprocessing runner | ✅ New |
@@ -99,12 +111,16 @@ encode_latents(x) -> list[Tensor]                        # deterministic (mu) la
 decode_latents(list[Tensor]) -> (B, H, W, C)
 ```
 
-| Model | Registry name | Latent | Hypothesis |
+| Model | Registry name | Latent (IIRS) | Hypothesis |
 |-------|---------------|--------|------------|
-| A: 2D Spatial | `vae-standard` | `(B, 16, 8, 8)` map | 2D convs blur pixel spectra → good PSNR, poor SAM |
+| A: 2D Spatial | `vae-standard` | `(B, 256, 8, 8)` map | 2D convs blur pixel spectra → good PSNR, poor SAM |
 | B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C/8, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
-| C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 32)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
-| Proposed: PRISM | `vae-our` | `[(B,256), (B,128,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
+| C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 4)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
+| Proposed: PRISM | `vae-our` | `[(B,256), (B,4,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
+
+Latent **shapes** differ by design — that geometry *is* what the ablation tests.
+Latent **budgets** are matched to 64:1 (§11), and parameter counts to within
+1.9 % (below). Both controls hold simultaneously.
 
 Baselines A/B preserve the spatial grid at 8×8 (H,W ÷ 8) and reconstruct
 exactly for any band count C. B now strides the spectral depth as well and pads
@@ -123,10 +139,15 @@ PYTHONPATH=. python utils/check-model-params.py           # audit the result
 
 | Dataset | vae-our target | `vae_standard_base_ch` | `vae_3d_base_ch` | `vae_1d_hidden_dims` |
 |---|---|---|---|---|
-| IIRS (C=256)   | 12.40 M | 94 | 48 | (2936, 1468, 734) |
-| M3 (C=84)      | 11.21 M | 91 | 46 | (2916, 1458, 729) |
-| AVIRIS (C=424) | 13.67 M | 98 | 50 | (2972, 1486, 743) |
-| CRIMS (C=456)  | 13.93 M | 99 | 51 | (2980, 1490, 745) |
+| IIRS (C=256)   | 10.87 M | 86 | 45 | (2748, 1374, 687) |
+| M3 (C=84)      | 10.70 M | 88 | 45 | (2856, 1428, 714) |
+| AVIRIS (C=424) | 11.21 M | 85 | 46 | (2668, 1334, 667) |
+| CRIMS (C=456)  | 11.28 M | 85 | 46 | (2656, 1328, 664) |
+
+**Order matters when regenerating: rate first, then parameters.** Shrinking
+`vae-our`'s spectral latent shrinks its `LazyLinear` (4096→256 becomes 4096→8),
+so the parameter *target* moves. Solving parameters first and rate second
+produces a stale match.
 
 ### Downstream experiments (`inference/downstream.py`)
 
@@ -165,12 +186,15 @@ with 108-band IIRS cubes. Change values in the dataclass; derived fields
 | **`train_patch_cap`** | **7000** | max training patches per dataset (applied by `pack.py`) |
 | **`patch_cap_seed`** | **1234** | seed for the cap's scene-stratified subsample |
 | `batch_size` | 32 / 32 / 16 / 16 | **per dataset** (IIRS / M3 / AVIRIS / CRIMS) — see §5 |
+| `vae_standard_latent_ch` | 256 / 84 / 424 / 456 | latent-rate knob, per dataset |
+| `vae_3d_latent_ch` | 8 | already exactly 64:1 — unchanged by the rate match |
+| `vae_1d_latent_dim` | 4 / 1 / 7 / 7 | latent-rate knob, per dataset |
 | `num_workers` | 8 | dataloader workers |
 | `reduced_dims` | 32 | spatial Conv1D output channels |
 | `latent_dim` | 256 | spatial latent (post-reparameterize) |
 | `n_2D_conv_blocks` | 4 | spatial bottleneck: 64→4 px |
 | `spectral_n_1D_conv_blocks` | 2 | spectral bottleneck |
-| `spectral_latent_dim` | 128 | per-pixel spectral latent |
+| `spectral_latent_dim` | 4 / 1 / 7 / 7 | per-pixel spectral latent — **per dataset**, see §11 |
 | **`spectral_base_ch`** | **32** | spectral Conv1D width — **decoupled from C**, see §10 |
 | `spectral_transpose_c/l` | 64 / C÷4 | decoder reshape target |
 | `spectral_linear_expansion_dim` | 16·C | 64 × (C÷4) |
@@ -495,9 +519,19 @@ project instructions). Before your first full training run:
 
 6. **Notebook config duplication.** `notebooks/*.ipynb` cell 2 inlines
    `utils/config.py` + `utils/hyperparams.py` + all four YAMLs so the notebooks
-   run standalone on Kaggle. Any change to band counts, model widths, or the
-   spectral/spatial knobs must be mirrored into **all four** notebooks. This
+   run standalone on Kaggle. Any change to band counts, model widths, latent
+   knobs, or batch sizes must be mirrored into **all four** notebooks. This
    duplication is exactly how `CRIMS: 544` survived in five places at once.
+
+7. **`verify_channels` is packed-aware, and must stay that way.** A packed shard
+   has already had `crop_bands` applied, so its band count is the *effective*
+   count; a processed patch still carries the *raw* one. `probe_channels`
+   returns `(count, source, location)` and callers must honour `source`.
+   Conflating the two is what made all seven CRIMS slots fail with
+   `on-disk patches have 456 bands but raw_channels says 457` — the data and the
+   packing were both fine. `inspect_channels.py` and `verify_channels` now share
+   the helper so they cannot disagree again (previously the inspector passed
+   while every training slot failed).
 
 ---
 
@@ -670,16 +704,6 @@ answered against the real cluster (whether the shipped `.venv`'s
 interpreter actually exists on the compute node, whether the two SSH hops
 are passwordless, etc).
 
-## 9. Phase 2 (Future)
-
-The VAE encoder (`SpatialEncoderDecoder`, `SpectralEncoderDecoder`) will serve as
-the backbone for a Latent Diffusion Model (LDM) that performs diffusion-based
-purification of the compressed latent representations from satellite imagery.
-The `standalone forward` methods on both encoder-decoder classes expose the
-full `(z, mu, logvar, reconstruction)` return for easy LDM integration.
-
----
-
 ## 10. Performance — why the grid was slow
 
 Measured from the 5-epoch smoke run (2026-08-19) and analytic MAC counts. Kept
@@ -795,3 +819,140 @@ Only on `standard` runs — no SAM term to prevent it — with
 few to call it, but if it persists at 30 those baselines produce nothing usable
 however fast they run, and the ~4× batch-size increase interacts with it. Worth
 checking after the first full grid.
+
+---
+
+## 11. Experimental controls — rate and parameters
+
+The ablation controls **two independent resources**. Conflating them was the
+single biggest methodological hole in the earlier grid.
+
+| Resource | What it bounds | Knob | Tool |
+|---|---|---|---|
+| **Parameters** | how complex a mapping can be learned | `*_base_ch`, `vae_1d_hidden_dims` | `utils/check-model-params.py --solve` |
+| **Latent rate** | how much information can pass the bottleneck | `spectral_latent_dim`, `vae_*_latent_ch/dim` | `utils/match_latent_rate.py --ratio 64` |
+
+Only parameters were being matched. Rate floated **512×** within a dataset:
+
+| dataset | input | vae-standard | vae-3d | vae-1d | vae-our |
+|---|---|---|---|---|---|
+| IIRS | 1,048,576 | 1,024 (1024:1) | 16,384 (64:1) | 131,072 (8:1) | 524,544 (**2:1**) |
+| M3 | 344,064 | 1,024 (336:1) | 5,632 (61:1) | 131,072 (3:1) | 524,544 (**1.52× the input**) |
+| AVIRIS | 1,736,704 | 1,024 (1696:1) | 27,136 (64:1) | 131,072 (13:1) | 524,544 (**3:1**) |
+| CRIMS | 1,867,776 | 1,024 (1824:1) | 29,184 (64:1) | 131,072 (14:1) | 524,544 (**4:1**) |
+
+For an autoencoder, reconstruction quality is bounded by rate almost by
+definition — a 2:1 bottleneck beats a 1024:1 one regardless of what is inside
+it. So rate was the *more* important of the two controls to have been missing.
+And on M3 the "latent" was 1.52× larger than the cube it encoded: an
+over-complete code that can copy the input outright, and unusable as an LDM
+backbone (Stable Diffusion's AutoencoderKL is 48:1).
+
+### The 64:1 target
+
+`vae-3d` is already exactly 64:1 (8×8×8 downsampling × 8 latent channels), so it
+is **unchanged** and cannot be accused of being re-tuned for the comparison.
+
+| dataset | target | `spectral_latent_dim` | `vae_standard_latent_ch` | `vae_3d_latent_ch` | `vae_1d_latent_dim` |
+|---|---|---|---|---|---|
+| IIRS | 16,384 | 128 → **4** (+1.6 %) | 16 → **256** (exact) | **8** (unchanged) | 32 → **4** (exact) |
+| M3 | 5,376 | 128 → **1** (−19 %) | 16 → **84** (exact) | **8** (+4.8 %) | 32 → **1** (−23.8 %) |
+| AVIRIS | 27,136 | 128 → **7** (+6.6 %) | 16 → **424** (exact) | **8** (unchanged) | 32 → **7** (+5.7 %) |
+| CRIMS | 29,184 | 128 → **7** (−0.9 %) | 16 → **456** (exact) | **8** (unchanged) | 32 → **7** (−1.8 %) |
+
+Exact 4-way matching is only possible on IIRS (C is a power of two). The
+per-pixel models can only hit multiples of 4,096 elements and 4,096 does not
+divide M3's 5,376 target, so M3 is the loosest at −24 % — inside the ±25 %
+tolerance, but only just. Achieved rates are recorded per cell and reported;
+P2 regresses on the achieved value, never the target.
+
+**What is deliberately NOT matched: latent shape.** `vae-standard` is a spatial
+grid with no spectral axis; `vae-our` is a global vector beside a
+full-resolution per-pixel spectral map. That geometry *is* the architecture
+under test — forcing a common shape would destroy the thing being measured.
+Only the scalar count matches. `vae-our`'s spectral latent drops 128 → 4
+channels per pixel, which is severe, but the shape survives.
+
+```bash
+python utils/match_latent_rate.py --ratio 64            # solve + paste-ready YAML
+python utils/match_latent_rate.py --ratio 64 --check    # verify, non-zero on failure
+python utils/match_latent_rate.py --ratio 64 --fit      # (find_max_batch) from a small GPU
+```
+
+`match_latent_rate.py` cross-checks its closed forms against the real models on
+every run, so a drift between it and `modules/` is caught rather than shipped.
+
+---
+
+## 12. Falsification suite
+
+`inference/probes.py` — seven probes on **frozen** checkpoints, each answering a
+specific way the headline result could be fake. Thresholds live in
+`inference/preregistration.yaml`, are fixed **before** any run, and the module
+refuses to start without that file. Reasoning for every number:
+`docs/preregistration.md`.
+
+| Probe | Question | Fails when |
+|---|---|---|
+| **P1** trivial floors | better than predicting the mean? | below global/region/fold/patch mean or 1000 random draws |
+| **P2** latent rate | capacity or architecture? | rate outside ±25 % of 64:1 |
+| **P3** collapse | is the latent used? | <1 % active units, or latent-swap moves SAM <2 % |
+| **P4** spatial shuffle | uses spatial context? | SRI < 0.02 (i.e. pixelwise in disguise) |
+| **P5** band inpainting | has a spectral prior? | <10 % gain over mean-fill on masked bands |
+| **P6** purification | does it actually denoise? | NPR ≥ 0.9 (passes input noise through) |
+| **P7** linear probe | latent = chemistry or nuisance? | physics R² < 0.5 |
+
+Plus `inference/stats.py`: paired bootstrap CIs, paired permutation tests,
+Holm–Bonferroni within each dataset's model-pair family, and Cliff's delta.
+
+### Three things the suite corrects for
+
+1. **SAM has a non-zero floor.** A *perfect copy* scores 0.0223 on IIRS, not 0
+   (the epsilon in its norm). The identity oracle is the real ceiling, so the
+   suite reports *headroom captured*, not raw scores.
+2. **SAM has a π/2 contamination.** A pixel with spectral energy below that
+   epsilon contributes **exactly π/2 whatever the model predicted**. CRIMS has
+   ~24 % such pixels → a hard raw-SAM floor near 0.377 rad unrelated to model
+   quality. Use `sam_valid`, which excludes them.
+3. **Significance is not evidence.** At n = 3,084 a 0.05 dB gap gives p = 0.0005.
+   Every comparison carries a preregistered minimum effect (0.5 dB / 0.005 rad /
+   0.01 SSIM); anything below is labelled `significant_but_negligible` and is
+   **not** a win.
+
+### Probe self-test
+
+`vae-1d-pixelwise` is *exactly* permutation-equivariant, so in P4 its shuffled
+and intact scores must match to 1e-6. A larger deviation is reported as
+`PROBE_BUG` — the probe is wrong, not the model. Check this before believing any
+P4 result.
+
+### Running it
+
+```bash
+bash scripts/inference.sh                      # recon + probes + downstream + verdict
+bash scripts/inference.sh --probes-only        # just the suite
+bash scripts/inference.sh --datasets CRIMS
+bash scripts/inference.sh --max-patches 0      # whole split instead of 512
+```
+
+Outputs:
+
+```
+results/VERDICT.txt   <- read this one: why each model wins or loses, per dataset
+results/probes.csv       per-cell probe metrics + PASS/FAIL/INVALID
+results/stats.csv        pairwise deltas, CIs, p, Holm, effect sizes
+results/probes/*.json    raw per-cell output
+```
+
+A claimed win requires: cell `VALID` **and** rate matched **and** the pairwise
+difference significant after Holm **and** above the effect floor.
+
+---
+
+## 13. Phase 2 (Future)
+
+The VAE encoder (`SpatialEncoderDecoder`, `SpectralEncoderDecoder`) will serve as
+the backbone for a Latent Diffusion Model (LDM) that performs diffusion-based
+purification of the compressed latent representations from satellite imagery.
+The `standalone forward` methods on both encoder-decoder classes expose the
+full `(z, mu, logvar, reconstruction)` return for easy LDM integration.

@@ -1,0 +1,150 @@
+# inference/preregistration.yaml
+# ==============================================================================
+# PREREGISTERED decision rules for the falsification suite (inference/probes.py).
+#
+# These thresholds are fixed BEFORE the probes are run. inference/probes.py reads
+# every number from this file and refuses to start if it is missing, so the rules
+# cannot be quietly tuned to fit whatever the results turn out to be. Changing a
+# threshold after seeing results is legitimate only as an explicit, dated,
+# reasoned edit here — which git will record.
+#
+# Prose version with the reasoning for each number: docs/preregistration.md
+# ==============================================================================
+
+registered_on: "2026-08-21"
+registered_by: "pre-run, against checkpoints trained at 64:1 matched latent rate"
+split: test
+notes: >
+  Every probe runs on frozen checkpoints. No probe may modify weights.
+  Probes are evaluated per (model, dataset, loss) cell.
+
+# ------------------------------------------------------------------------------
+# Sampling. Bounded so a full 28-cell sweep is predictable rather than open-ended.
+# P8's confidence intervals are computed on exactly this subset and report the
+# real n, never the full split size.
+# ------------------------------------------------------------------------------
+sampling:
+  max_patches: 512          # per cell; 0 = use the whole split
+  seed: 20260821
+  stratify_by_scene: true
+  probe_batch: 8            # chunk size for forwards inside probes; memory only
+
+# ------------------------------------------------------------------------------
+# P1 — Trivial-predictor floors
+# A model must beat every predictor that contains no learning. `mean_patch` is
+# the strongest of them and needs no training set at all.
+# ------------------------------------------------------------------------------
+p1_trivial_floors:
+  baselines: [mean_global, mean_region, mean_fold, mean_patch, random_uniform, random_normal]
+  n_random_draws: 1000
+  # A cell is VALID only if it beats max(all trivial floors) by ALL of these.
+  min_lift_over_best_floor:
+    psnr_db: 1.0
+    sam_relative: 0.10      # >=10% lower SAM than the floor
+    ssim_absolute: 0.02
+  # And must sit above every random draw.
+  max_random_percentile: 0.001
+  # SAM's epsilon makes near-zero pixels score exactly pi/2 whatever the model
+  # predicts. Pixels below this spectral energy are excluded from `sam_valid`.
+  # Both raw `sam` and corrected `sam_valid` are reported; `sam_valid` is the
+  # comparable one across datasets.
+  sam_valid_min_energy: 1.0e-8
+  # A perfect copy does NOT score 0 (measured: 0.0223 on IIRS). The identity
+  # oracle is the real ceiling, so headroom is measured against it.
+  report_identity_oracle: true
+
+# ------------------------------------------------------------------------------
+# P2 — Latent budget / rate control
+# ------------------------------------------------------------------------------
+p2_latent_budget:
+  target_ratio: 64                 # input:latent, set in the hyperparam YAMLs
+  match_tolerance_pct: 25          # a cell outside this is rate-unmatched
+  # Secondary control, since matching is approximate: regress metric on
+  # log2(achieved latent). A win counts as architectural only if vae-our's
+  # residual exceeds this many pooled SDs of the residuals.
+  min_residual_sds: 1.0
+  # vae-our's total_mse sums three terms; a large mse_spatial is an artifact of
+  # the auxiliary weighting, not of reconstruction quality.
+  report_per_branch_mse: true
+
+# ------------------------------------------------------------------------------
+# P3 — Posterior collapse / latent usage
+# ------------------------------------------------------------------------------
+p3_collapse:
+  active_unit_kl_nats: 0.01        # a latent dim is "active" above this
+  min_active_fraction: 0.01        # below 1% active => COLLAPSED
+  latent_swap_min_delta_sam: 0.02  # swapping z between patches must move SAM >=2%
+  verdict_on_collapse: INVALID     # such cells are reported as a finding, not scored
+
+# ------------------------------------------------------------------------------
+# P4 — Spatial-reliance shuffle (shortcut test 1)
+# ------------------------------------------------------------------------------
+p4_spatial_reliance:
+  # SRI = (SAM_shuffled - SAM_intact) / SAM_intact
+  min_sri_for_spatial_use: 0.02
+  # vae-1d is EXACTLY permutation-equivariant, so its shuffled and intact scores
+  # must be bit-identical. Any deviation is a bug in the probe (almost certainly
+  # the permutation applied to the input but not the target), never a finding.
+  positive_control_model: vae-1d-pixelwise
+  positive_control_tolerance: 1.0e-6
+
+# ------------------------------------------------------------------------------
+# P5 — Spectral band-masking inpainting (shortcut test 2)
+# ------------------------------------------------------------------------------
+p5_spectral_inpainting:
+  mask_fraction: 0.10              # contiguous block of bands
+  n_mask_positions: 5              # averaged over positions along the spectrum
+  baseline: bandwise_train_mean
+  min_relative_gain_over_baseline: 0.10
+
+# ------------------------------------------------------------------------------
+# P6 — Noise pass-through / purification (the paper's core claim)
+# ------------------------------------------------------------------------------
+p6_purification:
+  # Noise added to the INPUT, as a multiple of the data SD. (downstream.py
+  # perturbs the LATENT instead — a different question.)
+  sigmas: [0.01, 0.05, 0.10]
+  # NPR = ||D(E(x_noisy)) - x_clean|| / ||x_noisy - x_clean||
+  denoising_max_npr: 0.90          # below this => genuinely denoises
+  passthrough_npr_range: [0.90, 1.10]
+  # PREREGISTERED CLAIM, recorded before the run: vae-our attains the lowest NPR
+  # at every sigma on every dataset. Recorded so it can be falsified, not
+  # rediscovered.
+  claim: "vae-our achieves the lowest NPR at every sigma on every dataset"
+
+# ------------------------------------------------------------------------------
+# P7 — Linear probe on frozen latents
+# ------------------------------------------------------------------------------
+p7_linear_probe:
+  # Latent dimensionality itself confounds probe R^2 — more dims give a linear
+  # probe more to work with. Every latent is PCA-projected to a common width
+  # first, so the probe measures information content rather than size.
+  pca_dim: 256
+  # Wavelengths are NOT carried in the packed shards, so the physics target is
+  # defined on band indices: continuum-removed depth at the k deepest features
+  # of the train-mean spectrum.
+  physics_target: continuum_removed_band_depth
+  n_features: 3
+  min_physics_r2: 0.5
+  # Scene ID comes free from the shard's source_files.
+  nuisance_target: scene_id
+  high_nuisance_accuracy: 0.8      # high nuisance + low physics => latent is acquisition noise
+  controls: [raw_pixels_upper_bound, shuffled_latent_chance_floor]
+
+# ------------------------------------------------------------------------------
+# P8 — Statistics
+# With 3,084 test patches almost any difference is "significant", so the
+# minimum effect size is doing the real work here, not the p-value.
+# ------------------------------------------------------------------------------
+p8_statistics:
+  bootstrap_resamples: 10000
+  permutation_resamples: 10000
+  alpha: 0.05
+  correction: holm            # across the model-pair family within each dataset
+  min_meaningful_effect:
+    psnr_db: 0.5
+    sam_rad: 0.005
+    ssim: 0.01
+  report_effect_size: [paired_mean_difference, cliffs_delta]
+  # A difference that clears significance but not the effect floor is labelled
+  # "significant but negligible" rather than being claimed as a win.

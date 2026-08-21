@@ -1,0 +1,7 @@
+{
+ "model": "vae-our",
+ "dataset": "IIRS",
+ "loss": "physics",
+ "error": "missing checkpoint model/IIRS/vae-our.pt",
+ "verdict": "MISSING"
+}

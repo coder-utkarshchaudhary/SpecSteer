@@ -4,19 +4,30 @@
 # Run the full evaluation sweep after the overnight training grid finishes:
 #   1. inference/inference.py on every (model x dataset x loss) checkpoint,
 #      dumping metrics JSON under results/inference/.
-#   2. inference/downstream.py once per dataset (all four models internally),
+#   2. inference/probes.py — the FALSIFICATION SUITE, once per dataset (all
+#      models internally). Seven probes against thresholds preregistered in
+#      inference/preregistration.yaml. Writes results/probes/.
+#   3. inference/downstream.py once per dataset (latent noise + interpolation),
 #      writing PNGs + JSON under results/downstream/<DATASET>/.
-#   3. inference/aggregate.py to roll everything into two CSVs and send one
+#   4. inference/verdict.py — probes.csv, stats.csv (paired bootstrap +
+#      permutation + Holm) and VERDICT.txt, the readable answer to "why does my
+#      model beat or get beaten on each dataset".
+#   5. inference/aggregate.py for the reconstruction/downstream CSVs and one
 #      final Telegram summary.
 #
 # Run from the repo root:
 #   bash scripts/inference.sh
 #   bash scripts/inference.sh --datasets IIRS,M3          # subset
+#   bash scripts/inference.sh --probes-only               # just the suite + verdict
+#   bash scripts/inference.sh --skip-probes               # old behaviour
+#   bash scripts/inference.sh --max-patches 0             # use the whole split
 #   bash scripts/inference.sh --no-telegram               # skip the summary ping
 #
 # Environment overrides:
-#   CKPT_DIR   — checkpoint root directory   (default: model)
-#   OUT_DIR    — results root                (default: results)
+#   CKPT_DIR     — checkpoint root directory   (default: model)
+#   OUT_DIR      — results root                (default: results)
+#   MAX_PATCHES  — probe sampling cap          (default: from preregistration)
+#   PROBE_BATCH  — probe forward chunk size    (default: from preregistration)
 
 set -uo pipefail
 
@@ -29,20 +40,35 @@ CKPT_DIR="${CKPT_DIR:-model}"
 OUT_DIR="${OUT_DIR:-results}"
 INFER_JSON_DIR="${OUT_DIR}/inference"
 DOWNSTREAM_DIR="${OUT_DIR}/downstream"
+PROBES_DIR="${OUT_DIR}/probes"
 
 cd "${REPO_ROOT}"
 
 ALL_DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
 DATASETS=("${ALL_DATASETS[@]}")
 SEND_TELEGRAM=1
+DO_RECON=1
+DO_PROBES=1
+DO_DOWNSTREAM=1
 EXTRA_ARGS=()
+PROBE_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --datasets)
+        --datasets|--dataset)
             IFS=',' read -r -a DATASETS <<< "$2"
             shift 2
             ;;
+        --probes-only)
+            DO_RECON=0; DO_DOWNSTREAM=0; shift ;;
+        --skip-probes)
+            DO_PROBES=0; shift ;;
+        --skip-downstream)
+            DO_DOWNSTREAM=0; shift ;;
+        --max-patches)
+            PROBE_ARGS+=(--max-patches "$2"); shift 2 ;;
+        --probe-batch)
+            PROBE_ARGS+=(--probe-batch "$2"); shift 2 ;;
         --no-telegram)
             SEND_TELEGRAM=0
             shift
@@ -67,7 +93,18 @@ done
 
 STANDARD_MODELS=("vae-standard" "vae-3d-spatio-spectral" "vae-1d-pixelwise")
 
-mkdir -p "${INFER_JSON_DIR}" "${DOWNSTREAM_DIR}"
+mkdir -p "${INFER_JSON_DIR}" "${DOWNSTREAM_DIR}" "${PROBES_DIR}"
+
+[[ -n "${MAX_PATCHES:-}" ]] && PROBE_ARGS+=(--max-patches "${MAX_PATCHES}")
+[[ -n "${PROBE_BATCH:-}" ]] && PROBE_ARGS+=(--probe-batch "${PROBE_BATCH}")
+
+PREREG="inference/preregistration.yaml"
+if (( DO_PROBES )) && [[ ! -s "${PREREG}" ]]; then
+    echo "ERROR: ${PREREG} is missing."
+    echo "The probes read every threshold from it and will not run without it —"
+    echo "that is the point of preregistering the decision rules."
+    exit 3
+fi
 
 echo "=============================================="
 echo " HSI VAE — inference + downstream sweep"
@@ -75,6 +112,10 @@ echo "  datasets     : ${DATASETS[*]}"
 echo "  ckpt dir     : ${REPO_ROOT}/${CKPT_DIR}"
 echo "  out dir      : ${REPO_ROOT}/${OUT_DIR}"
 echo "  telegram     : $( ((SEND_TELEGRAM)) && echo yes || echo no )"
+echo "  steps        : recon=${DO_RECON} probes=${DO_PROBES} downstream=${DO_DOWNSTREAM}"
+if (( DO_PROBES )); then
+    echo "  preregistered: $(grep -m1 '^registered_on:' "${PREREG}" | cut -d'"' -f2)"
+fi
 echo "=============================================="
 
 SKIPPED=()
@@ -99,6 +140,7 @@ run_inference() {
 }
 
 # ---- Step 1: 28-cell reconstruction sweep ---------------------------------
+if (( DO_RECON )); then
 for ds in "${DATASETS[@]}"; do
     run_inference vae-our "${ds}" physics vae-our
     for m in "${STANDARD_MODELS[@]}"; do
@@ -107,8 +149,27 @@ for ds in "${DATASETS[@]}"; do
         done
     done
 done
+fi
 
-# ---- Step 2: downstream (one call per dataset) ----------------------------
+# ---- Step 2: falsification suite (one call per dataset, all models) -------
+# One call per dataset rather than per cell: the trivial-predictor floors and
+# the 1000-draw random null are model-independent and get computed once and
+# reused across that dataset's seven cells.
+if (( DO_PROBES )); then
+for ds in "${DATASETS[@]}"; do
+    echo ""
+    echo ">>> probes ${ds}"
+    if ! python inference/probes.py --dataset "${ds}" --all-models \
+            --ckpt-dir "${CKPT_DIR}" --out-dir "${PROBES_DIR}" \
+            ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}; then
+        echo "!!! probes failed for ${ds}"
+        FAILED+=("probes|${ds}")
+    fi
+done
+fi
+
+# ---- Step 3: downstream (one call per dataset) ----------------------------
+if (( DO_DOWNSTREAM )); then
 for ds in "${DATASETS[@]}"; do
     echo ">>> downstream ${ds}"
     if ! python inference/downstream.py --dataset "${ds}" --save-plots \
@@ -117,19 +178,40 @@ for ds in "${DATASETS[@]}"; do
         FAILED+=("downstream|${ds}")
     fi
 done
+fi
 
-# ---- Step 3: aggregate + single summary ping ------------------------------
+# ---- Step 4: verdict — probes.csv, stats.csv, VERDICT.txt -----------------
+if (( DO_PROBES )); then
+    echo ""
+    echo ">>> verdict"
+    if ! python inference/verdict.py --probes-dir "${PROBES_DIR}" \
+            --out-dir "${OUT_DIR}"; then
+        echo "!!! verdict aggregation failed"
+        FAILED+=("verdict")
+    fi
+fi
+
+# ---- Step 5: aggregate + single summary ping ------------------------------
 AGG_ARGS=(--inference-dir "${INFER_JSON_DIR}" --downstream-dir "${DOWNSTREAM_DIR}" --out-dir "${OUT_DIR}")
 if (( SEND_TELEGRAM )); then
     AGG_ARGS+=(--telegram)
 fi
-python inference/aggregate.py "${AGG_ARGS[@]}"
+if (( DO_RECON )) || (( DO_DOWNSTREAM )); then
+    python inference/aggregate.py "${AGG_ARGS[@]}"
+fi
 
 echo ""
 echo "=============================================="
 echo " Sweep complete."
 echo "  skipped : ${#SKIPPED[@]}"
 echo "  failed  : ${#FAILED[@]}"
+if (( DO_PROBES )); then
+    echo ""
+    echo "  Results:"
+    echo "    ${OUT_DIR}/VERDICT.txt   <- read this one"
+    echo "    ${OUT_DIR}/probes.csv    per-cell probe metrics + verdicts"
+    echo "    ${OUT_DIR}/stats.csv     pairwise CIs, p-values, effect sizes"
+fi
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
     echo "  skipped runs:"
     for s in "${SKIPPED[@]}"; do echo "    - ${s}"; done

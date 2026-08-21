@@ -250,7 +250,7 @@ def make_settings(dataset: str) -> Settings:
     return Settings(input_channels=DATASETS[key]["input_channels"])
 
 
-def probe_channels(dataset: str, processed_root: str | None = None) -> int | None:
+def probe_channels(dataset: str, processed_root: str | None = None):
     """
     Read the band count of one on-disk patch for ``dataset``.
 
@@ -258,8 +258,15 @@ def probe_channels(dataset: str, processed_root: str | None = None) -> int | Non
     carries the shape without reading the payload), then falls back to the first
     per-scene ``.npy`` under the processed root.
 
-    Returns the RAW on-disk band count, or None if nothing is readable (no data
+    Returns ``(count, source, location)`` where source is ``"packed"`` or
+    ``"processed"``, or ``(None, None, None)`` if nothing is readable (no data
     staged yet — callers treat that as "cannot verify", not as an error).
+
+    The SOURCE MATTERS and callers must honour it: a packed shard has already
+    had ``crop_bands`` applied, so its count is the *effective* band count. A
+    processed patch has not, so its count is the *raw* one. Conflating the two is
+    what made every CRIMS slot fail — the probe returned the packed 456 and it
+    was compared against ``raw_channels`` (457).
     """
     import numpy as np
 
@@ -269,20 +276,20 @@ def probe_channels(dataset: str, processed_root: str | None = None) -> int | Non
     packed = Path(meta["packed_root"]) / "train.npy"
     if packed.is_file():
         try:
-            return int(np.load(packed, mmap_mode="r").shape[-1])
+            return int(np.load(packed, mmap_mode="r").shape[-1]), "packed", str(packed)
         except (OSError, ValueError):
             pass
 
     root = Path(processed_root or meta["processed_root"])
     if not root.exists():
-        return None
+        return None, None, None
     for split in ("train", "valid", "test"):
         for p in root.glob(f"**/{split}/*.npy"):
             try:
-                return int(np.load(p, mmap_mode="r").shape[-1])
+                return int(np.load(p, mmap_mode="r").shape[-1]), "processed", str(p)
             except (OSError, ValueError):
-                return None
-    return None
+                return None, None, None
+    return None, None, None
 
 
 def effective_channels(dataset: str, raw_c: int) -> int:
@@ -305,27 +312,40 @@ def verify_channels(dataset: str, processed_root: str | None = None) -> None:
     """
     key = dataset.upper()
     meta = DATASETS[key]
-    raw_c = probe_channels(key, processed_root)
-    if raw_c is None:
+    count, source, where = probe_channels(key, processed_root)
+    if count is None:
         return
 
-    expected_raw = meta.get("raw_channels")
-    if expected_raw is not None and raw_c != expected_raw:
-        raise ValueError(
-            f"{key}: on-disk patches have {raw_c} bands but DATASETS['{key}']"
-            f"['raw_channels'] says {expected_raw}.\n"
-            f"  probed under : {processed_root or meta['processed_root']}\n"
-            f"Fix utils/config.py (and re-derive crop_bands / input_channels), "
-            f"or point --data-root at the right directory.\n"
-            f"Run `python utils/dataset/inspect_channels.py` for the full table."
-        )
+    # A packed shard is ALREADY cropped, so its count is the effective band
+    # count and must not be compared against raw_channels. Only the processed
+    # tree carries the pre-crop count. Getting this wrong is what killed all
+    # seven CRIMS slots: the probe read the packed 456 and it was checked
+    # against raw_channels=457.
+    if source == "processed":
+        expected_raw = meta.get("raw_channels")
+        if expected_raw is not None and count != expected_raw:
+            raise ValueError(
+                f"{key}: on-disk patches have {count} bands but DATASETS['{key}']"
+                f"['raw_channels'] says {expected_raw}.\n"
+                f"  probed        : {where}\n"
+                f"Fix utils/config.py (and re-derive crop_bands / input_channels), "
+                f"or point --data-root at the right directory.\n"
+                f"Run `python utils/dataset/inspect_channels.py` for the full table."
+            )
+        eff = effective_channels(key, count)
+    else:
+        eff = count
 
-    eff = effective_channels(key, raw_c)
     if eff != meta["input_channels"]:
         raise ValueError(
-            f"{key}: effective band count is {eff} "
-            f"(raw {raw_c}, crop_bands={meta.get('crop_bands')}) but "
-            f"input_channels says {meta['input_channels']}."
+            f"{key}: effective band count is {eff} but input_channels says "
+            f"{meta['input_channels']}.\n"
+            f"  probed        : {where}  ({source})\n"
+            f"  on-disk count : {count}"
+            + (f"\n  crop_bands    : {meta.get('crop_bands')} (already applied "
+               f"in the packed shard)" if source == "packed"
+               else f"\n  crop_bands    : {meta.get('crop_bands')}")
+            + "\nRun `python utils/dataset/inspect_channels.py` for the full table."
         )
 
     n_blocks = settings.spectral_n_1D_conv_blocks

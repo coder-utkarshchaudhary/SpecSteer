@@ -1,15 +1,14 @@
-# CRIMS (456 bands, cropped from the 457 on disk) — vae-our target = 13,925,585 params.
+# CRIMS (456 bands, cropped from the 457 on disk) — vae-our target = 11,276,895 params.
 #
-# Baseline widths RE-SOLVED on 2026-08-19 after two architecture-level perf
-# fixes (see CLAUDE.md §10):
-#   * vae-our's spectral branch width was decoupled from the band count
-#     (settings.spectral_base_ch = 32), which cut its FLOPs ~97x here and
-#     dropped its param count from the 72.99M implied by the old (wrong) 544-band
-#     assumption to 13,925,585.
-#   * vae-3d now strides the spectral (depth) axis, so vae_3d_base_ch below is
-#     much smaller than the old 134.
-# Regenerate with:  python utils/check-model-params.py --solve
-# Audit with:       python utils/check-model-params.py
+# Two controls are enforced in this file, and they are independent resources:
+#   * LATENT RATE  — the information bottleneck, matched to 64:1 (see below)
+#   * PARAMETERS   — the capacity of the function class, matched to vae-our
+# Regenerate, in this order (rate first — it moves the parameter target):
+#   python utils/match_latent_rate.py --ratio 64
+#   python utils/check-model-params.py --solve
+#   python utils/find_max_batch.py --budget-gb 24 --fit
+# Audit:  python utils/check-model-params.py
+#         python utils/match_latent_rate.py --ratio 64 --check
 
 # --- Optimization ---
 epochs: 30
@@ -28,8 +27,8 @@ lr: 1.0e-3
 # Derived against the tightest budget any slot here will see — the lab's 24 GB:
 #
 #   binding model : vae-3d-spatio-spectral
-#   memory        : ~0.961 GB/sample marginal, ~0.2 GB fixed
-#   at B=16       : ~15.6 GB of the 20.4 GB usable (24 GB less 15% headroom)
+#   memory        : ~0.862 GB/sample marginal, ~0.18 GB fixed
+#   at B=16       : ~14.0 GB of the 20.4 GB usable (24 GB less 15% headroom)
 #   HPC 40 GB     : headroom
 #   Kaggle 2xT4   : nn.DataParallel puts 8 per 15 GB device — clears
 #
@@ -37,6 +36,7 @@ lr: 1.0e-3
 # leaves margin for fragmentation. Re-derive natively on the target GPU with:
 #     PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --time
 # or, from a smaller card, add --fit to extrapolate from B=1,2,4.
+# RE-DERIVED after the latent-rate change; the value did not move.
 batch_size: 16
 num_workers: 8
 
@@ -46,7 +46,41 @@ seed: 42
 weight_decay: 1.0e-5
 early_stopping_patience: 7
 
-# --- Baseline capacity (matched to vae-our within 0.73%) ---
-vae_standard_base_ch: 99        # 14,026,610 (+0.73%)
-vae_3d_base_ch: 51              # 13,997,069 (+0.51%)
-vae_1d_hidden_dims: [2980, 1490, 745]   # 13,921,590 (-0.03%)
+# --- Latent rate: every model matched to 1,867,776 / 29,184 = 64:1 ---
+#
+# Rate and parameter count are INDEPENDENT resources — the bottleneck sets how
+# much information can pass, the widths below set how complex a mapping can be
+# learned — so the ablation controls for both. Previously only parameters were
+# matched and rate floated 512x between models, which for an autoencoder is the
+# more important of the two: reconstruction quality is bounded by rate almost by
+# definition. (On M3 vae-our's latent was 1.52x LARGER than its input.)
+#
+# 64:1 is vae-3d's own natural operating point (8x8x8 downsample x 8 latent
+# channels), so that baseline is UNCHANGED and cannot be accused of being
+# re-tuned for the comparison. It also sits near Stable Diffusion's
+# AutoencoderKL (48:1), so these latents are a credible LDM diffusion space.
+#
+# Latent SHAPE is deliberately not equalised — vae-standard is a spatial grid
+# with no spectral axis, vae-our is a global vector beside a full-resolution
+# per-pixel spectral map. That geometry IS the architecture under test. Only the
+# scalar count matches.
+#
+# Regenerate with:  python utils/match_latent_rate.py --ratio 64
+# Verify with:      python utils/match_latent_rate.py --ratio 64 --check
+spectral_latent_dim: 7           # vae-our  :  28,928 elements (-0.9%)
+vae_standard_latent_ch: 456   # vae-std  :  29,184 elements (+0.0%)
+vae_3d_latent_ch: 8         # vae-3d   :  29,184 elements (+0.0%)  <- unchanged
+vae_1d_latent_dim: 7            # vae-1d   :  28,672 elements (-1.8%)
+# worst deviation from target: 1.8% (tolerance +/-25%)
+
+# --- Baseline capacity: matched to vae-our within 0.99% ---
+#
+# RE-SOLVED after the latent-rate change above. Order matters: shrinking
+# vae-our's spectral latent shrank its LazyLinear (4096->256 becomes 4096->8),
+# so the parameter target moved and these widths had to be recomputed against
+# the new one. Rate first, then parameters — never the reverse.
+# vae-our target = 11,276,895 params
+# Regenerate with:  python utils/check-model-params.py --solve
+vae_standard_base_ch: 85        # 11,342,238 (+0.58%)
+vae_3d_base_ch: 46              # 11,388,329 (+0.99%)
+vae_1d_hidden_dims: [2656, 1328, 664]   # 11,282,494 (+0.05%)

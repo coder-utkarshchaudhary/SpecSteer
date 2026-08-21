@@ -57,7 +57,10 @@ if [[ "${1:-}" == "--all" ]]; then
     OVERWRITE="${OVERWRITE:-0}"
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --datasets)  DATASETS_SUBSET="$2"; shift 2 ;;
+            # --dataset is accepted as an alias for --datasets: in --all mode the
+            # filter takes a comma list, but a single dataset is the common case
+            # and typing the singular is the natural thing to do.
+            --datasets|--dataset)  DATASETS_SUBSET="$2"; shift 2 ;;
             --epochs)    HAS_EPOCHS=1; EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
             --overwrite) OVERWRITE=1; shift ;;
             *)           EXTRA_ARGS+=("$1"); shift ;;

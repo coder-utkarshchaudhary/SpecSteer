@@ -35,6 +35,13 @@ import yaml
 _SETTINGS_FIELDS: set[str] = {
     "batch_size",
     "num_workers",
+    # Latent-rate knobs. These set the size of the information bottleneck and are
+    # per-dataset because a constant COMPRESSION RATIO implies a latent budget
+    # that scales with band count. Distinct from the capacity knobs below, which
+    # set parameter count: rate and capacity are independent resources and the
+    # ablation controls for both. See utils/match_latent_rate.py.
+    "latent_dim",
+    "spectral_latent_dim",
     "vae_standard_base_ch",
     "vae_standard_n_down",
     "vae_standard_latent_ch",
@@ -94,11 +101,17 @@ def apply_hyperparams(settings, hp: dict[str, Any]) -> None:
     Mutate `settings` in place for whitelisted Settings fields present in `hp`.
     Leaves optimization fields alone (caller reads those from `hp` directly).
 
-    Does NOT call `settings.__post_init__()` — none of the whitelisted fields
-    feed into any derived (`field(init=False)`) computation.
+    Recomputes the derived (`field(init=False)`) dims afterwards. None of the
+    currently whitelisted fields feed a derived one, so this is a no-op today —
+    but relying on that was a silent trap: adding a knob that *does* feed
+    `__post_init__` (say `spectral_base_ch` or `n_2D_conv_blocks`) would have
+    left the derived dims stale and produced a shape error hundreds of frames
+    away. `__post_init__` only recomputes from primaries, so calling it is
+    idempotent and cheap.
     """
     for key in _SETTINGS_FIELDS & set(hp):
         value = hp[key]
         if key == "vae_1d_hidden_dims" and isinstance(value, list):
             value = tuple(value)
         setattr(settings, key, value)
+    settings.__post_init__()

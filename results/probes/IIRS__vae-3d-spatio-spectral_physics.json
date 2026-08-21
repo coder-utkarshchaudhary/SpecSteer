@@ -1,0 +1,7 @@
+{
+ "model": "vae-3d-spatio-spectral",
+ "dataset": "IIRS",
+ "loss": "physics",
+ "error": "missing checkpoint model/IIRS/vae-3d-spatio-spectral_physics.pt",
+ "verdict": "MISSING"
+}

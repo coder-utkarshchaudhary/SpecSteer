@@ -1,0 +1,1479 @@
+[21/08/2026 07:32] Macroni: Smoke grid starting on yashdeep-Dell-Pro-Max-Tower-T2-FCT2250: 2 epochs x 28 slots
+[21/08/2026 07:32] Macroni: [START] vae-our | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-our | IIRS | physics
+epochs 2/2  ·  wall 4m17s  ·  peak GPU 14.7 GB
+best @ epoch 2: 0.058620 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0612     0.0586     0.0165     0.0145    0.1415     0.1394 *
+(*) new best val checkpoint
+ckpt: model_smoke/IIRS/vae-our.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-standard | IIRS | standard
+epochs 2/2  ·  wall 0m29s  ·  peak GPU 1.4 GB
+best @ epoch 2: 0.003193 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708 *
+(*) new best val checkpoint
+ckpt: model_smoke/IIRS/vae-standard_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-standard | IIRS | physics
+epochs 2/2  ·  wall 0m30s  ·  peak GPU 1.3 GB
+best @ epoch 2: 0.084088 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0824     0.0841     0.0010     0.0009    0.2706     0.2766 *
+(*) new best val checkpoint
+ckpt: model_smoke/IIRS/vae-standard_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | IIRS | standard
+epochs 2/2  ·  wall 14m48s  ·  peak GPU 20.1 GB
+best @ epoch 1: 0.003193 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0030     0.0032     0.0030     0.0032    1.5707     1.5707  
+ckpt: model_smoke/IIRS/vae-3d-spatio-spectral_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | IIRS | physics
+epochs 2/2  ·  wall 14m51s  ·  peak GPU 20.0 GB
+best @ epoch 2: 0.074253 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0714     0.0743     0.0002     0.0002    0.2350     0.2446 *
+(*) new best val checkpoint
+ckpt: model_smoke/IIRS/vae-3d-spatio-spectral_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | IIRS | standard
+epochs 2/2  ·  wall 2m56s  ·  peak GPU 15.5 GB
+best @ epoch 2: 0.000328 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0003     0.0003     0.0003     0.0003    0.2847     0.2923 *
+(*) new best val checkpoint
+ckpt: model_smoke/IIRS/vae-1d-pixelwise_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | IIRS | physics
+epochs 2/2  ·  wall 2m57s  ·  peak GPU 15.3 GB
+best @ epoch 2: 0.051901 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0528     0.0519     0.0005     0.0006    0.1718     0.1687 *
+(*) new best val checkpoint
+ckpt: model_smoke/IIRS/vae-1d-pixelwise_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-our | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-our | M3 | physics
+epochs 2/2  ·  wall 1m04s  ·  peak GPU 5.1 GB
+best @ epoch 2: 0.040039 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0550     0.0400     0.0337     0.0217    0.0631     0.0537 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-our.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-standard | M3 | standard
+epochs 2/2  ·  wall 0m16s  ·  peak GPU 0.6 GB
+best @ epoch 2: 0.943619 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.2171     0.9436     0.0111     0.0085    0.0918     0.0839 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-standard_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-standard | M3 | physics
+epochs 2/2  ·  wall 0m17s  ·  peak GPU 0.6 GB
+best @ epoch 2: 0.028946 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0353     0.0289     0.0120     0.0087    0.0754     0.0655 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-standard_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | M3 | standard
+epochs 2/2  ·  wall 6m14s  ·  peak GPU 10.6 GB
+best @ epoch 2: 0.007984 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0110     0.0080     0.0106     0.0076    0.0908     0.0709 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-3d-spatio-spectral_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | M3 | physics
+epochs 2/2  ·  wall 6m15s  ·  peak GPU 10.5 GB
+best @ epoch 2: 0.020613 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0267     0.0206     0.0102     0.0073    0.0519     0.0417 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-3d-spatio-spectral_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | M3 | standard
+epochs 2/2  ·  wall 3m06s  ·  peak GPU 15.0 GB
+best @ epoch 2: 0.008179 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0108     0.0082     0.0106     0.0080    0.0764     0.0742 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-1d-pixelwise_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | M3 | physics
+epochs 2/2  ·  wall 3m06s  ·  peak GPU 15.0 GB
+best @ epoch 2: 0.021123 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0273     0.0211     0.0104     0.0074    0.0546     0.0438 *
+(*) new best val checkpoint
+ckpt: model_smoke/M3/vae-1d-pixelwise_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-our | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-our | AVIRIS | physics
+epochs 2/2  ·  wall 8m32s  ·  peak GPU 12.1 GB
+best @ epoch 2: 0.016704 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0175     0.0167     0.0049     0.0042    0.0346     0.0345 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-our.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-standard | AVIRIS | standard
+epochs 2/2  ·  wall 0m37s  ·  peak GPU 1.2 GB
+best @ epoch 2: 0.002435 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0027     0.0024     0.0023     0.0021    0.0872     0.0894 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-standard_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-standard | AVIRIS | physics
+epochs 2/2  ·  wall 0m36s  ·  peak GPU 1.1 GB
+best @ epoch 2: 0.062529 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0628     0.0625     0.0352     0.0340    0.0921     0.0952 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-standard_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | AVIRIS | standard
+epochs 2/2  ·  wall 25m10s  ·  peak GPU 14.5 GB
+best @ epoch 2: 0.082476 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0817     0.0825     0.0817     0.0825    0.4838     0.4824 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-3d-spatio-spectral_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | AVIRIS | physics
+epochs 2/2  ·  wall 25m08s  ·  peak GPU 15.2 GB
+best @ epoch 2: 0.012882 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0134     0.0129     0.0006     0.0007    0.0399     0.0384 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-3d-spatio-spectral_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | AVIRIS | standard
+epochs 2/2  ·  wall 3m10s  ·  peak GPU 8.1 GB
+best @ epoch 2: 0.033719 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0353     0.0337     0.0353     0.0337    0.0926     0.0956 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-1d-pixelwise_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | AVIRIS | physics
+epochs 2/2  ·  wall 3m12s  ·  peak GPU 8.0 GB
+best @ epoch 2: 0.016677 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   2     0.0207     0.0167     0.0039     0.0017    0.0542     0.0479 *
+(*) new best val checkpoint
+ckpt: model_smoke/AVIRIS/vae-1d-pixelwise_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-our | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-our | CRIMS | physics
+epochs 0/2  ·  wall 0m01s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:21 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-our | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-our | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:29 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-standard | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-standard | CRIMS | standard
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:32 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-standard | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-standard | CRIMS | standard
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:39 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-standard | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-standard | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:42 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-standard | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-standard | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:50 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-3d-spatio-spectral | CRIMS | standard
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:53:53 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-3d-spatio-spectral | CRIMS | standard
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:01 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-3d-spatio-spectral | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:04 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-3d-spatio-spectral | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:12 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-1d-pixelwise | CRIMS | standard
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:23 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-1d-pixelwise | CRIMS | standard
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:30 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-1d-pixelwise | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:33 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 2 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 2
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [FAIL] vae-1d-pixelwise | CRIMS | physics
+epochs 0/2  ·  wall 0m00s  ·  peak GPU 0.0 GB
+(no epochs completed)
+e+, no GradScaler)
+18:54:41 [ERROR] Training run failed with an exception.
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+Traceback (most recent call last):
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/train/train.py", line 544, in main
+    verify_channels(args.dataset, args.data_root)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/yashdeep/New Volume 2/UTKARSH_CHAUDHARY_prism/prism/utils/config.py", line 314, in verify_channels
+    raise ValueError(
+    ...<6 lines>...
+    )
+ValueError: CRIMS: on-disk patches have 456 bands but DATASETS['CRIMS']['raw_channels'] says 457.
+  probed under : data/processed/CRIMS
+Fix utils/config.py (and re-derive crop_bands / input_channels), or point --data-root at the right directory.
+Run `python utils/dataset/inspect_channels.py` for the full table.
+
+[21/08/2026 07:32] Macroni: Full grid starting on yashdeep-Dell-Pro-Max-Tower-T2-FCT2250: 30 epochs x 28 slots
+[21/08/2026 07:32] Macroni: [START] vae-our | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-our | IIRS | physics
+epoch 10/30  ·  wall 14m53s  ·  ETA 23m34s
+               train         val
+loss        0.026239    0.026520
+mse         0.005086    0.004889
+sam         0.061016    0.062561
+kld         2.848796    2.863013
+best so far: epoch 10 (monitor=0.026520)
+[21/08/2026 07:32] Macroni: [HB] vae-our | IIRS | physics
+epoch 20/30  ·  wall 26m41s  ·  ETA 11m47s
+               train         val
+loss        0.019567    0.019877
+mse         0.003286    0.003284
+sam         0.045122    0.046176
+kld         2.744018    2.739594
+best so far: epoch 20 (monitor=0.019877)
+[21/08/2026 07:32] Macroni: [HB] vae-our | IIRS | physics
+epoch 30/30  ·  wall 38m30s  ·  ETA 0m00s
+               train         val
+loss        0.018325    0.018483
+mse         0.002948    0.002997
+sam         0.042524    0.042830
+kld         2.619927    2.637137
+best so far: epoch 30 (monitor=0.018483)
+[21/08/2026 07:32] Macroni: [OK] vae-our | IIRS | physics
+epochs 30/30  ·  wall 38m31s  ·  peak GPU 14.7 GB
+best @ epoch 30: 0.018483 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0262     0.0265     0.0051     0.0049    0.0610     0.0626  
+  20     0.0196     0.0199     0.0033     0.0033    0.0451     0.0462  
+  30     0.0183     0.0185     0.0029     0.0030    0.0425     0.0428 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-our.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-standard | IIRS | standard
+epoch 10/30  ·  wall 2m01s  ·  ETA 3m43s
+               train         val
+loss        0.003026    0.003193
+mse         0.003025    0.003193
+sam         1.570799    1.570796
+kld         0.000318    0.000319
+best so far: epoch 4 (monitor=0.003193)
+[21/08/2026 07:32] Macroni: [STOP] vae-standard | IIRS | standard
+epochs 11/30  ·  wall 2m13s  ·  peak GPU 1.4 GB
+best @ epoch 4: 0.003193 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708  
+  11     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708  
+ckpt: model/IIRS/vae-standard_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-standard | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-standard | IIRS | physics
+epoch 10/30  ·  wall 2m06s  ·  ETA 4m02s
+               train         val
+loss        0.074458    0.077602
+mse         0.000550    0.000611
+sam         0.245366    0.255479
+kld         0.299173    0.347390
+best so far: epoch 10 (monitor=0.077602)
+[21/08/2026 07:32] Macroni: [HB] vae-standard | IIRS | physics
+epoch 20/30  ·  wall 4m08s  ·  ETA 2m00s
+               train         val
+loss        0.070903    0.074276
+mse         0.000271    0.000274
+sam         0.233171    0.244290
+kld         0.680595    0.714293
+best so far: epoch 20 (monitor=0.074276)
+[21/08/2026 07:32] Macroni: [HB] vae-standard | IIRS | physics
+epoch 30/30  ·  wall 6m10s  ·  ETA 0m00s
+               train         val
+loss        0.068684    0.072182
+mse         0.000240    0.000247
+sam         0.225025    0.236579
+kld         0.937102    0.961215
+best so far: epoch 30 (monitor=0.072182)
+[21/08/2026 07:32] Macroni: [OK] vae-standard | IIRS | physics
+epochs 30/30  ·  wall 6m11s  ·  peak GPU 1.3 GB
+best @ epoch 30: 0.072182 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0745     0.0776     0.0005     0.0006    0.2454     0.2555  
+  20     0.0709     0.0743     0.0003     0.0003    0.2332     0.2443  
+  30     0.0687     0.0722     0.0002     0.0002    0.2250     0.2366 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-standard_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-3d-spatio-spectral | IIRS | standard
+epoch 10/30  ·  wall 38m52s  ·  ETA 1h00m25s
+               train         val
+loss        0.003025    0.003193
+mse         0.003025    0.003193
+sam         1.570656    1.570660
+kld         0.000082    0.000102
+best so far: epoch 4 (monitor=0.003193)
+[21/08/2026 07:32] Macroni: [STOP] vae-3d-spatio-spectral | IIRS | standard
+epochs 11/30  ·  wall 41m55s  ·  peak GPU 20.1 GB
+best @ epoch 4: 0.003193 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0030     0.0032     0.0030     0.0032    1.5707     1.5707  
+  11     0.0030     0.0032     0.0030     0.0032    1.5707     1.5707  
+ckpt: model/IIRS/vae-3d-spatio-spectral_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-3d-spatio-spectral | IIRS | physics
+epoch 10/30  ·  wall 39m33s  ·  ETA 1h01m50s
+               train         val
+loss        0.065295    0.067565
+mse         0.000176    0.000168
+sam         0.213584    0.221027
+kld         1.043849    1.088175
+best so far: epoch 10 (monitor=0.067565)
+[21/08/2026 07:32] Macroni: [HB] vae-3d-spatio-spectral | IIRS | physics
+epoch 20/30  ·  wall 1h10m28s  ·  ETA 30m53s
+               train         val
+loss        0.061006    0.063792
+mse         0.000138    0.000145
+sam         0.199087    0.208192
+kld         1.141595    1.190351
+best so far: epoch 20 (monitor=0.063792)
+[21/08/2026 07:32] Macroni: [HB] vae-3d-spatio-spectral | IIRS | physics
+epoch 30/30  ·  wall 1h41m21s  ·  ETA 0m00s
+               train         val
+loss        0.060262    0.063088
+mse         0.000132    0.000140
+sam         0.196626    0.205972
+kld         1.142096    1.156622
+best so far: epoch 30 (monitor=0.063088)
+[21/08/2026 07:32] Macroni: [OK] vae-3d-spatio-spectral | IIRS | physics
+epochs 30/30  ·  wall 1h41m22s  ·  peak GPU 20.0 GB
+best @ epoch 30: 0.063088 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0653     0.0676     0.0002     0.0002    0.2136     0.2210  
+  20     0.0610     0.0638     0.0001     0.0001    0.1991     0.2082  
+  30     0.0603     0.0631     0.0001     0.0001    0.1966     0.2060 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-3d-spatio-spectral_physics.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-1d-pixelwise | IIRS | standard
+epoch 10/30  ·  wall 14m28s  ·  ETA 28m56s
+               train         val
+loss        0.000229    0.000233
+mse         0.000148    0.000144
+sam         0.221097    0.226462
+kld         0.081654    0.088736
+best so far: epoch 10 (monitor=0.000233)
+[21/08/2026 07:32] Macroni: [HB] vae-1d-pixelwise | IIRS | standard
+epoch 20/30  ·  wall 28m56s  ·  ETA 14m26s
+               train         val
+loss        0.000216    0.000223
+mse         0.000132    0.000133
+sam         0.214771    0.220759
+kld         0.084073    0.090114
+best so far: epoch 18 (monitor=0.000222)
+[21/08/2026 07:32] Macroni: [HB] vae-1d-pixelwise | IIRS | standard
+epoch 30/30  ·  wall 43m21s  ·  ETA 0m00s
+               train         val
+loss        0.000213    0.000221
+mse         0.000126    0.000129
+sam         0.211026    0.219169
+kld         0.086711    0.091883
+best so far: epoch 27 (monitor=0.000220)
+[21/08/2026 07:32] Macroni: [OK] vae-1d-pixelwise | IIRS | standard
+epochs 30/30  ·  wall 43m22s  ·  peak GPU 15.5 GB
+best @ epoch 27: 0.000220 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0002     0.0002     0.0001     0.0001    0.2211     0.2265  
+  20     0.0002     0.0002     0.0001     0.0001    0.2148     0.2208  
+  30     0.0002     0.0002     0.0001     0.0001    0.2110     0.2192  
+ckpt: model/IIRS/vae-1d-pixelwise_standard.pt
+[21/08/2026 07:32] Macroni: [START] vae-1d-pixelwise | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 07:32] Macroni: [HB] vae-1d-pixelwise | IIRS | physics
+epoch 10/30  ·  wall 14m41s  ·  ETA 29m17s
+               train         val
+loss        0.032143    0.033668
+mse         0.000319    0.000404
+sam         0.103197    0.107938
+kld         0.864245    0.882464
+best so far: epoch 10 (monitor=0.033668)
