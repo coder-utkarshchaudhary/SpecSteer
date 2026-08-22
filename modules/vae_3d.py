@@ -167,7 +167,12 @@ class VAE_3D_SpatioSpectral(nn.Module):
         loss = mse + beta * kld
         if use_physics:
             loss = loss + lambda_physics * sam
-        return {"loss": loss, "mse": mse, "kld": kld, "sam": sam}
+        # `mse_final` is the RECONSTRUCTION MSE, the quantity that is comparable
+        # across every model in the grid. For a single-stream model it equals
+        # `mse`; for vae-our it does not (see modules/vae_our.py). `recon` rides
+        # along so train.py can compute PSNR/SSIM without a second forward pass.
+        return {"loss": loss, "mse": mse, "mse_final": mse,
+                "kld": kld, "sam": sam, "recon": recon}
 
     @torch.no_grad()
     def reconstruct(self, x):

@@ -1,0 +1,2728 @@
+[21/08/2026 10:25] AAAI KA BOT: Full grid starting on yashdeep-Dell-Pro-Max-Tower-T2-FCT2250: 30 epochs x 28 slots
+[21/08/2026 10:25] AAAI KA BOT: [START] vae-our | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 10:41] AAAI KA BOT: [HB] vae-our | IIRS | physics
+epoch 10/30  ·  wall 19m15s  ·  ETA 44m44s
+               train         val
+loss        0.042954    0.045416
+mse         0.003226    0.003302
+sam         0.122392    0.130432
+kld         3.010328    2.984318
+best so far: epoch 10 (monitor=0.045416)
+[21/08/2026 10:49] AAAI KA BOT: [HB] vae-our | IIRS | physics
+epoch 10/30  ·  wall 24m05s  ·  ETA 49m40s
+               train         val
+loss        0.043474    0.045340
+mse         0.003163    0.003231
+sam         0.124037    0.130049
+kld         3.100076    3.094634
+best so far: epoch 10 (monitor=0.045340)
+[21/08/2026 11:04] AAAI KA BOT: [HB] vae-our | IIRS | physics
+epoch 20/30  ·  wall 42m15s  ·  ETA 22m40s
+               train         val
+loss        0.040136    0.042859
+mse         0.002036    0.002155
+sam         0.117431    0.126108
+kld         2.870037    2.871485
+best so far: epoch 20 (monitor=0.042859)
+[21/08/2026 11:13] AAAI KA BOT: [HB] vae-our | IIRS | physics
+epoch 20/30  ·  wall 47m13s  ·  ETA 23m04s
+               train         val
+loss        0.040105    0.042887
+mse         0.002113    0.002300
+sam         0.116808    0.125523
+kld         2.950246    2.929997
+best so far: epoch 20 (monitor=0.042887)
+[21/08/2026 11:27] AAAI KA BOT: [HB] vae-our | IIRS | physics
+epoch 30/30  ·  wall 1h05m17s  ·  ETA 0m00s
+               train         val
+loss        0.039422    0.042095
+mse         0.001771    0.001888
+sam         0.116033    0.124492
+kld         2.840842    2.858629
+best so far: epoch 30 (monitor=0.042095)
+[21/08/2026 11:27] AAAI KA BOT: [OK] vae-our | IIRS | physics
+epochs 30/30  ·  wall 1h05m18s  ·  peak GPU 14.4 GB
+best @ epoch 30: 0.042095 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0430     0.0454     0.0032     0.0033    0.1224     0.1304  
+  20     0.0401     0.0429     0.0020     0.0022    0.1174     0.1261  
+  30     0.0394     0.0421     0.0018     0.0019    0.1160     0.1245 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-our.pt
+[21/08/2026 11:27] AAAI KA BOT: [START] vae-standard | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:29] AAAI KA BOT: [HB] vae-standard | IIRS | standard
+epoch 10/30  ·  wall 2m40s  ·  ETA 4m55s
+               train         val
+loss        0.003027    0.003193
+mse         0.003026    0.003193
+sam         1.570799    1.570796
+kld         0.000325    0.000325
+best so far: epoch 3 (monitor=0.003193)
+[21/08/2026 11:29] AAAI KA BOT: [STOP] vae-standard | IIRS | standard
+epochs 10/30  ·  wall 2m40s  ·  peak GPU 1.4 GB
+best @ epoch 3: 0.003193 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708  
+ckpt: model/IIRS/vae-standard_standard.pt
+[21/08/2026 11:29] AAAI KA BOT: [START] vae-standard | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:32] AAAI KA BOT: [HB] vae-standard | IIRS | physics
+epoch 10/30  ·  wall 2m59s  ·  ETA 5m32s
+               train         val
+loss        0.072935    0.075646
+mse         0.000413    0.000373
+sam         0.241238    0.250283
+kld         0.150600    0.188257
+best so far: epoch 10 (monitor=0.075646)
+[21/08/2026 11:38] AAAI KA BOT: [HB] vae-standard | IIRS | physics
+epoch 30/30  ·  wall 8m07s  ·  ETA 0m00s
+               train         val
+loss        0.065211    0.068676
+mse         0.000191    0.000200
+sam         0.215333    0.226824
+kld         0.419986    0.428266
+best so far: epoch 30 (monitor=0.068676)
+[21/08/2026 11:38] AAAI KA BOT: [OK] vae-standard | IIRS | physics
+epochs 30/30  ·  wall 8m08s  ·  peak GPU 1.3 GB
+best @ epoch 30: 0.068676 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0729     0.0756     0.0004     0.0004    0.2412     0.2503  
+  20     0.0670     0.0702     0.0002     0.0002    0.2213     0.2320  
+  30     0.0652     0.0687     0.0002     0.0002    0.2153     0.2268 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-standard_physics.pt
+[21/08/2026 11:38] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:38] AAAI KA BOT: [HB] vae-standard | IIRS | standard
+epoch 10/30  ·  wall 2m43s  ·  ETA 5m01s
+               train         val
+loss        0.003027    0.003193
+mse         0.003026    0.003193
+sam         1.570799    1.570796
+kld         0.000291    0.000296
+best so far: epoch 3 (monitor=0.003193)
+[21/08/2026 11:38] AAAI KA BOT: [STOP] vae-standard | IIRS | standard
+epochs 10/30  ·  wall 2m44s  ·  peak GPU 1.4 GB
+best @ epoch 3: 0.003193 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708  
+ckpt: model/IIRS/vae-standard_standard.pt
+[21/08/2026 11:38] AAAI KA BOT: [START] vae-standard | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:41] AAAI KA BOT: [HB] vae-standard | IIRS | physics
+epoch 10/30  ·  wall 2m59s  ·  ETA 5m42s
+               train         val
+loss        0.072635    0.075475
+mse         0.000327    0.000315
+sam         0.240496    0.249835
+kld         0.158791    0.208816
+best so far: epoch 10 (monitor=0.075475)
+[21/08/2026 11:44] AAAI KA BOT: [HB] vae-standard | IIRS | physics
+epoch 20/30  ·  wall 5m52s  ·  ETA 2m51s
+               train         val
+loss        0.066550    0.069726
+mse         0.000222    0.000232
+sam         0.219849    0.230332
+kld         0.372540    0.394695
+best so far: epoch 20 (monitor=0.069726)
+[21/08/2026 11:47] AAAI KA BOT: [HB] vae-standard | IIRS | physics
+epoch 30/30  ·  wall 8m43s  ·  ETA 0m00s
+               train         val
+loss        0.064201    0.067645
+mse         0.000188    0.000198
+sam         0.211807    0.223219
+kld         0.470638    0.480774
+best so far: epoch 30 (monitor=0.067645)
+[21/08/2026 11:47] AAAI KA BOT: [OK] vae-standard | IIRS | physics
+epochs 30/30  ·  wall 8m44s  ·  peak GPU 1.3 GB
+best @ epoch 30: 0.067645 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0726     0.0755     0.0003     0.0003    0.2405     0.2498  
+  20     0.0665     0.0697     0.0002     0.0002    0.2198     0.2303  
+  30     0.0642     0.0676     0.0002     0.0002    0.2118     0.2232 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-standard_physics.pt
+[21/08/2026 11:47] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:49] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | standard
+epochs 0/30  ·  wall 11m08s  ·  peak GPU 14.4 GB
+(no epochs completed)
+uts=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.64 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 13.83 GiB memory in use. Process 2600910 has 6.29 GiB memory in use. Of the allocated memory 10.88 GiB is allocated by PyTorch, and 2.66 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 11:50] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:53] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | standard
+epochs 0/30  ·  wall 6m27s  ·  peak GPU 10.9 GB
+(no epochs completed)
+s=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 2.59 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 11.93 GiB memory in use. Process 2602770 has 7.23 GiB memory in use. Of the allocated memory 10.80 GiB is allocated by PyTorch, and 871.31 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 11:54] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 11:55] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | standard
+epochs 0/30  ·  wall 5m43s  ·  peak GPU 8.9 GB
+(no epochs completed)
+home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 2.60 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 9.11 GiB memory in use. Process 2605765 has 10.04 GiB memory in use. Of the allocated memory 7.74 GiB is allocated by PyTorch, and 1.10 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 11:56] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:00] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | physics
+epochs 0/30  ·  wall 4m06s  ·  peak GPU 8.9 GB
+(no epochs completed)
+7, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.66 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2605765 has 13.80 GiB memory in use. Including non-PyTorch memory, this process has 6.29 GiB memory in use. Of the allocated memory 4.92 GiB is allocated by PyTorch, and 1.10 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:01] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | standard
+epochs 0/30  ·  wall 6m27s  ·  peak GPU 11.5 GB
+(no epochs completed)
+uts=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 2.58 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 12.88 GiB memory in use. Process 2607117 has 6.29 GiB memory in use. Of the allocated memory 10.80 GiB is allocated by PyTorch, and 1.79 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:01] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:01] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:05] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | physics
+epochs 0/30  ·  wall 4m05s  ·  peak GPU 8.9 GB
+(no epochs completed)
+7, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.66 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2610355 has 13.80 GiB memory in use. Including non-PyTorch memory, this process has 6.29 GiB memory in use. Of the allocated memory 4.92 GiB is allocated by PyTorch, and 1.10 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:06] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:07] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | physics
+epochs 0/30  ·  wall 5m38s  ·  peak GPU 11.5 GB
+(no epochs completed)
+uts=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 2.59 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 12.87 GiB memory in use. Process 2613887 has 6.29 GiB memory in use. Of the allocated memory 10.67 GiB is allocated by PyTorch, and 1.92 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:07] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:07] AAAI KA BOT: [FAIL] vae-1d-pixelwise | IIRS | standard
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 14.3 GB
+(no epochs completed)
+s=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.34 GiB. GPU 0 has a total capacity of 23.42 GiB of which 244.44 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2613887 has 6.29 GiB memory in use. Including non-PyTorch memory, this process has 15.22 GiB memory in use. Of the allocated memory 12.37 GiB is allocated by PyTorch, and 2.57 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:08] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:08] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | IIRS | physics
+epochs 0/30  ·  wall 2m06s  ·  peak GPU 6.6 GB
+(no epochs completed)
+ in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.42 GiB of which 116.44 MiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 6.29 GiB memory in use. Process 2615371 has 15.35 GiB memory in use. Of the allocated memory 4.92 GiB is allocated by PyTorch, and 1.10 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:08] AAAI KA BOT: [FAIL] vae-1d-pixelwise | IIRS | standard
+epochs 0/30  ·  wall 0m05s  ·  peak GPU 14.3 GB
+(no epochs completed)
+s=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.34 GiB. GPU 0 has a total capacity of 23.42 GiB of which 244.44 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2613887 has 6.29 GiB memory in use. Including non-PyTorch memory, this process has 15.22 GiB memory in use. Of the allocated memory 12.37 GiB is allocated by PyTorch, and 2.57 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:09] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:09] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:09] AAAI KA BOT: [FAIL] vae-1d-pixelwise | IIRS | physics
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 7.3 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 344.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 154.44 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2616019 has 14.01 GiB memory in use. Including non-PyTorch memory, this process has 7.61 GiB memory in use. Of the allocated memory 7.32 GiB is allocated by PyTorch, and 18.82 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:09] AAAI KA BOT: [FAIL] vae-1d-pixelwise | IIRS | standard
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 13.4 GB
+(no epochs completed)
+uts=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.34 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.25 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 14.01 GiB memory in use. Process 2616079 has 7.61 GiB memory in use. Of the allocated memory 12.29 GiB is allocated by PyTorch, and 1.44 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:10] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:10] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:10] AAAI KA BOT: [FAIL] vae-1d-pixelwise | IIRS | physics
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 6.5 GB
+(no epochs completed)
+~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/normalization.py", line 229, in forward
+    return F.layer_norm(
+           ~~~~~~~~~~~~^
+        input, self.normalized_shape, self.weight, self.bias, self.eps
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 2935, in layer_norm
+    return torch.layer_norm(
+           ~~~~~~~~~~~~~~~~^
+        input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 344.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 254.44 MiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 6.77 GiB memory in use. Process 2616834 has 14.75 GiB memory in use. Of the allocated memory 6.31 GiB is allocated by PyTorch, and 194.07 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:10] AAAI KA BOT: [FAIL] vae-1d-pixelwise | IIRS | standard
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 13.4 GB
+(no epochs completed)
+=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.34 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1012.44 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2616810 has 6.77 GiB memory in use. Including non-PyTorch memory, this process has 14.01 GiB memory in use. Of the allocated memory 12.29 GiB is allocated by PyTorch, and 1.44 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:11] AAAI KA BOT: [START] vae-our | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:11] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:20] AAAI KA BOT: [HB] vae-our | M3 | physics
+epoch 10/30  ·  wall 9m22s  ·  ETA 17m26s
+               train         val
+loss        0.047784    0.040515
+mse         0.026473    0.020374
+sam         0.063166    0.058805
+kld         2.361650    2.500144
+best so far: epoch 8 (monitor=0.037064)
+[21/08/2026 12:29] AAAI KA BOT: [HB] vae-our | M3 | physics
+epoch 20/30  ·  wall 18m09s  ·  ETA 8m47s
+               train         val
+loss        0.039064    0.031363
+mse         0.019869    0.014960
+sam         0.056006    0.046720
+kld         2.393043    2.387528
+best so far: epoch 20 (monitor=0.031363)
+[21/08/2026 12:38] AAAI KA BOT: [HB] vae-our | M3 | physics
+epoch 30/30  ·  wall 26m55s  ·  ETA 0m00s
+               train         val
+loss        0.037644    0.030442
+mse         0.019231    0.014555
+sam         0.053180    0.044400
+kld         2.459031    2.567404
+best so far: epoch 28 (monitor=0.030432)
+[21/08/2026 12:38] AAAI KA BOT: [OK] vae-our | M3 | physics
+epochs 30/30  ·  wall 26m56s  ·  peak GPU 4.8 GB
+best @ epoch 28: 0.030432 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0478     0.0405     0.0265     0.0204    0.0632     0.0588  
+  20     0.0391     0.0314     0.0199     0.0150    0.0560     0.0467  
+  30     0.0376     0.0304     0.0192     0.0146    0.0532     0.0444  
+ckpt: model/M3/vae-our.pt
+[21/08/2026 12:38] AAAI KA BOT: [START] vae-standard | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:39] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | physics
+epoch 10/30  ·  wall 28m19s  ·  ETA 56m45s
+               train         val
+loss        0.038985    0.040830
+mse         0.000362    0.000448
+sam         0.120314    0.126295
+kld         2.529379    2.493935
+best so far: epoch 10 (monitor=0.040830)
+[21/08/2026 12:39] AAAI KA BOT: [HB] vae-standard | M3 | standard
+epoch 10/30  ·  wall 1m24s  ·  ETA 2m27s
+               train         val
+loss        0.010667    0.007740
+mse         0.010468    0.007609
+sam         0.068683    0.057141
+kld         0.198245    0.131278
+best so far: epoch 10 (monitor=0.007740)
+[21/08/2026 12:40] AAAI KA BOT: [HB] vae-standard | M3 | standard
+epoch 20/30  ·  wall 2m43s  ·  ETA 1m18s
+               train         val
+loss        0.010342    0.007560
+mse         0.010247    0.007469
+sam         0.060896    0.050660
+kld         0.094221    0.091044
+best so far: epoch 19 (monitor=0.007545)
+[21/08/2026 12:42] AAAI KA BOT: [HB] vae-standard | M3 | standard
+epoch 30/30  ·  wall 4m06s  ·  ETA 0m00s
+               train         val
+loss        0.010278    0.007485
+mse         0.010194    0.007403
+sam         0.059255    0.049023
+kld         0.084602    0.081976
+best so far: epoch 29 (monitor=0.007485)
+[21/08/2026 12:42] AAAI KA BOT: [OK] vae-standard | M3 | standard
+epochs 30/30  ·  wall 4m07s  ·  peak GPU 0.6 GB
+best @ epoch 29: 0.007485 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0107     0.0077     0.0105     0.0076    0.0687     0.0571  
+  20     0.0103     0.0076     0.0102     0.0075    0.0609     0.0507  
+  30     0.0103     0.0075     0.0102     0.0074    0.0593     0.0490  
+ckpt: model/M3/vae-standard_standard.pt
+[21/08/2026 12:42] AAAI KA BOT: [START] vae-standard | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:43] AAAI KA BOT: [HB] vae-standard | M3 | physics
+epoch 10/30  ·  wall 1m30s  ·  ETA 2m43s
+               train         val
+loss        0.120275    0.021357
+mse         0.010470    0.007646
+sam         0.051674    0.044279
+kld        94.302925    0.427389
+best so far: epoch 10 (monitor=0.021357)
+[21/08/2026 12:45] AAAI KA BOT: [HB] vae-standard | M3 | physics
+epoch 20/30  ·  wall 2m52s  ·  ETA 1m20s
+               train         val
+loss        0.023877    0.019604
+mse         0.010224    0.007440
+sam         0.044486    0.039352
+kld         0.306604    0.358851
+best so far: epoch 20 (monitor=0.019604)
+[21/08/2026 12:46] AAAI KA BOT: [HB] vae-standard | M3 | physics
+epoch 30/30  ·  wall 4m17s  ·  ETA 0m00s
+               train         val
+loss        0.023369    0.019189
+mse         0.010182    0.007372
+sam         0.042951    0.038184
+kld         0.301059    0.362602
+best so far: epoch 30 (monitor=0.019189)
+[21/08/2026 12:46] AAAI KA BOT: [OK] vae-standard | M3 | physics
+epochs 30/30  ·  wall 4m18s  ·  peak GPU 0.6 GB
+best @ epoch 30: 0.019189 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.1203     0.0214     0.0105     0.0076    0.0517     0.0443  
+  20     0.0239     0.0196     0.0102     0.0074    0.0445     0.0394  
+  30     0.0234     0.0192     0.0102     0.0074    0.0430     0.0382 *
+(*) new best val checkpoint
+ckpt: model/M3/vae-standard_physics.pt
+[21/08/2026 12:46] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:49] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | standard
+epochs 0/30  ·  wall 2m25s  ·  peak GPU 4.3 GB
+(no epochs completed)
+=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 1.01 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 4.64 GiB memory in use. Of the allocated memory 3.75 GiB is allocated by PyTorch, and 628.82 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:49] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:52] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | standard
+epochs 0/30  ·  wall 2m20s  ·  peak GPU 4.3 GB
+(no epochs completed)
+=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 1.01 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 4.64 GiB memory in use. Of the allocated memory 3.75 GiB is allocated by PyTorch, and 628.82 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:52] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:55] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | physics
+epochs 0/30  ·  wall 2m21s  ·  peak GPU 4.2 GB
+(no epochs completed)
+=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 1.01 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 4.64 GiB memory in use. Of the allocated memory 3.71 GiB is allocated by PyTorch, and 669.82 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:56] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:58] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | physics
+epochs 0/30  ·  wall 2m23s  ·  peak GPU 4.2 GB
+(no epochs completed)
+=inputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 1.01 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 4.64 GiB memory in use. Of the allocated memory 3.71 GiB is allocated by PyTorch, and 669.82 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 12:59] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 12:59] AAAI KA BOT: [FAIL] vae-1d-pixelwise | M3 | standard
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 5.0 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 358.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 366.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 5.30 GiB memory in use. Of the allocated memory 5.00 GiB is allocated by PyTorch, and 22.26 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 13:00] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 13:00] AAAI KA BOT: [FAIL] vae-1d-pixelwise | M3 | standard
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 5.0 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 358.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 366.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 5.30 GiB memory in use. Of the allocated memory 5.00 GiB is allocated by PyTorch, and 22.26 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 13:00] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 13:00] AAAI KA BOT: [FAIL] vae-1d-pixelwise | M3 | physics
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 5.0 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 358.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 366.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 5.30 GiB memory in use. Of the allocated memory 5.00 GiB is allocated by PyTorch, and 22.26 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 13:01] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | physics
+epoch 20/30  ·  wall 50m24s  ·  ETA 19m43s
+               train         val
+loss        0.037694    0.039615
+mse         0.000348    0.000427
+sam         0.115817    0.121889
+kld         2.600608    2.621050
+best so far: epoch 20 (monitor=0.039615)
+[21/08/2026 13:01] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 13:01] AAAI KA BOT: [FAIL] vae-1d-pixelwise | M3 | physics
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 5.0 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 358.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 366.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 5.30 GiB memory in use. Of the allocated memory 5.00 GiB is allocated by PyTorch, and 22.26 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 13:02] AAAI KA BOT: [START] vae-our | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 13:03] AAAI KA BOT: [FAIL] vae-our | AVIRIS | physics
+epochs 0/30  ·  wall 1m07s  ·  peak GPU 4.7 GB
+(no epochs completed)
+nputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 848.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 832.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 4.84 GiB memory in use. Of the allocated memory 3.74 GiB is allocated by PyTorch, and 827.88 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 13:04] AAAI KA BOT: [START] vae-our | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 13:04] AAAI KA BOT: [FAIL] vae-our | AVIRIS | physics
+epochs 0/30  ·  wall 0m09s  ·  peak GPU 4.7 GB
+(no epochs completed)
+nputs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/__init__.py", line 364, in backward
+    _engine_run_backward(
+    ~~~~~~~~~~~~~~~~~~~~^
+        tensors,
+        ^^^^^^^^
+    ...<5 lines>...
+        accumulate_grad=True,
+        ^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        t_outputs, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )  # Calls into the C++ engine to run the backward pass
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 848.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 826.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2617567 has 16.10 GiB memory in use. Including non-PyTorch memory, this process has 4.84 GiB memory in use. Of the allocated memory 3.74 GiB is allocated by PyTorch, and 827.88 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 13:05] AAAI KA BOT: [START] vae-standard | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:19] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | physics
+epoch 30/30  ·  wall 2h08m17s  ·  ETA 0m00s
+               train         val
+loss        0.037226    0.039247
+mse         0.000340    0.000430
+sam         0.114176    0.120559
+kld         2.633219    2.648912
+best so far: epoch 29 (monitor=0.039210)
+[21/08/2026 14:19] AAAI KA BOT: [OK] vae-1d-pixelwise | IIRS | physics
+epochs 30/30  ·  wall 2h08m18s  ·  peak GPU 14.3 GB
+best @ epoch 29: 0.039210 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0390     0.0408     0.0004     0.0004    0.1203     0.1263  
+  20     0.0377     0.0396     0.0003     0.0004    0.1158     0.1219  
+  30     0.0372     0.0392     0.0003     0.0004    0.1142     0.1206  
+ckpt: model/IIRS/vae-1d-pixelwise_physics.pt
+[21/08/2026 14:20] AAAI KA BOT: [START] vae-our | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:26] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard
+epoch 10/30  ·  wall 1h21m16s  ·  ETA 2h30m58s
+               train         val
+loss        0.001729    0.001759
+mse         0.001645    0.001672
+sam         0.075821    0.079396
+kld         0.083849    0.087616
+best so far: epoch 10 (monitor=0.001759)
+[21/08/2026 14:28] AAAI KA BOT: [HB] vae-our | M3 | physics
+epoch 10/30  ·  wall 8m30s  ·  ETA 13m15s
+               train         val
+loss        0.044310    0.038179
+mse         0.023232    0.017606
+sam         0.062612    0.060272
+kld         2.294153    2.490910
+best so far: epoch 8 (monitor=0.035645)
+[21/08/2026 14:29] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard
+epoch 20/30  ·  wall 1h24m46s  ·  ETA 3m26s
+               train         val
+loss        0.001301    0.001528
+mse         0.001232    0.001456
+sam         0.067284    0.073585
+kld         0.068824    0.071653
+best so far: epoch 19 (monitor=0.001462)
+[21/08/2026 14:33] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard
+epoch 30/30  ·  wall 1h28m13s  ·  ETA 0m00s
+               train         val
+loss        0.001149    0.001354
+mse         0.001081    0.001286
+sam         0.063968    0.069452
+kld         0.068005    0.068555
+best so far: epoch 30 (monitor=0.001354)
+[21/08/2026 14:33] AAAI KA BOT: [OK] vae-standard | AVIRIS | standard
+epochs 30/30  ·  wall 1h28m14s  ·  peak GPU 1.2 GB
+best @ epoch 30: 0.001354 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0017     0.0018     0.0016     0.0017    0.0758     0.0794  
+  20     0.0013     0.0015     0.0012     0.0015    0.0673     0.0736  
+  30     0.0011     0.0014     0.0011     0.0013    0.0640     0.0695 *
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-standard_standard.pt
+[21/08/2026 14:33] AAAI KA BOT: [START] vae-standard | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:35] AAAI KA BOT: [HB] vae-our | M3 | physics
+epoch 20/30  ·  wall 15m27s  ·  ETA 6m52s
+               train         val
+loss        0.038426    0.030883
+mse         0.019629    0.014749
+sam         0.054697    0.045696
+kld         2.388757    2.425318
+best so far: epoch 20 (monitor=0.030883)
+[21/08/2026 14:37] AAAI KA BOT: [HB] vae-standard | AVIRIS | physics
+epoch 10/30  ·  wall 4m01s  ·  ETA 7m40s
+               train         val
+loss        0.062516    0.062309
+mse         0.035155    0.033843
+sam         0.091202    0.094887
+kld         0.000259    0.000208
+best so far: epoch 10 (monitor=0.062309)
+[21/08/2026 14:40] AAAI KA BOT: [STOP] vae-standard | AVIRIS | physics
+epochs 17/30  ·  wall 6m44s  ·  peak GPU 1.1 GB
+best @ epoch 10: 0.062309 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0625     0.0623     0.0352     0.0338    0.0912     0.0949 *
+  17     0.0624     0.0625     0.0351     0.0340    0.0909     0.0951  
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-standard_physics.pt
+[21/08/2026 14:40] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:43] AAAI KA BOT: [HB] vae-our | M3 | physics
+epoch 30/30  ·  wall 23m12s  ·  ETA 0m00s
+               train         val
+loss        0.037167    0.030028
+mse         0.019173    0.014301
+sam         0.051832    0.043903
+kld         2.444583    2.556703
+best so far: epoch 30 (monitor=0.030028)
+[21/08/2026 14:43] AAAI KA BOT: [OK] vae-our | M3 | physics
+epochs 30/30  ·  wall 23m14s  ·  peak GPU 4.8 GB
+best @ epoch 30: 0.030028 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0443     0.0382     0.0232     0.0176    0.0626     0.0603  
+  20     0.0384     0.0309     0.0196     0.0147    0.0547     0.0457  
+  30     0.0372     0.0300     0.0192     0.0143    0.0518     0.0439 *
+(*) new best val checkpoint
+ckpt: model/M3/vae-our.pt
+[21/08/2026 14:43] AAAI KA BOT: [START] vae-standard | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:45] AAAI KA BOT: [HB] vae-standard | M3 | standard
+epoch 10/30  ·  wall 1m26s  ·  ETA 2m34s
+               train         val
+loss        0.190395    0.007790
+mse         0.010808    0.007669
+sam         0.079756    0.061439
+kld       179.586685    0.120954
+best so far: epoch 10 (monitor=0.007790)
+[21/08/2026 14:46] AAAI KA BOT: [HB] vae-standard | M3 | standard
+epoch 20/30  ·  wall 2m47s  ·  ETA 1m18s
+               train         val
+loss        0.010354    0.007564
+mse         0.010251    0.007454
+sam         0.062466    0.051319
+kld         0.103342    0.109931
+best so far: epoch 20 (monitor=0.007564)
+[21/08/2026 14:47] AAAI KA BOT: [HB] vae-standard | M3 | standard
+epoch 30/30  ·  wall 4m09s  ·  ETA 0m00s
+               train         val
+loss        0.010292    0.007504
+mse         0.010196    0.007406
+sam         0.060696    0.049928
+kld         0.096524    0.098534
+best so far: epoch 29 (monitor=0.007504)
+[21/08/2026 14:47] AAAI KA BOT: [OK] vae-standard | M3 | standard
+epochs 30/30  ·  wall 4m10s  ·  peak GPU 0.6 GB
+best @ epoch 29: 0.007504 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.1904     0.0078     0.0108     0.0077    0.0798     0.0614  
+  20     0.0104     0.0076     0.0103     0.0075    0.0625     0.0513  
+  30     0.0103     0.0075     0.0102     0.0074    0.0607     0.0499  
+ckpt: model/M3/vae-standard_standard.pt
+[21/08/2026 14:47] AAAI KA BOT: [START] vae-standard | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:49] AAAI KA BOT: [HB] vae-standard | M3 | physics
+epoch 10/30  ·  wall 1m29s  ·  ETA 2m44s
+               train         val
+loss        0.046126    0.021509
+mse         0.010446    0.007555
+sam         0.051987    0.045538
+kld        20.084049    0.292114
+best so far: epoch 10 (monitor=0.021509)
+[21/08/2026 14:50] AAAI KA BOT: [HB] vae-standard | M3 | physics
+epoch 20/30  ·  wall 2m53s  ·  ETA 1m22s
+               train         val
+loss        0.024245    0.019830
+mse         0.010243    0.007439
+sam         0.045645    0.040339
+kld         0.308553    0.288739
+best so far: epoch 20 (monitor=0.019830)
+[21/08/2026 14:52] AAAI KA BOT: [HB] vae-standard | M3 | physics
+epoch 30/30  ·  wall 4m22s  ·  ETA 0m00s
+               train         val
+loss        0.023626    0.019387
+mse         0.010183    0.007393
+sam         0.043814    0.038969
+kld         0.298375    0.302644
+best so far: epoch 29 (monitor=0.019379)
+[21/08/2026 14:52] AAAI KA BOT: [OK] vae-standard | M3 | physics
+epochs 30/30  ·  wall 4m23s  ·  peak GPU 0.6 GB
+best @ epoch 29: 0.019379 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0461     0.0215     0.0104     0.0076    0.0520     0.0455  
+  20     0.0242     0.0198     0.0102     0.0074    0.0456     0.0403  
+  30     0.0236     0.0194     0.0102     0.0074    0.0438     0.0390  
+ckpt: model/M3/vae-standard_physics.pt
+[21/08/2026 14:52] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:53] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | standard
+epochs 0/30  ·  wall 1m23s  ·  peak GPU 2.3 GB
+(no epochs completed)
+_call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 896.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2715064 has 18.51 GiB memory in use. Including non-PyTorch memory, this process has 2.38 GiB memory in use. Of the allocated memory 1.77 GiB is allocated by PyTorch, and 335.48 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 14:54] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:55] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | standard
+epochs 0/30  ·  wall 1m23s  ·  peak GPU 2.3 GB
+(no epochs completed)
+_call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 896.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2715064 has 18.51 GiB memory in use. Including non-PyTorch memory, this process has 2.38 GiB memory in use. Of the allocated memory 1.77 GiB is allocated by PyTorch, and 335.48 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 14:56] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 14:58] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | physics
+epochs 0/30  ·  wall 1m23s  ·  peak GPU 2.3 GB
+(no epochs completed)
+_call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 896.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2715064 has 18.51 GiB memory in use. Including non-PyTorch memory, this process has 2.38 GiB memory in use. Of the allocated memory 1.77 GiB is allocated by PyTorch, and 335.48 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 14:58] AAAI KA BOT: [START] vae-3d-spatio-spectral | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:00] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | M3 | physics
+epochs 0/30  ·  wall 1m22s  ·  peak GPU 2.3 GB
+(no epochs completed)
+_call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 1367, in forward
+    return F.conv_transpose3d(
+           ~~~~~~~~~~~~~~~~~~^
+        input,
+        ^^^^^^
+    ...<6 lines>...
+        self.dilation,
+        ^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 990.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 896.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2715064 has 18.51 GiB memory in use. Including non-PyTorch memory, this process has 2.38 GiB memory in use. Of the allocated memory 1.77 GiB is allocated by PyTorch, and 335.48 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:00] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:00] AAAI KA BOT: [FAIL] vae-1d-pixelwise | M3 | standard
+epochs 0/30  ·  wall 0m02s  ·  peak GPU 2.2 GB
+(no epochs completed)
+~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/normalization.py", line 229, in forward
+    return F.layer_norm(
+           ~~~~~~~~~~~~^
+        input, self.normalized_shape, self.weight, self.bias, self.eps
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 2935, in layer_norm
+    return torch.layer_norm(
+           ~~~~~~~~~~~~~~~~^
+        input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.39 GiB. GPU 0 has a total capacity of 23.42 GiB of which 762.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2715064 has 18.51 GiB memory in use. Including non-PyTorch memory, this process has 2.51 GiB memory in use. Of the allocated memory 2.21 GiB is allocated by PyTorch, and 29.04 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:01] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:02] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | AVIRIS | standard
+epochs 1/30  ·  wall 22m39s  ·  peak GPU 14.1 GB
+best @ epoch 1: 0.082490 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   1     0.0822     0.0825     0.0822     0.0825    0.4838     0.4825 *
+(*) new best val checkpoint
+, line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 723, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/conv.py", line 718, in _conv_forward
+    return F.conv3d(
+           ~~~~~~~~^
+        input, weight, bias, self.stride, self.padding, self.dilation, self.groups
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.38 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.87 GiB is free. Process 4382 has 225.63 MiB memory in use. Including non-PyTorch memory, this process has 3.31 GiB memory in use. Process 2729798 has 16.58 GiB memory in use. Of the allocated memory 409.78 MiB is allocated by PyTorch, and 2.63 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:04] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:04] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | AVIRIS | standard
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.6 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.38 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.88 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.30 GiB memory in use. Of the allocated memory 2.59 GiB is allocated by PyTorch, and 447.11 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:05] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:05] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | AVIRIS | physics
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.6 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.38 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.88 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.30 GiB memory in use. Of the allocated memory 2.59 GiB is allocated by PyTorch, and 447.11 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:06] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:06] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | AVIRIS | physics
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.6 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.38 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.88 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.30 GiB memory in use. Of the allocated memory 2.59 GiB is allocated by PyTorch, and 447.11 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:07] AAAI KA BOT: [START] vae-1d-pixelwise | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:07] AAAI KA BOT: [FAIL] vae-1d-pixelwise | AVIRIS | standard
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 4.7 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 334.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 250.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.94 GiB memory in use. Of the allocated memory 4.65 GiB is allocated by PyTorch, and 12.05 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:07] AAAI KA BOT: [START] vae-1d-pixelwise | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:07] AAAI KA BOT: [FAIL] vae-1d-pixelwise | AVIRIS | standard
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 4.7 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 334.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 250.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.94 GiB memory in use. Of the allocated memory 4.65 GiB is allocated by PyTorch, and 12.05 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:08] AAAI KA BOT: [START] vae-1d-pixelwise | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:08] AAAI KA BOT: [FAIL] vae-1d-pixelwise | AVIRIS | physics
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 4.7 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 334.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 250.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.94 GiB memory in use. Of the allocated memory 4.65 GiB is allocated by PyTorch, and 12.05 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:09] AAAI KA BOT: [START] vae-1d-pixelwise | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:09] AAAI KA BOT: [FAIL] vae-1d-pixelwise | AVIRIS | physics
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 4.7 GB
+(no epochs completed)
+python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 334.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 250.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.94 GiB memory in use. Of the allocated memory 4.65 GiB is allocated by PyTorch, and 12.05 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:10] AAAI KA BOT: [START] vae-our | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:11] AAAI KA BOT: [FAIL] vae-our | CRIMS | physics
+epochs 0/30  ·  wall 0m56s  ·  peak GPU 4.0 GB
+(no epochs completed)
+yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 912.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 922.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.28 GiB memory in use. Of the allocated memory 3.95 GiB is allocated by PyTorch, and 45.14 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:12] AAAI KA BOT: [START] vae-our | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:12] AAAI KA BOT: [FAIL] vae-our | CRIMS | physics
+epochs 0/30  ·  wall 0m26s  ·  peak GPU 4.0 GB
+(no epochs completed)
+yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 912.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 922.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2729798 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.28 GiB memory in use. Of the allocated memory 3.95 GiB is allocated by PyTorch, and 45.14 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:13] AAAI KA BOT: [START] vae-standard | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:15] AAAI KA BOT: [HB] vae-standard | CRIMS | standard
+epoch 10/30  ·  wall 2m09s  ·  ETA 3m10s
+               train         val
+loss        0.002270    0.002307
+mse         0.002126    0.002166
+sam         0.551395    0.529217
+kld         0.143305    0.141191
+best so far: epoch 10 (monitor=0.002307)
+[21/08/2026 15:16] AAAI KA BOT: [HB] vae-standard | CRIMS | standard
+epoch 20/30  ·  wall 3m42s  ·  ETA 1m32s
+               train         val
+loss        0.001898    0.002083
+mse         0.001778    0.001960
+sam         0.552694    0.534565
+kld         0.119985    0.123354
+best so far: epoch 20 (monitor=0.002083)
+[21/08/2026 15:17] AAAI KA BOT: [HB] vae-1d-pixelwise | M3 | standard
+epoch 10/30  ·  wall 16m10s  ·  ETA 33m54s
+               train         val
+loss        0.012450    0.009880
+mse         0.010943    0.008203
+sam         0.076407    0.075611
+kld         1.506472    1.676915
+best so far: epoch 4 (monitor=0.009776)
+[21/08/2026 15:18] AAAI KA BOT: [HB] vae-standard | CRIMS | standard
+epoch 30/30  ·  wall 5m16s  ·  ETA 0m00s
+               train         val
+loss        0.001776    0.001976
+mse         0.001665    0.001865
+sam         0.554186    0.534358
+kld         0.110338    0.111886
+best so far: epoch 30 (monitor=0.001976)
+[21/08/2026 15:18] AAAI KA BOT: [OK] vae-standard | CRIMS | standard
+epochs 30/30  ·  wall 5m17s  ·  peak GPU 1.2 GB
+best @ epoch 30: 0.001976 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0023     0.0023     0.0021     0.0022    0.5514     0.5292  
+  20     0.0019     0.0021     0.0018     0.0020    0.5527     0.5346  
+  30     0.0018     0.0020     0.0017     0.0019    0.5542     0.5344 *
+(*) new best val checkpoint
+ckpt: model/CRIMS/vae-standard_standard.pt
+[21/08/2026 15:18] AAAI KA BOT: [START] vae-standard | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:19] AAAI KA BOT: [STOP] vae-1d-pixelwise | M3 | standard
+epochs 11/30  ·  wall 18m12s  ·  peak GPU 14.6 GB
+best @ epoch 4: 0.009776 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0124     0.0099     0.0109     0.0082    0.0764     0.0756  
+  11     0.0124     0.0101     0.0109     0.0084    0.0762     0.0821  
+ckpt: model/M3/vae-1d-pixelwise_standard.pt
+[21/08/2026 15:20] AAAI KA BOT: [START] vae-1d-pixelwise | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:20] AAAI KA BOT: [HB] vae-standard | CRIMS | physics
+epoch 10/30  ·  wall 1m43s  ·  ETA 3m03s
+               train         val
+loss        0.164660    0.159412
+mse         0.002605    0.003296
+sam         0.539395    0.519640
+kld         0.236365    0.223973
+best so far: epoch 9 (monitor=0.159257)
+[21/08/2026 15:21] AAAI KA BOT: [HB] vae-standard | CRIMS | physics
+epoch 20/30  ·  wall 3m21s  ·  ETA 1m36s
+               train         val
+loss        0.163543    0.158018
+mse         0.002298    0.002572
+sam         0.536726    0.517376
+kld         0.227271    0.233541
+best so far: epoch 20 (monitor=0.158018)
+[21/08/2026 15:23] AAAI KA BOT: [HB] vae-standard | CRIMS | physics
+epoch 30/30  ·  wall 5m03s  ·  ETA 0m00s
+               train         val
+loss        0.162639    0.157697
+mse         0.002039    0.002577
+sam         0.534566    0.516268
+kld         0.230340    0.239288
+best so far: epoch 29 (monitor=0.157677)
+[21/08/2026 15:23] AAAI KA BOT: [OK] vae-standard | CRIMS | physics
+epochs 30/30  ·  wall 5m04s  ·  peak GPU 1.1 GB
+best @ epoch 29: 0.157677 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.1647     0.1594     0.0026     0.0033    0.5394     0.5196  
+  20     0.1635     0.1580     0.0023     0.0026    0.5367     0.5174  
+  30     0.1626     0.1577     0.0020     0.0026    0.5346     0.5163  
+ckpt: model/CRIMS/vae-standard_physics.pt
+[21/08/2026 15:23] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:23] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | CRIMS | standard
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.8 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.56 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.65 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.53 GiB memory in use. Of the allocated memory 2.79 GiB is allocated by PyTorch, and 482.15 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:24] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:24] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | CRIMS | standard
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.8 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.56 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.65 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.53 GiB memory in use. Of the allocated memory 2.79 GiB is allocated by PyTorch, and 482.15 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:25] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:25] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | CRIMS | physics
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.8 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.56 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.65 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.53 GiB memory in use. Of the allocated memory 2.79 GiB is allocated by PyTorch, and 482.15 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:26] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:26] AAAI KA BOT: [FAIL] vae-3d-spatio-spectral | CRIMS | physics
+epochs 0/30  ·  wall 0m07s  ·  peak GPU 2.8 GB
+(no epochs completed)
+me/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 143, in forward
+    return F.relu(input, inplace=self.inplace)
+           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/functional.py", line 1721, in relu
+    result = torch.relu(input)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.56 GiB. GPU 0 has a total capacity of 23.42 GiB of which 1.65 GiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 3.53 GiB memory in use. Of the allocated memory 2.79 GiB is allocated by PyTorch, and 482.15 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:27] AAAI KA BOT: [START] vae-1d-pixelwise | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:27] AAAI KA BOT: [FAIL] vae-1d-pixelwise | CRIMS | standard
+epochs 0/30  ·  wall 0m04s  ·  peak GPU 4.6 GB
+(no epochs completed)
+/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 332.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 270.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.92 GiB memory in use. Of the allocated memory 4.64 GiB is allocated by PyTorch, and 4.77 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:28] AAAI KA BOT: [START] vae-1d-pixelwise | CRIMS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:28] AAAI KA BOT: [FAIL] vae-1d-pixelwise | CRIMS | standard
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 4.6 GB
+(no epochs completed)
+/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 332.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 270.50 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.92 GiB memory in use. Of the allocated memory 4.64 GiB is allocated by PyTorch, and 4.77 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:28] AAAI KA BOT: [START] vae-1d-pixelwise | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:28] AAAI KA BOT: [FAIL] vae-1d-pixelwise | CRIMS | physics
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 4.6 GB
+(no epochs completed)
+/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 332.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 362.56 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.92 GiB memory in use. Of the allocated memory 4.64 GiB is allocated by PyTorch, and 4.77 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:29] AAAI KA BOT: [START] vae-1d-pixelwise | CRIMS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 15:29] AAAI KA BOT: [FAIL] vae-1d-pixelwise | CRIMS | physics
+epochs 0/30  ·  wall 0m03s  ·  peak GPU 4.6 GB
+(no epochs completed)
+/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/container.py", line 253, in forward
+    input = module(input)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/yashdeep/miniconda3/lib/python3.13/site-packages/torch/nn/modules/linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 332.00 MiB. GPU 0 has a total capacity of 23.42 GiB of which 290.88 MiB is free. Process 4382 has 225.63 MiB memory in use. Process 2742908 has 16.58 GiB memory in use. Including non-PyTorch memory, this process has 4.92 GiB memory in use. Of the allocated memory 4.64 GiB is allocated by PyTorch, and 4.77 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[21/08/2026 15:30] AAAI KA BOT: train_fixed finished on yashdeep-Dell-Pro-Max-Tower-T2-FCT2250 in 5h8m (smoke rc=0, full rc=0)
+[21/08/2026 15:35] AAAI KA BOT: Inference sweep finished
+reconstruction cells: 0  |  downstream cells: 0
+Reconstruction metrics (0 cells)
+(no rows)
+
+Downstream latent probes (0 cells)
+(no rows)
+
+CSVs: results/ablation_table.csv , results/downstream_table.csv
+[21/08/2026 15:35] AAAI KA BOT: [HB] vae-1d-pixelwise | M3 | physics
+epoch 10/30  ·  wall 15m33s  ·  ETA 28m39s
+               train         val
+loss        0.029853    0.026077
+mse         0.011316    0.008240
+sam         0.053974    0.051313
+kld         2.344492    2.443223
+best so far: epoch 9 (monitor=0.026016)
+[21/08/2026 15:49] AAAI KA BOT: [HB] vae-1d-pixelwise | M3 | physics
+epoch 20/30  ·  wall 29m38s  ·  ETA 14m08s
+               train         val
+loss        0.028376    0.024962
+mse         0.011173    0.008326
+sam         0.049267    0.046342
+kld         2.423388    2.732816
+best so far: epoch 17 (monitor=0.024763)
+[21/08/2026 16:03] AAAI KA BOT: [HB] vae-1d-pixelwise | M3 | physics
+epoch 30/30  ·  wall 43m51s  ·  ETA 0m00s
+               train         val
+loss        0.027419    0.024183
+mse         0.010995    0.008148
+sam         0.046416    0.044221
+kld         2.498799    2.767593
+best so far: epoch 28 (monitor=0.024125)
+[21/08/2026 16:03] AAAI KA BOT: [OK] vae-1d-pixelwise | M3 | physics
+epochs 30/30  ·  wall 43m52s  ·  peak GPU 14.6 GB
+best @ epoch 28: 0.024125 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0299     0.0261     0.0113     0.0082    0.0540     0.0513  
+  20     0.0284     0.0250     0.0112     0.0083    0.0493     0.0463  
+  30     0.0274     0.0242     0.0110     0.0081    0.0464     0.0442  
+ckpt: model/M3/vae-1d-pixelwise_physics.pt
+[21/08/2026 16:03] AAAI KA BOT: [START] vae-our | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 16:25] AAAI KA BOT: [HB] vae-our | AVIRIS | physics
+epoch 10/30  ·  wall 21m29s  ·  ETA 36m48s
+               train         val
+loss        0.013553    0.013625
+mse         0.002157    0.002172
+sam         0.031254    0.031757
+kld         2.019914    1.926417
+best so far: epoch 10 (monitor=0.013625)
+[21/08/2026 16:43] AAAI KA BOT: [HB] vae-our | AVIRIS | physics
+epoch 20/30  ·  wall 39m53s  ·  ETA 18m22s
+               train         val
+loss        0.011822    0.011909
+mse         0.001367    0.001420
+sam         0.029007    0.029188
+kld         1.753212    1.732966
+best so far: epoch 20 (monitor=0.011909)
+[21/08/2026 17:02] AAAI KA BOT: [OK] vae-our | AVIRIS | physics
+epochs 30/30  ·  wall 58m15s  ·  peak GPU 12.0 GB
+best @ epoch 30: 0.011567 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0136     0.0136     0.0022     0.0022    0.0313     0.0318  
+  20     0.0118     0.0119     0.0014     0.0014    0.0290     0.0292  
+  30     0.0113     0.0116     0.0012     0.0013    0.0281     0.0285 *
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-our.pt
+[21/08/2026 17:02] AAAI KA BOT: [START] vae-standard | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 17:05] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard
+epoch 10/30  ·  wall 2m41s  ·  ETA 5m13s
+               train         val
+loss        0.001729    0.001759
+mse         0.001645    0.001672
+sam         0.075821    0.079396
+kld         0.083849    0.087616
+best so far: epoch 10 (monitor=0.001759)
+[21/08/2026 17:07] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard
+epoch 20/30  ·  wall 5m19s  ·  ETA 2m39s
+               train         val
+loss        0.001301    0.001528
+mse         0.001232    0.001456
+sam         0.067284    0.073585
+kld         0.068824    0.071653
+best so far: epoch 19 (monitor=0.001462)
+[21/08/2026 17:10] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard
+epoch 30/30  ·  wall 8m04s  ·  ETA 0m00s
+               train         val
+loss        0.001149    0.001354
+mse         0.001081    0.001286
+sam         0.063968    0.069452
+kld         0.068005    0.068555
+best so far: epoch 30 (monitor=0.001354)
+[21/08/2026 17:10] AAAI KA BOT: [OK] vae-standard | AVIRIS | standard
+epochs 30/30  ·  wall 8m05s  ·  peak GPU 1.2 GB
+best @ epoch 30: 0.001354 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0017     0.0018     0.0016     0.0017    0.0758     0.0794  
+  20     0.0013     0.0015     0.0012     0.0015    0.0673     0.0736  
+  30     0.0011     0.0014     0.0011     0.0013    0.0640     0.0695 *
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-standard_standard.pt
+[21/08/2026 17:10] AAAI KA BOT: [START] vae-standard | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+[21/08/2026 17:13] AAAI KA BOT: [HB] vae-standard | AVIRIS | physics
+epoch 10/30  ·  wall 2m47s  ·  ETA 5m23s
+               train         val
+loss        0.062517    0.062314
+mse         0.035156    0.033845
+sam         0.091203    0.094897
+kld         0.000516    0.000487
+best so far: epoch 10 (monitor=0.062314)
+[21/08/2026 17:15] AAAI KA BOT: [STOP] vae-standard | AVIRIS | physics
+epochs 17/30  ·  wall 4m37s  ·  peak GPU 1.1 GB
+best @ epoch 10: 0.062314 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+  10     0.0625     0.0623     0.0352     0.0338    0.0912     0.0949 *
+  17     0.0624     0.0625     0.0351     0.0340    0.0909     0.0951  
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-standard_physics.pt
+[21/08/2026 17:15] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05

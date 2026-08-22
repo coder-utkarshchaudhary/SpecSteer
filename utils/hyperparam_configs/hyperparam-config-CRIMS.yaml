@@ -46,41 +46,66 @@ seed: 42
 weight_decay: 1.0e-5
 early_stopping_patience: 7
 
-# --- Latent rate: every model matched to 1,867,776 / 29,184 = 64:1 ---
+# --- Latent budget: every model on the common target T = 28,672 (65.1:1) ---
 #
 # Rate and parameter count are INDEPENDENT resources — the bottleneck sets how
 # much information can pass, the widths below set how complex a mapping can be
-# learned — so the ablation controls for both. Previously only parameters were
-# matched and rate floated 512x between models, which for an autoencoder is the
-# more important of the two: reconstruction quality is bounded by rate almost by
-# definition. (On M3 vae-our's latent was 1.52x LARGER than its input.)
+# learned — so the ablation controls for both.
 #
-# 64:1 is vae-3d's own natural operating point (8x8x8 downsample x 8 latent
-# channels), so that baseline is UNCHANGED and cannot be accused of being
-# re-tuned for the comparison. It also sits near Stable Diffusion's
-# AutoencoderKL (48:1), so these latents are a credible LDM diffusion space.
+# WHAT CHANGED, AND WHY. The previous version solved for a fixed 64:1 RATIO and
+# let each model land wherever its quantisation allowed. On M3 that left vae-1d
+# 23.8% below target, because a 64:1 target of 5,376 is not a multiple of 4,096
+# and 4,096 is vae-1d's grain (one latent channel per 64x64 pixel).
+#
+# This version solves for a common reachable BUDGET instead: T = the nearest
+# multiple of H*W = 4,096 to the 64:1 point. 4,096 is divisible by
+# vae-standard's grain of 64, so BOTH per-pixel and spatial models land on T
+# EXACTLY. Worst deviation across all four datasets drops 23.8% -> 6.2%.
+#
+# The two that do not land exactly:
+#   vae-3d   — grain is (C_pad/8)*64, whose odd factor (11, 53, 57) makes an
+#              exact common multiple astronomical. Padding its depth to a power
+#              of two WOULD make it exact, and was rejected: on M3 that means 44
+#              replicated bands, so only 65.6% of its latent depth would encode
+#              real data. It would match the nominal number while mismatching
+#              the effective rate the number is supposed to measure.
+#   vae-our  — carries a latent_dim-sized global vector on top of a multiple of
+#              4,096, so it is always +latent_dim above T. Forcing exactness
+#              needs latent_dim = 4,096, which takes this model from 10.9M to
+#              105.3M parameters and stops its spatial stream being a bottleneck
+#              at all (8192 -> 4096 is a 2x squeeze).
 #
 # Latent SHAPE is deliberately not equalised — vae-standard is a spatial grid
 # with no spectral axis, vae-our is a global vector beside a full-resolution
 # per-pixel spectral map. That geometry IS the architecture under test. Only the
 # scalar count matches.
 #
-# Regenerate with:  python utils/match_latent_rate.py --ratio 64
-# Verify with:      python utils/match_latent_rate.py --ratio 64 --check
-spectral_latent_dim: 7           # vae-our  :  28,928 elements (-0.9%)
-vae_standard_latent_ch: 456   # vae-std  :  29,184 elements (+0.0%)
-vae_3d_latent_ch: 8         # vae-3d   :  29,184 elements (+0.0%)  <- unchanged
-vae_1d_latent_dim: 7            # vae-1d   :  28,672 elements (-1.8%)
-# worst deviation from target: 1.8% (tolerance +/-25%)
+# Regenerate with:  python utils/match_latent_rate.py --exact
+# Verify with:      python utils/match_latent_rate.py --exact --check
+spectral_latent_dim: 7           # vae-our  :  28,928 elements (+0.9%)
+vae_standard_latent_ch: 448      # vae-std  :  28,672 elements (EXACT)
+vae_3d_latent_ch: 8            # vae-3d   :  29,184 elements (+1.8%)
+vae_1d_latent_dim: 7            # vae-1d   :  28,672 elements (EXACT)
+# worst deviation from T: 1.8% (tolerance +/-10%)
 
 # --- Baseline capacity: matched to vae-our within 0.99% ---
 #
-# RE-SOLVED after the latent-rate change above. Order matters: shrinking
-# vae-our's spectral latent shrank its LazyLinear (4096->256 becomes 4096->8),
-# so the parameter target moved and these widths had to be recomputed against
-# the new one. Rate first, then parameters — never the reverse.
+# RE-SOLVED after the latent-budget change above. Order matters: the rate knobs
+# feed the parameter count (vae-standard's 1x1 projections scale with
+# latent_ch; vae-our's LazyLinear scales with spectral_latent_dim), so the
+# parameter target moves whenever the latent does. Rate first, then parameters —
+# never the reverse.
+#
+# NOTE: parameter matching is no longer the PRIMARY defence against the capacity
+# confound. It is brittle (it moves every time the latent moves) and it forces
+# four architectures onto one number they have no reason to share. The primary
+# control is now post-hoc: capacity scaling curves, covariate regression on
+# log2(params) and log2(latent), and the Pareto frontier — see CLAUDE.md 12.
+# These widths are kept because a rough match costs nothing and removes the
+# crudest objection.
+#
 # vae-our target = 11,276,895 params
 # Regenerate with:  python utils/check-model-params.py --solve
-vae_standard_base_ch: 85        # 11,342,238 (+0.58%)
-vae_3d_base_ch: 46              # 11,388,329 (+0.99%)
+vae_standard_base_ch: 85                # 11,325,902 (+0.43%)
+vae_3d_base_ch: 46                      # 11,388,329 (+0.99%)
 vae_1d_hidden_dims: [2656, 1328, 664]   # 11,282,494 (+0.05%)

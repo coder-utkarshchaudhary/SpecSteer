@@ -47,6 +47,8 @@ cd "${REPO_ROOT}"
 ALL_DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
 DATASETS=("${ALL_DATASETS[@]}")
 SEND_TELEGRAM=1
+SELECT="${SELECT:-sam}"
+SEEDS_CSV="${SEEDS_CSV:-}"
 DO_RECON=1
 DO_PROBES=1
 DO_DOWNSTREAM=1
@@ -69,6 +71,14 @@ while [[ $# -gt 0 ]]; do
             PROBE_ARGS+=(--max-patches "$2"); shift 2 ;;
         --probe-batch)
             PROBE_ARGS+=(--probe-batch "$2"); shift 2 ;;
+        # Which of each cell's TWO checkpoints to evaluate. Every cell writes
+        # best-val-SAM and best-val-recon-MSE; a comparison must read the SAME
+        # criterion for every model or it is not a comparison.
+        --select)
+            SELECT="$2"; shift 2 ;;
+        # Which training seed(s), comma-separated. Omit to sweep every seed found.
+        --seed|--seeds)
+            SEEDS_CSV="$2"; shift 2 ;;
         --no-telegram)
             SEND_TELEGRAM=0
             shift
@@ -98,6 +108,21 @@ mkdir -p "${INFER_JSON_DIR}" "${DOWNSTREAM_DIR}" "${PROBES_DIR}"
 [[ -n "${MAX_PATCHES:-}" ]] && PROBE_ARGS+=(--max-patches "${MAX_PATCHES}")
 [[ -n "${PROBE_BATCH:-}" ]] && PROBE_ARGS+=(--probe-batch "${PROBE_BATCH}")
 
+# Seeds to evaluate. Default: whatever is actually on disk, so a single-seed
+# tree and a three-seed tree both work with no flag. An empty entry means "no
+# seed in the filename", i.e. a checkpoint from before the seed axis landed.
+if [[ -n "${SEEDS_CSV}" ]]; then
+    IFS=',' read -r -a SEEDS <<< "${SEEDS_CSV}"
+else
+    mapfile -t SEEDS < <(python -c 'import sys; from modules.registry import find_seeds; \
+s=set();  [s.update(find_seeds(sys.argv[1], sys.argv[2], m, "physics")) for m in \
+["vae-our","vae-standard","vae-3d-spatio-spectral","vae-1d-pixelwise"]]; \
+print("\n".join(map(str, sorted(s))))' "${CKPT_DIR}" "${DATASETS[0]}" 2>/dev/null)
+    [[ ${#SEEDS[@]} -eq 0 ]] && SEEDS=("")
+fi
+echo "  select    : best-${SELECT} checkpoints"
+echo "  seeds     : ${SEEDS[*]:-<unseeded>}"
+
 PREREG="inference/preregistration.yaml"
 if (( DO_PROBES )) && [[ ! -s "${PREREG}" ]]; then
     echo "ERROR: ${PREREG} is missing."
@@ -123,31 +148,39 @@ FAILED=()
 
 run_inference() {
     # $1=model  $2=dataset  $3=loss  $4=ckpt_name
-    local m="$1" ds="$2" loss="$3" name="$4"
-    local ckpt="${CKPT_DIR}/${ds}/${name}.pt"
-    local out_json="${INFER_JSON_DIR}/${ds}__${name}.json"
+    local m="$1" ds="$2" loss="$3" name="$4" seed="${5:-}"
+    local sfx="" ; local seed_args=()
+    if [[ -n "${seed}" ]]; then
+        sfx="_seed${seed}"; seed_args=(--seed "${seed}")
+    fi
+    local ckpt="${CKPT_DIR}/${ds}/${name}${sfx}_best${SELECT}.pt"
+    [[ -s "${ckpt}" ]] || ckpt="${CKPT_DIR}/${ds}/${name}.pt"   # pre-seed-axis fallback
+    local out_json="${INFER_JSON_DIR}/${ds}__${name}${sfx}_${SELECT}.json"
     if [[ ! -s "${ckpt}" ]]; then
         echo "[skip] inference  ${m} | ${ds} | ${loss}  (missing ${ckpt})"
-        SKIPPED+=("infer|${m}|${ds}|${loss}")
+        SKIPPED+=("infer|${m}|${ds}|${loss}${sfx}")
         return 0
     fi
-    echo ">>> inference  ${m} | ${ds} | ${loss}"
+    echo ">>> inference  ${m} | ${ds} | ${loss}${sfx} [${SELECT}]"
     if ! python inference/inference.py --model "${m}" --dataset "${ds}" --loss "${loss}" \
-            --ckpt-dir "${CKPT_DIR}" --out-json "${out_json}" "${EXTRA_ARGS[@]}"; then
-        echo "!!! inference failed: ${m} | ${ds} | ${loss}"
-        FAILED+=("infer|${m}|${ds}|${loss}")
+            --ckpt-dir "${CKPT_DIR}" --out-json "${out_json}" \
+            --select "${SELECT}" ${seed_args[@]+"${seed_args[@]}"} "${EXTRA_ARGS[@]}"; then
+        echo "!!! inference failed: ${m} | ${ds} | ${loss}${sfx}"
+        FAILED+=("infer|${m}|${ds}|${loss}${sfx}")
     fi
 }
 
 # ---- Step 1: 28-cell reconstruction sweep ---------------------------------
 if (( DO_RECON )); then
 for ds in "${DATASETS[@]}"; do
-    run_inference vae-our "${ds}" physics vae-our
+  for seed in "${SEEDS[@]}"; do
+    run_inference vae-our "${ds}" physics vae-our "${seed}"
     for m in "${STANDARD_MODELS[@]}"; do
         for loss in standard physics; do
-            run_inference "${m}" "${ds}" "${loss}" "${m}_${loss}"
+            run_inference "${m}" "${ds}" "${loss}" "${m}_${loss}" "${seed}"
         done
     done
+  done
 done
 fi
 
@@ -157,14 +190,18 @@ fi
 # reused across that dataset's seven cells.
 if (( DO_PROBES )); then
 for ds in "${DATASETS[@]}"; do
+  for seed in "${SEEDS[@]}"; do
+    probe_seed_args=(); [[ -n "${seed}" ]] && probe_seed_args=(--seed "${seed}")
     echo ""
-    echo ">>> probes ${ds}"
+    echo ">>> probes ${ds}${seed:+ seed ${seed}} [${SELECT}]"
     if ! python inference/probes.py --dataset "${ds}" --all-models \
             --ckpt-dir "${CKPT_DIR}" --out-dir "${PROBES_DIR}" \
+            --select "${SELECT}" ${probe_seed_args[@]+"${probe_seed_args[@]}"} \
             ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}; then
-        echo "!!! probes failed for ${ds}"
-        FAILED+=("probes|${ds}")
+        echo "!!! probes failed for ${ds}${seed:+ seed ${seed}}"
+        FAILED+=("probes|${ds}|seed${seed}")
     fi
+  done
 done
 fi
 
@@ -172,8 +209,10 @@ fi
 if (( DO_DOWNSTREAM )); then
 for ds in "${DATASETS[@]}"; do
     echo ">>> downstream ${ds}"
+    ds_seed_args=(); [[ -n "${SEEDS[0]}" ]] && ds_seed_args=(--seed "${SEEDS[0]}")
     if ! python inference/downstream.py --dataset "${ds}" --save-plots \
-            --ckpt-dir "${CKPT_DIR}" --out-dir "${DOWNSTREAM_DIR}"; then
+            --ckpt-dir "${CKPT_DIR}" --out-dir "${DOWNSTREAM_DIR}" \
+            --select "${SELECT}" ${ds_seed_args[@]+"${ds_seed_args[@]}"}; then
         echo "!!! downstream failed for ${ds}"
         FAILED+=("downstream|${ds}")
     fi

@@ -52,6 +52,8 @@ FULL_EPOCHS="${FULL_EPOCHS:-30}"
 ZIP_NAME="${ZIP_NAME:-dataset.zip}"
 PACKED_ROOT="data/packed"
 
+ORIGINAL_ARGS="$*"
+
 DATASETS_CSV=""
 DO_PACK=1
 DO_ZIP=1
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --no-zip)     DO_ZIP=0; shift ;;
         --repack)     PACK_ARGS+=(--overwrite); shift ;;
         --dry-run)    DRY_RUN=1; shift ;;
+        --allow-concurrent) export ALLOW_CONCURRENT=1; shift ;;
         -h|--help)    sed -n '2,40p' "$0"; exit 0 ;;
         *) echo "unknown flag: $1  (see --help)"; exit 2 ;;
     esac
@@ -86,6 +89,19 @@ if [[ -n "${DATASETS_CSV}" ]]; then
     IFS=',' read -r -a DATASETS <<< "${DATASETS_CSV}"
 else
     DATASETS=(IIRS M3 AVIRIS CRIMS)
+fi
+
+# --------------------------------------------------------------------------
+# Refuse a second concurrent grid. This is THE fix for the v3 failure: two
+# launches four minutes apart fought over one 23.4 GB card and produced 47 OOMs.
+# Taken before packing, because step 2 writes data/packed/ and step 3 deletes
+# and rewrites the zip — two runs would corrupt both.
+# --------------------------------------------------------------------------
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/grid_lock.sh"
+GRID_LOCK_CMD="$0 ${ORIGINAL_ARGS}"
+if (( ! DRY_RUN )); then
+    acquire_grid_lock "train_fixed (${DATASETS[*]})" || exit 9
 fi
 
 banner() {
@@ -142,6 +158,16 @@ if ! run "${PY}" utils/dataset/inspect_channels.py; then
     echo "!!! Band counts disagree with utils/config.py. Fix that before packing —"
     echo "!!! packing a mismatched cube just moves the failure later."
     exit 3
+fi
+
+# Notebook parity: cheap, CPU-only, and the failure it catches (a config value
+# edited in three notebooks out of four) is otherwise invisible until Kaggle.
+if ! run "${PY}" utils/check_notebook_parity.py; then
+    echo ""
+    echo "!!! Notebooks disagree with the repo config. They are committed and run"
+    echo "!!! on Kaggle, so a drift here produces results that silently used"
+    echo "!!! different hyper-parameters. Fix before training."
+    exit 4
 fi
 
 # --------------------------------------------------------------------------

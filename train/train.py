@@ -33,6 +33,8 @@ import argparse
 import logging
 import math
 import os
+import platform
+import subprocess
 import random
 import sys
 import time
@@ -49,6 +51,7 @@ from modules.registry import (
     MODEL_NAMES,
     PHYSICS_ONLY,
     build_model,
+    SELECT_CRITERIA,
     checkpoint_name,
 )
 from utils.config import DATASETS, apply_dataset, settings, verify_channels
@@ -59,6 +62,7 @@ from utils.logging_setup import (
     tail_log,
     timestamp,
 )
+from modules.metrics import psnr as psnr_metric, ssim as ssim_metric
 from utils.notify import RunNotifier
 from utils.training.dataloader import build_dataloader
 
@@ -81,6 +85,11 @@ class _LossTermsAdapter(nn.Module):
     we expose ``loss_terms`` through ``forward`` and unsqueeze each scalar term
     to a length-1 first-dim tensor. DP concatenates those along dim 0 (one row
     per GPU); the training loop takes ``.mean()`` afterwards to reduce.
+
+    ``recon`` is the exception: it is already batched along dim 0, so DP's
+    gather concatenates it correctly as-is. Unsqueezing it would produce
+    ``(n_gpus, B_per_gpu, H, W, C)`` and silently corrupt every metric computed
+    from it. Only 0-dim entries are unsqueezed.
     """
 
     def __init__(self, inner: nn.Module):
@@ -91,7 +100,7 @@ class _LossTermsAdapter(nn.Module):
         terms = self.inner.loss_terms(
             x, beta=beta, lambda_physics=lambda_physics, use_physics=use_physics,
         )
-        return {k: v.unsqueeze(0) for k, v in terms.items()}
+        return {k: (v.unsqueeze(0) if v.dim() == 0 else v) for k, v in terms.items()}
 
 
 def _unwrap(model: nn.Module) -> nn.Module:
@@ -128,6 +137,67 @@ def _pick_amp_dtype(device: torch.device, logger: logging.Logger) -> torch.dtype
     return torch.float16
 
 
+def _gpu_processes() -> str:
+    """Compute processes currently on the GPU, via nvidia-smi. Best effort."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory",
+             "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip() or "(none reported)"
+    except Exception:
+        return "(nvidia-smi unavailable)"
+
+
+def preflight_vram(device: torch.device, batch_size: int, logger: logging.Logger,
+                   min_free_gb: float = 4.0) -> None:
+    """
+    Refuse to start when the card is already occupied.
+
+    The v3 grid was launched twice and the two runs fought over one 23.4 GB card,
+    producing 47 OOMs — every one of which names a second multi-GiB process.
+    `scripts/grid_lock.sh` stops that happening from this machine; this check
+    catches what a file lock cannot see: another user, a stale process, or a
+    notebook kernel still holding memory.
+
+    Deliberately advisory-but-loud rather than a hard limit tied to a per-model
+    estimate: a wrong estimate that blocks a legitimate run is worse than an OOM.
+    Only an obviously-occupied card aborts.
+    """
+    if device.type != "cuda":
+        return
+    try:
+        free_b, total_b = torch.cuda.mem_get_info()
+    except Exception as e:                      # pragma: no cover - driver-dependent
+        logger.debug("mem_get_info unavailable, skipping VRAM preflight: %s", e)
+        return
+
+    free_gb, total_gb = free_b / 1024 ** 3, total_b / 1024 ** 3
+    used_gb = total_gb - free_gb
+    logger.info(f"VRAM preflight: {free_gb:.1f} GB free of {total_gb:.1f} GB "
+                f"({used_gb:.1f} GB already in use)")
+
+    if free_gb >= min_free_gb:
+        if used_gb > 1.0:
+            logger.warning(
+                f"{used_gb:.1f} GB of this GPU is already in use by another "
+                f"process. Continuing, but if this run OOMs, that is why.\n"
+                f"  compute apps: {_gpu_processes()}"
+            )
+        return
+
+    raise RuntimeError(
+        f"Refusing to start: only {free_gb:.1f} GB of {total_gb:.1f} GB VRAM is "
+        f"free (need at least {min_free_gb:.1f} GB).\n"
+        f"  compute apps now: {_gpu_processes()}\n"
+        f"  Another training run is almost certainly still going. Two grids on "
+        f"one card is what produced 47 OOMs in the v3 run.\n"
+        f"  Wait for it, or re-run with a smaller --batch-size (currently "
+        f"{batch_size})."
+    )
+
+
 def _memory_format_for(model_name: str) -> torch.memory_format:
     """channels_last_3d for vae-3d-spatio-spectral, channels_last for the rest."""
     if model_name == "vae-3d-spatio-spectral":
@@ -151,7 +221,7 @@ def train_vae(
     weight_decay=1e-5,
     patience=7,
     val_dataloader=None,
-    ckpt_path=None,
+    ckpt_paths=None,
     ckpt_meta=None,
     logger=None,
     notifier=None,
@@ -168,7 +238,11 @@ def train_vae(
 
     model.to(device)
     ckpt_meta = ckpt_meta or {}
-    best_val_loss = math.inf
+    # One "best" tracker per selection criterion. See modules/registry.py's
+    # SELECT_CRITERIA for why there are two rather than one.
+    ckpt_paths = ckpt_paths or {}
+    best = {k: math.inf for k in ckpt_paths}
+    best_epoch = {k: 0 for k in ckpt_paths}
     no_improve_epochs = 0
 
     use_amp = (device.type == "cuda")
@@ -176,8 +250,8 @@ def train_vae(
     needs_scaler = use_amp and (amp_dtype == torch.float16)
     scaler = torch.amp.GradScaler("cuda", enabled=needs_scaler)
 
-    if ckpt_path is not None:
-        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+    for _p in ckpt_paths.values():
+        _p.parent.mkdir(parents=True, exist_ok=True)
 
     epoch_wall_starts = []
 
@@ -249,12 +323,18 @@ def train_vae(
 
         # ---- Validation ----
         val_loss = val_mse = val_sam = val_kld = 0.0
+        val_mse_final = val_psnr = val_ssim = 0.0
         if val_dataloader is not None:
             model.eval()
             v_loss = torch.zeros((), device=device)
             v_mse = torch.zeros((), device=device)
             v_sam = torch.zeros((), device=device)
             v_kld = torch.zeros((), device=device)
+            # `mse_final` is the reconstruction MSE and is comparable across
+            # models; `mse` is each model's own training term and is not.
+            v_mse_final = torch.zeros((), device=device)
+            v_psnr = torch.zeros((), device=device)
+            v_ssim = torch.zeros((), device=device)
             val_bar = tqdm(
                 val_dataloader,
                 desc=f"epoch {epoch}/{epochs} val  ",
@@ -270,6 +350,13 @@ def train_vae(
                     v_mse += terms["mse"].mean()
                     v_sam += terms["sam"].mean()
                     v_kld += terms["kld"].mean()
+                    v_mse_final += terms["mse_final"].mean()
+                    # PSNR/SSIM come from the reconstruction the model already
+                    # returned, so this costs no extra forward pass. Both stay
+                    # on-GPU; the single .item() sync happens after the loop.
+                    recon_val = terms["recon"]
+                    v_psnr += psnr_metric(x_val, recon_val)
+                    v_ssim += ssim_metric(x_val, recon_val)
                     if j % tqdm_every == 0:
                         val_bar.set_postfix(
                             loss=f"{(v_loss / j).item():.4f}",
@@ -283,13 +370,17 @@ def train_vae(
             val_mse = (v_mse / n_val).item()
             val_sam = (v_sam / n_val).item()
             val_kld = (v_kld / n_val).item()
+            val_mse_final = (v_mse_final / n_val).item()
+            val_psnr = (v_psnr / n_val).item()
+            val_ssim = (v_ssim / n_val).item()
 
         scheduler.step()
 
         # ---- Console logging ----
         val_str = (
             f" | Val Loss: {val_loss:.4f} | Val MSE: {val_mse:.4f} "
-            f"| Val SAM: {val_sam:.4f} | Val KLD: {val_kld:.4f}"
+            f"| Val SAM: {val_sam:.4f} | Val KLD: {val_kld:.4f} "
+            f"| Val PSNR: {val_psnr:.2f} | Val SSIM: {val_ssim:.4f}"
             if val_dataloader is not None else ""
         )
         epoch_wall = time.time() - epoch_t0
@@ -311,6 +402,8 @@ def train_vae(
                 "val_mse": val_mse if val_dataloader is not None else None,
                 "val_sam": val_sam if val_dataloader is not None else None,
                 "val_kld": val_kld if val_dataloader is not None else None,
+                "val_psnr": val_psnr if val_dataloader is not None else None,
+                "val_ssim": val_ssim if val_dataloader is not None else None,
             })
 
         if wandb_run is not None:
@@ -328,34 +421,66 @@ def train_vae(
                         "val/mse": val_mse,
                         "val/sam": val_sam,
                         "val/kld": val_kld,
+                        "val/mse_final": val_mse_final,
+                        "val/psnr": val_psnr,
+                        "val/ssim": val_ssim,
                     }
                     if val_dataloader is not None
                     else {}
                 ),
             })
 
-        # ---- Checkpoint (best by monitored loss) + early stopping ----
-        monitor = val_loss if val_dataloader is not None else train_loss
-        improved = monitor < best_val_loss
-        if improved:
-            best_val_loss = monitor
+        # ---- Checkpoints (one per selection criterion) + early stopping ----
+        #
+        # Two checkpoints, not one. `val_loss` has a different FORM in every cell
+        # -- vae-our carries a 3-branch MSE and a summed KL, `physics` cells
+        # carry a SAM term, `standard` cells do not -- so selecting on it meant
+        # each cell's weights were chosen by a different objective. Selecting
+        # everything on SAM breaks the other way, because `standard` cells never
+        # train a SAM term. Writing both lets each downstream analysis read the
+        # checkpoint selected on the metric it reports, uniformly across cells.
+        #
+        # Both criteria are minimised. Falls back to the training figures when
+        # there is no validation split.
+        if val_dataloader is not None:
+            monitors = {"sam": val_sam, "mse": val_mse_final}
+        else:
+            monitors = {"sam": train_sam, "mse": train_mse}
+
+        any_improved = False
+        for crit, path in ckpt_paths.items():
+            value = monitors[crit]
+            if value >= best[crit]:
+                continue
+            best[crit] = value
+            best_epoch[crit] = epoch
+            any_improved = True
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": _unwrap(model).state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": value,
+                    "select": crit,
+                    "val_sam": val_sam,
+                    "val_mse_final": val_mse_final,
+                    "val_psnr": val_psnr,
+                    "val_ssim": val_ssim,
+                    **ckpt_meta,
+                },
+                path,
+            )
+            logger.info(f"Epoch {epoch}: new best {crit}={value:.6f} — saved {path.name}")
+
+        # Early stopping only when NEITHER criterion has improved; stopping on
+        # one alone would truncate the other's search.
+        if any_improved:
             no_improve_epochs = 0
-            if ckpt_path is not None:
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": _unwrap(model).state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "loss": monitor,
-                        **ckpt_meta,
-                    },
-                    ckpt_path,
-                )
-                logger.info(f"Epoch {epoch}: new best {monitor:.6f} — checkpoint saved")
-            if notifier is not None:
-                notifier.mark_best(epoch, monitor)
         else:
             no_improve_epochs += 1
+
+        if notifier is not None and "sam" in best_epoch and best_epoch["sam"] == epoch:
+            notifier.mark_best(epoch, best["sam"])
 
         # ---- Heartbeat (every log_every epochs) ----
         if notifier is not None:
@@ -369,11 +494,13 @@ def train_vae(
 
         # Early stopping only when a validation set is available.
         if val_dataloader is not None and no_improve_epochs >= patience:
-            logger.info(f"Early stopping at epoch {epoch}: no val_loss improvement for {patience} epochs.")
+            logger.info(f"Early stopping at epoch {epoch}: neither val SAM nor "
+                        f"val recon-MSE improved for {patience} epochs.")
             return "early_stop"
 
-    if ckpt_path is not None:
-        logger.info(f"Best checkpoint saved to: {ckpt_path}")
+    for crit, path in ckpt_paths.items():
+        logger.info(f"Best-{crit} checkpoint (epoch {best_epoch[crit]}, "
+                    f"{best[crit]:.6f}): {path}")
     return "ok"
 
 
@@ -498,9 +625,29 @@ def main():
 
     amp_dtype = _pick_amp_dtype(device, logger)
 
-    # Checkpoint destination
-    ckpt_path = Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
-    ckpt_meta = {"model": args.model, "dataset": args.dataset, "loss_type": args.loss}
+    # Checkpoint destinations — one per selection criterion, and the seed is in
+    # the filename. It was not, so `--seed 1` and `--seed 2` overwrote each
+    # other, which would have made the seed-robustness runs measure nothing.
+    ckpt_dir = Path(args.ckpt_dir) / args.dataset
+    ckpt_paths = {
+        crit: ckpt_dir / checkpoint_name(args.model, args.loss, seed=seed, select=crit)
+        for crit in SELECT_CRITERIA
+    }
+    # `batch_size` and `platform` are recorded because batch size is NOT constant
+    # across platforms for a dataset (notebooks are sized for Kaggle's 2x15 GB,
+    # scripts for the lab's 20 GB). Any cross-platform comparison within one
+    # dataset therefore carries a batch confound, and it has to be auditable from
+    # the artifact rather than remembered.
+    ckpt_meta = {
+        "model": args.model,
+        "dataset": args.dataset,
+        "loss_type": args.loss,
+        "seed": seed,
+        "batch_size": batch_size,
+        "platform": platform.node(),
+        "lambda_physics": lambda_physics,
+        "beta": beta,
+    }
 
     # ---- Notifier FIRST -------------------------------------------------
     # Everything below here — dataloader construction, band-count verification,
@@ -515,6 +662,7 @@ def main():
         dataset=args.dataset,
         loss=args.loss,
         epochs_planned=epochs,
+        seed=seed,
     )
 
     resolved_cfg = {
@@ -541,6 +689,7 @@ def main():
         # ---- Band-count sanity check ----
         # Fails loudly here, with the dataset name and both numbers, rather than
         # 500 frames deep as an opaque assert inside SpectralBranch.forward.
+        preflight_vram(device, batch_size, logger)
         verify_channels(args.dataset, args.data_root)
 
         # ---- Dataloaders ----
@@ -666,7 +815,7 @@ def main():
             weight_decay=weight_decay,
             patience=patience,
             val_dataloader=val_loader,
-            ckpt_path=ckpt_path,
+            ckpt_paths=ckpt_paths,
             ckpt_meta=ckpt_meta,
             logger=logger,
             notifier=notifier,
@@ -686,7 +835,10 @@ def main():
                 pass
         raise
 
-    notifier.flush_run(status or "ok", extra=f"ckpt: {ckpt_path}")
+    notifier.flush_run(
+        status or "ok",
+        extra="ckpt: " + ", ".join(p.name for p in ckpt_paths.values()),
+    )
     if wandb_run is not None:
         try:
             wandb_run.finish(exit_code=0)

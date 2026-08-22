@@ -205,6 +205,10 @@ class _EpochRow:
     val_sam: Optional[float]
     train_kld: float
     val_kld: Optional[float]
+    # Report-only, validation-side. Defaults keep every existing positional
+    # construction valid (is_best was the only defaulted field before).
+    val_psnr: Optional[float] = None
+    val_ssim: Optional[float] = None
     is_best: bool = False
 
 
@@ -215,6 +219,7 @@ class RunNotifier:
     loss: str
     log_every: int = 10
     epochs_planned: Optional[int] = None
+    seed: Optional[int] = None
     tg: TelegramNotifier = field(default_factory=TelegramNotifier)
     _rows: list[_EpochRow] = field(default_factory=list)
     _latest: Optional[_EpochRow] = None
@@ -222,13 +227,23 @@ class RunNotifier:
     _best_val: Optional[float] = None
     _start_ts: float = field(default_factory=time.time)
     _last_epoch_seen: int = 0
+    # Short, per-process run id. Two concurrent launches of the same cell used
+    # to emit byte-identical [HB]/[OK] messages, so a duplicate grid was
+    # indistinguishable from the bot misbehaving — which is exactly how the v3
+    # double launch went unnoticed until the OOMs started. The id makes two
+    # interleaved runs visible at a glance.
+    run_id: str = field(default_factory=lambda: f"{os.getpid() % 100000:05d}")
 
     # ------------------------------------------------------------------
 
     def _header(self, badge: str) -> str:
+        tail = f"  <code>#{self.run_id}</code>"
+        if self.seed is not None:
+            tail = f" | seed <b>{self.seed}</b>" + tail
         return (
             f"{badge} <b>{html.escape(self.model)}</b> | "
             f"<b>{html.escape(self.dataset)}</b> | <b>{html.escape(self.loss)}</b>"
+            + tail
         )
 
     def send_start(self, config: Optional[dict] = None) -> bool:
@@ -260,6 +275,8 @@ class RunNotifier:
             val_sam=_maybe_float(metrics.get("val_sam")),
             train_kld=float(metrics.get("train_kld", float("nan"))),
             val_kld=_maybe_float(metrics.get("val_kld")),
+            val_psnr=_maybe_float(metrics.get("val_psnr")),
+            val_ssim=_maybe_float(metrics.get("val_ssim")),
         )
         self._rows.append(row)
         self._latest = row
@@ -296,13 +313,17 @@ class RunNotifier:
             f"{'mse':<8}{r.train_mse:>12.6f}{_fmt(r.val_mse, 12, 6):>12}",
             f"{'sam':<8}{r.train_sam:>12.6f}{_fmt(r.val_sam, 12, 6):>12}",
             f"{'kld':<8}{r.train_kld:>12.6f}{_fmt(r.val_kld, 12, 6):>12}",
+            # Report-only, val-side; comparable across all four models in a way
+            # `mse` is not (vae-our's `mse` is a 3-branch average).
+            f"{'psnr':<8}{'-':>12}{_fmt(r.val_psnr, 12, 2):>12}",
+            f"{'ssim':<8}{'-':>12}{_fmt(r.val_ssim, 12, 4):>12}",
         ]
         lines.append("<pre>" + html.escape("\n".join(rows)) + "</pre>")
 
         if self._best_epoch is not None and self._best_val is not None:
             lines.append(
-                f"best so far: epoch {self._best_epoch} "
-                f"(monitor={self._best_val:.6f})"
+                f"best SAM so far: epoch {self._best_epoch} "
+                f"(val_sam={self._best_val:.6f})"
             )
         return self.tg.send("\n".join(lines))
 
@@ -383,11 +404,20 @@ def _fmt(v: Optional[float], width: int = 9, prec: int = 4) -> str:
 
 
 def _format_table(rows: list[_EpochRow]) -> str:
+    """
+    Stride-10 summary table.
+
+    The train-side mse/sam columns were dropped when PSNR and SSIM were added:
+    at seven columns the header was already ~75 characters and Telegram wraps a
+    <pre> block past roughly that on mobile, which makes the table unreadable
+    rather than merely wide. The val columns are the ones a summary is read for;
+    tr_loss stays as the overfitting tell.
+    """
     has_val = any(r.val_loss is not None for r in rows)
     if has_val:
         header = (
-            f"{'ep':>4}  {'tr_loss':>9}  {'val_loss':>9}  "
-            f"{'tr_mse':>9}  {'val_mse':>9}  {'tr_sam':>8}  {'val_sam':>8}"
+            f"{'ep':>4}  {'tr_loss':>9}  {'val_loss':>9}  {'val_mse':>9}  "
+            f"{'val_sam':>8}  {'psnr':>7}  {'ssim':>7}"
         )
     else:
         header = f"{'ep':>4}  {'tr_loss':>9}  {'tr_mse':>9}  {'tr_sam':>8}"
@@ -398,12 +428,12 @@ def _format_table(rows: list[_EpochRow]) -> str:
         if has_val:
             line = (
                 f"{r.epoch:>4}  {r.train_loss:>9.4f}  {_fmt(r.val_loss):>9}  "
-                f"{r.train_mse:>9.4f}  {_fmt(r.val_mse):>9}  "
-                f"{r.train_sam:>8.4f}  {_fmt(r.val_sam):>8}"
+                f"{_fmt(r.val_mse):>9}  {_fmt(r.val_sam):>8}  "
+                f"{_fmt(r.val_psnr, 7, 2):>7}  {_fmt(r.val_ssim, 7, 4):>7}"
             )
         else:
             line = f"{r.epoch:>4}  {r.train_loss:>9.4f}  {r.train_mse:>9.4f}  {r.train_sam:>8.4f}"
         lines.append(line + marker)
     if any(r.is_best for r in rows):
-        lines.append("(*) new best val checkpoint")
+        lines.append("(*) new best val SAM checkpoint")
     return "\n".join(lines)

@@ -50,7 +50,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from inference.inference import compute_psnr, compute_ssim, load_model  # noqa: E402
 from modules.losses import spectral_angle_mapper_loss  # noqa: E402
-from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name  # noqa: E402
+from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name, resolve_checkpoint  # noqa: E402
 from utils.config import DATASETS, apply_dataset, settings  # noqa: E402
 from utils.hyperparams import apply_hyperparams, load_hyperparams  # noqa: E402
 from utils.training.dataloader import build_dataset  # noqa: E402
@@ -727,13 +727,18 @@ def p7_linear_probe(model, x, scenes, stats, cfg) -> dict:
 # Driver
 # ---------------------------------------------------------------------------
 
-def resolve_ckpt(model_name: str, dataset: str, loss: str, ckpt_dir: str) -> Path:
-    return Path(ckpt_dir) / dataset / checkpoint_name(model_name, loss)
+def resolve_ckpt(model_name, dataset, loss, ckpt_dir, seed=None, select="sam"):
+    """Locate one cell's checkpoint, honouring the seed axis and the two
+    selection criteria (see modules/registry.py:resolve_checkpoint)."""
+    return resolve_checkpoint(ckpt_dir, dataset, model_name, loss,
+                              seed=seed, select=select)
 
 
 def run_cell(model_name: str, dataset: str, loss: str, args, cfg,
              x, scenes, stats, device) -> dict:
-    ckpt = Path(args.ckpt) if args.ckpt else resolve_ckpt(model_name, dataset, loss, args.ckpt_dir)
+    ckpt = (Path(args.ckpt) if args.ckpt else
+            resolve_ckpt(model_name, dataset, loss, args.ckpt_dir,
+                         seed=args.seed, select=args.select))
     if not ckpt.is_file():
         return {"model": model_name, "dataset": dataset, "loss": loss,
                 "error": f"missing checkpoint {ckpt}", "verdict": "MISSING"}
@@ -791,6 +796,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--all-models", action="store_true")
     p.add_argument("--loss", default=None, choices=["standard", "physics"])
     p.add_argument("--ckpt-dir", default="model")
+    p.add_argument("--seed", type=int, default=None,
+                    help="Which training seed's checkpoint to evaluate. Omit when only one seed exists; required once several do, since picking implicitly would make the result depend on file order.")
+    p.add_argument("--select", choices=("sam", "mse"), default="sam",
+                    help="Which checkpoint to load: the epoch selected on best val SAM (default) or on best val reconstruction MSE. Every cell writes both; a comparison must read the SAME criterion for every model.")
     p.add_argument("--ckpt", default=None)
     p.add_argument("--split", default=None)
     p.add_argument("--packed-root", default=None)
@@ -839,7 +848,7 @@ def main() -> int:
     rc = 0
     for m, l in cells:
         res = run_cell(m, args.dataset, l, args, cfg, x, scenes, stats, device)
-        name = checkpoint_name(m, l).replace(".pt", "")
+        name = checkpoint_name(m, l, seed=args.seed, select=args.select).replace(".pt", "")
         (out_dir / f"{args.dataset}__{name}.json").write_text(json.dumps(res, indent=1))
         if res.get("error"):
             print(f"  {m:<24} {l:<9} {res['verdict']}  ({res['error']})")

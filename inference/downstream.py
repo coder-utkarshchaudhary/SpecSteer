@@ -43,7 +43,7 @@ import torch
 
 from inference.inference import compute_mse, compute_psnr, compute_ssim, load_model
 from modules.losses import spectral_angle_mapper_loss
-from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name
+from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name, resolve_checkpoint
 from utils.config import DATASETS, apply_dataset, settings
 from utils.logging_setup import get_console_logger, get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
@@ -199,15 +199,20 @@ def interpolation_smoothness(model, x, idx_a, idx_b, n_alpha, pixel):
 # Per-model driver
 # ---------------------------------------------------------------------------
 
-def resolve_ckpt(model_name, dataset, loss, ckpt_dir):
-    return Path(ckpt_dir) / dataset / checkpoint_name(model_name, loss)
+def resolve_ckpt(model_name, dataset, loss, ckpt_dir, seed=None, select="sam"):
+    """Locate one cell's checkpoint, honouring the seed axis and the two
+    selection criteria (see modules/registry.py:resolve_checkpoint)."""
+    return resolve_checkpoint(ckpt_dir, dataset, model_name, loss,
+                              seed=seed, select=select)
 
 
 def run_for_model(model_name, x, args, device, generator, logger):
     """Load one model's checkpoint and run both experiments; return a result dict."""
     # vae-our is physics-only; the baselines use the requested loss regime.
     loss = "physics" if model_name in PHYSICS_ONLY else args.loss
-    ckpt_file = Path(args.ckpt) if args.ckpt else resolve_ckpt(model_name, args.dataset, loss, args.ckpt_dir)
+    ckpt_file = (Path(args.ckpt) if args.ckpt else
+                 resolve_ckpt(model_name, args.dataset, loss, args.ckpt_dir,
+                              seed=args.seed, select=args.select))
     if not ckpt_file.exists():
         logger.warning(f"[skip] {model_name}: checkpoint not found ({ckpt_file})")
         return None
@@ -334,6 +339,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--packed-root", default=None,
                         help="Override the packed-shard dir (data/packed/<DS>).")
     parser.add_argument("--ckpt-dir", default="model", help="Checkpoint root (per-dataset subfolders).")
+    parser.add_argument("--seed", type=int, default=None,
+                    help="Which training seed's checkpoint to evaluate. Omit when only one seed exists; required once several do, since picking implicitly would make the result depend on file order.")
+    parser.add_argument("--select", choices=("sam", "mse"), default="sam",
+                    help="Which checkpoint to load: the epoch selected on best val SAM (default) or on best val reconstruction MSE. Every cell writes both; a comparison must read the SAME criterion for every model.")
     parser.add_argument("--ckpt", default=None,
                         help="Explicit checkpoint path (single-model runs only).")
     parser.add_argument("--split", default="test", choices=["train", "valid", "test"])

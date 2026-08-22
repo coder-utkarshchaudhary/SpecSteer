@@ -132,7 +132,7 @@ export EPOCHS="${EPOCHS:-100}"
 export USE_SHIPPED_VENV="${USE_SHIPPED_VENV:-1}"
 export PUSH_RESULTS_FROM_JOB="${PUSH_RESULTS_FROM_JOB:-0}"
 export COLLECTOR_INTERVAL="${COLLECTOR_INTERVAL:-120}"
-HPC_ARRAY_RANGE="${HPC_ARRAY_RANGE:-1-28}"
+HPC_ARRAY_RANGE="${HPC_ARRAY_RANGE:-1-60}"
 export DATASETS_SUBSET
 
 LOG_DIR="${REPO_ROOT}/logs"
@@ -696,7 +696,7 @@ cat <<EOF
 
     What happens next (automated):
       1. Smoke watcher polls qstat (two-hop) for the smoke job to finish.
-      2. If smoke passes -> waits ${SMOKE_DELAY_SECS:-600}s -> submits full ${FULL_ARRAY_RANGE:-1-28} grid.
+      2. If smoke passes -> waits ${SMOKE_DELAY_SECS:-600}s -> submits full ${FULL_ARRAY_RANGE:-1-60} grid.
          (Telegram: "[LAUNCHED] Full ablation grid submitted")
          -> starts the grid watcher, which polls each array slot and, the
             moment a slot finishes, pulls its checkpoint + logs back to the

@@ -59,14 +59,17 @@ echo "  cwd        : $(pwd)"
 echo "  ts         : ${TS}"
 echo "=========================================="
 
-# ---- resolve slot -> (model, dataset, loss, ckpt_name) --------------------
+# ---- resolve slot -> (model, dataset, loss, ckpt_name, seed) --------------
+# grid_lookup gained a trailing <seed> field when the seed axis landed, and
+# GRID_TOTAL went 28 -> 60. Set HPC_ARRAY_RANGE / FULL_ARRAY_RANGE accordingly.
 # shellcheck source=/dev/null
 source scripts/grid_manifest.sh
 CFG="$(grid_lookup "${ARRAY_IDX}")"
 MODEL="${CFG%%|*}"; REST="${CFG#*|}"
 DATASET="${REST%%|*}"; REST="${REST#*|}"
-LOSS="${REST%%|*}"
-CKPT_NAME="${REST#*|}"
+LOSS="${REST%%|*}"; REST="${REST#*|}"
+CKPT_NAME="${REST%%|*}"
+SEED="${REST#*|}"
 
 # In smoke mode we (a) point the checkpoint at a scratch dir so it does not
 # collide with a real run, and (b) reduce epochs so the smoke completes fast.
@@ -79,14 +82,18 @@ else
     RUN_EPOCHS="${EPOCHS}"
     RUN_TAG="FULL"
 fi
-CKPT_PATH="${CKPT_ROOT}/${DATASET}/${CKPT_NAME}.pt"
+# Two checkpoints per cell (best-SAM and best-recon-MSE), seed in the filename.
+CKPT_PATH="${CKPT_ROOT}/${DATASET}/${CKPT_NAME}_seed${SEED}_bestsam.pt"
+CKPT_PATH_MSE="${CKPT_ROOT}/${DATASET}/${CKPT_NAME}_seed${SEED}_bestmse.pt"
 
 echo "  mode       : ${RUN_TAG}"
 echo "  model      : ${MODEL}"
 echo "  dataset    : ${DATASET}"
 echo "  loss       : ${LOSS}"
 echo "  ckpt_name  : ${CKPT_NAME}"
+echo "  seed       : ${SEED}"
 echo "  ckpt_path  : ${CKPT_PATH}"
+echo "  ckpt_mse   : ${CKPT_PATH_MSE}"
 echo "  epochs     : ${RUN_EPOCHS}"
 echo "  overwrite  : ${OVERWRITE}"
 
@@ -97,8 +104,8 @@ echo "  overwrite  : ${OVERWRITE}"
 if [[ -s "${CKPT_PATH}" && "${OVERWRITE}" == "1" ]]; then
     echo ">>> [overwrite] ${CKPT_PATH} exists; retraining (OVERWRITE=1)."
 fi
-if [[ -s "${CKPT_PATH}" && "${OVERWRITE}" != "1" ]]; then
-    echo ">>> [skip] ${CKPT_PATH} exists; nothing to do."
+if [[ -s "${CKPT_PATH}" && -s "${CKPT_PATH_MSE}" && "${OVERWRITE}" != "1" ]]; then
+    echo ">>> [skip] both checkpoints for this cell exist; nothing to do."
     echo ">>>        re-submit with -v OVERWRITE=1 to retrain this slot."
     # Still worth a push attempt: this slot's ckpt could exist locally on the
     # compute node from an earlier partial run that never made it back to the
@@ -150,6 +157,7 @@ set +e
     --model "${MODEL}" \
     --dataset "${DATASET}" \
     --loss "${LOSS}" \
+    --seed "${SEED}" \
     --epochs "${RUN_EPOCHS}" \
     --num-workers "${NUM_WORKERS}" \
     --ckpt-dir "${CKPT_ROOT}" \

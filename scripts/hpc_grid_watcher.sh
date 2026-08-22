@@ -35,7 +35,7 @@
 #
 # Not intended to be invoked by hand — hpc_smoke_watcher.sh wires it up. But
 # it works standalone (e.g. to re-attach after the lab machine rebooted):
-#   HPC_FULL_JOBID=1234[].padum FULL_ARRAY_RANGE=1-28 bash scripts/hpc_grid_watcher.sh
+#   HPC_FULL_JOBID=1234[].padum FULL_ARRAY_RANGE=1-60 bash scripts/hpc_grid_watcher.sh
 
 set -uo pipefail
 
@@ -76,9 +76,9 @@ if [[ -z "${FULL_JOBID}" ]]; then
 fi
 
 # Assumes a plain "N-M" range (what hpc_launch.sh/hpc_config.env.example ever
-# produce). A PBS step range ("1-28:2") or comma list would break both the
+# produce). A PBS step range ("1-60:2") or comma list would break both the
 # count below and the slot loop further down — not handled.
-FULL_ARRAY_RANGE="${FULL_ARRAY_RANGE:-${HPC_ARRAY_RANGE:-1-28}}"
+FULL_ARRAY_RANGE="${FULL_ARRAY_RANGE:-${HPC_ARRAY_RANGE:-1-60}}"
 IFS='-' read -r RANGE_START RANGE_END <<< "${FULL_ARRAY_RANGE}"
 RANGE_START="${RANGE_START:-1}"
 RANGE_END="${RANGE_END:-${RANGE_START}}"

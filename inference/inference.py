@@ -17,51 +17,33 @@ import json
 from collections import OrderedDict
 from pathlib import Path
 
-import numpy as np
 import torch
 
 from modules.losses import spectral_angle_mapper_loss
-from modules.registry import MODEL_NAMES, build_model, checkpoint_name
+from modules.registry import MODEL_NAMES, build_model, resolve_checkpoint
 from utils.config import DATASETS, apply_dataset, settings
 from utils.logging_setup import get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
 
 
 # ---------------------------------------------------------------------------
-# Reconstruction metrics (batch tensors are channels-last (B, H, W, C), [0, 1])
+# Reconstruction metrics
 # ---------------------------------------------------------------------------
-
-def compute_mse(x, recon):
-    return torch.mean((x - recon) ** 2).item()
-
-
-def compute_psnr(x, recon, max_val=1.0):
-    mse = torch.mean((x - recon) ** 2).item()
-    if mse <= 0:
-        return float("inf")
-    return 10.0 * np.log10((max_val ** 2) / mse)
-
-
-def compute_ssim(x, recon, max_val=1.0):
-    """
-    Mean global SSIM over the batch (single-scale, per-sample, all bands pooled).
-    Lightweight port of the notebook helper — no windowing, sufficient as a
-    comparative reconstruction metric across the ablation.
-    """
-    c1 = (0.01 * max_val) ** 2
-    c2 = (0.03 * max_val) ** 2
-    scores = []
-    for i in range(x.shape[0]):
-        a = x[i].reshape(-1)
-        b = recon[i].reshape(-1)
-        mu_a, mu_b = a.mean(), b.mean()
-        va, vb = a.var(unbiased=False), b.var(unbiased=False)
-        cov = ((a - mu_a) * (b - mu_b)).mean()
-        ssim = ((2 * mu_a * mu_b + c1) * (2 * cov + c2)) / (
-            (mu_a ** 2 + mu_b ** 2 + c1) * (va + vb + c2)
-        )
-        scores.append(ssim.item())
-    return float(np.mean(scores))
+# These now live in modules/metrics.py and are re-exported here so the existing
+# call sites (and inference/downstream.py, inference/probes.py, which import
+# them from this module) keep working.
+#
+# NOTE — SSIM CHANGED. This file used to define a GLOBAL single-scale SSIM: one
+# mean and one variance per sample over the whole flattened cube, no windowing.
+# The notebooks meanwhile used an 11x11 Gaussian-windowed per-band SSIM. The two
+# were never comparable. modules/metrics.py keeps the windowed one, so SSIM
+# values reported before this change should not be compared against values
+# reported after it.
+from modules.metrics import (  # noqa: E402,F401
+    compute_mse,
+    compute_psnr,
+    compute_ssim,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +94,10 @@ def parse_args() -> argparse.Namespace:
                         help="Override the dataset's processed root.")
     parser.add_argument("--ckpt-dir", default="model",
                         help="Checkpoint root (per-dataset subfolders).")
+    parser.add_argument("--seed", type=int, default=None,
+                    help="Which training seed's checkpoint to evaluate. Omit when only one seed exists; required once several do, since picking implicitly would make the result depend on file order.")
+    parser.add_argument("--select", choices=("sam", "mse"), default="sam",
+                    help="Which checkpoint to load: the epoch selected on best val SAM (default) or on best val reconstruction MSE. Every cell writes both; a comparison must read the SAME criterion for every model.")
     parser.add_argument("--ckpt", default=None,
                         help="Explicit checkpoint path (overrides --ckpt-dir/--model/--loss).")
     parser.add_argument("--split", default="test", choices=["train", "valid", "test"])
@@ -137,7 +123,8 @@ def main():
 
     ckpt_file = (
         Path(args.ckpt) if args.ckpt
-        else Path(args.ckpt_dir) / args.dataset / checkpoint_name(args.model, args.loss)
+        else resolve_checkpoint(args.ckpt_dir, args.dataset, args.model, args.loss,
+                                seed=args.seed, select=args.select)
     )
     if not ckpt_file.exists():
         logger.error(f"Checkpoint not found: {ckpt_file}")

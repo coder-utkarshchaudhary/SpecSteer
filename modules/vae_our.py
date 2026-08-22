@@ -91,14 +91,31 @@ class HSI_DualStream_PI_VAE(nn.Module):
         """
         recon_final, recon_s, recon_p, mu_s, logvar_s, mu_p, logvar_p = self(x)
 
-        # Multi-branch reconstruction MSE.
+        # --- Multi-branch reconstruction MSE, as a weighted MEAN -------------
+        # The weights sum to 1, not 2. This matters, and it is not cosmetic.
+        #
+        # The previous form was `mse_final + 0.5*mse_spatial + 0.5*mse_spectral`
+        # (weights summing to 2) while every baseline uses a single MSE. With the
+        # three branches at similar error that made this model's reconstruction
+        # term ~2x the magnitude of any baseline's, so at a shared
+        # `lambda_physics` it trained at HALF the baselines' effective physics
+        # weight (0.15 against their 0.30) — on SAM, the metric the ablation is
+        # judged on. `beta` was doubly penalised the same way, since total_kld
+        # was a sum of two streams rather than their mean.
+        #
+        # Normalising both to means puts all four models' loss terms on one
+        # scale, so `beta` and `lambda_physics` mean the same thing everywhere.
+        # The branches, fusion, reparameterisation and architecture are
+        # untouched; only the weighting changes.
         mse_final = self.mse_loss_fn(recon_final, x)
         mse_spatial = self.mse_loss_fn(recon_s, x)
         mse_spectral = self.mse_loss_fn(recon_p, x)
-        total_mse = mse_final + 0.5 * mse_spatial + 0.5 * mse_spectral
+        total_mse = 0.5 * mse_final + 0.25 * mse_spatial + 0.25 * mse_spectral
 
-        # Combined KL (mean-form primitives; already batch-normalized).
-        total_kld = kl_divergence(mu_s, logvar_s) + kl_divergence(mu_p, logvar_p)
+        # Combined KL, mean of the two streams (mean-form primitives, so each is
+        # already batch-normalized; the 0.5 makes it comparable to a baseline's
+        # single kld rather than twice one).
+        total_kld = 0.5 * (kl_divergence(mu_s, logvar_s) + kl_divergence(mu_p, logvar_p))
 
         # Physics prior (SAM) on the fused reconstruction.
         sam = spectral_angle_mapper_loss(x, recon_final)
@@ -107,7 +124,13 @@ class HSI_DualStream_PI_VAE(nn.Module):
         if use_physics:
             loss = loss + lambda_physics * sam
 
-        return {"loss": loss, "mse": total_mse, "kld": total_kld, "sam": sam}
+        # `mse` is the training objective's reconstruction term (a 3-branch
+        # average, specific to this model). `mse_final` is the reconstruction
+        # MSE of the fused output — the ONLY one comparable to a baseline's
+        # `mse`. Reporting code must use `mse_final` for cross-model comparison.
+        return {"loss": loss, "mse": total_mse, "mse_final": mse_final,
+                "mse_spatial": mse_spatial, "mse_spectral": mse_spectral,
+                "kld": total_kld, "sam": sam, "recon": recon_final}
 
     @torch.no_grad()
     def reconstruct(self, x):
