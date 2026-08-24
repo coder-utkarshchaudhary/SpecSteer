@@ -29,7 +29,7 @@
 # 60 runs.
 
 # Datasets in the exact PBS array order.
-GRID_DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
+GRID_DATASETS=("M3" "IIRS" "AVIRIS" "CRIMS")
 
 # Seeds. Override with e.g. GRID_SEEDS="42 7" to split work across machines.
 # shellcheck disable=SC2206
@@ -40,12 +40,12 @@ GRID_SEEDS=(${GRID_SEEDS:-42 7 1234})
 #   "<model>|<loss>|<ckpt_stem>|<claim:1|0>"
 GRID_CONFIGS=(
     "vae-our|physics|vae-our|1"
-    "vae-standard|physics|vae-standard_physics|1"
-    "vae-3d-spatio-spectral|physics|vae-3d-spatio-spectral_physics|1"
-    "vae-1d-pixelwise|physics|vae-1d-pixelwise_physics|1"
     "vae-standard|standard|vae-standard_standard|0"
-    "vae-3d-spatio-spectral|standard|vae-3d-spatio-spectral_standard|0"
+    "vae-standard|physics|vae-standard_physics|1"
     "vae-1d-pixelwise|standard|vae-1d-pixelwise_standard|0"
+    "vae-1d-pixelwise|physics|vae-1d-pixelwise_physics|1"
+    "vae-3d-spatio-spectral|physics|vae-3d-spatio-spectral_physics|1"
+    "vae-3d-spatio-spectral|standard|vae-3d-spatio-spectral_standard|0"
 )
 
 GRID_CONFIGS_PER_DATASET=${#GRID_CONFIGS[@]}   # 7
