@@ -29,7 +29,7 @@
 # 60 runs.
 
 # Datasets in the exact PBS array order.
-GRID_DATASETS=("M3" "IIRS" "AVIRIS" "CRIMS")
+GRID_DATASETS=("IIRS" "AVIRIS" "CRIMS")
 
 # Seeds. Override with e.g. GRID_SEEDS="42 7" to split work across machines.
 # shellcheck disable=SC2206
