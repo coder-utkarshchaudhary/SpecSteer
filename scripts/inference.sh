@@ -26,6 +26,7 @@
 # Environment overrides:
 #   CKPT_DIR     — checkpoint root directory   (default: model)
 #   OUT_DIR      — results root                (default: results)
+#   PACKED_ROOT  — packed-shard root           (default: data/packed)
 #   MAX_PATCHES  — probe sampling cap          (default: from preregistration)
 #   PROBE_BATCH  — probe forward chunk size    (default: from preregistration)
 
@@ -38,13 +39,19 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
 CKPT_DIR="${CKPT_DIR:-model}"
 OUT_DIR="${OUT_DIR:-results}"
+PACKED_ROOT="${PACKED_ROOT:-data/packed}"
 INFER_JSON_DIR="${OUT_DIR}/inference"
 DOWNSTREAM_DIR="${OUT_DIR}/downstream"
 PROBES_DIR="${OUT_DIR}/probes"
 
 cd "${REPO_ROOT}"
 
-ALL_DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
+# One source of truth for which datasets the grid covers — the grid manifest.
+# ALL_DATASETS used to be a second hard-coded list here and it drifted (M3 was
+# dropped from the manifest but not from here).
+# shellcheck source=scripts/grid_manifest.sh
+source "${SCRIPT_DIR}/grid_manifest.sh"
+ALL_DATASETS=("${GRID_DATASETS[@]}")
 DATASETS=("${ALL_DATASETS[@]}")
 SEND_TELEGRAM=1
 SELECT="${SELECT:-sam}"
@@ -71,6 +78,10 @@ while [[ $# -gt 0 ]]; do
             PROBE_ARGS+=(--max-patches "$2"); shift 2 ;;
         --probe-batch)
             PROBE_ARGS+=(--probe-batch "$2"); shift 2 ;;
+        --n-random-draws)
+            PROBE_ARGS+=(--n-random-draws "$2"); shift 2 ;;
+        --packed-root)
+            PACKED_ROOT="$2"; shift 2 ;;
         # Which of each cell's TWO checkpoints to evaluate. Every cell writes
         # best-val-SAM and best-val-recon-MSE; a comparison must read the SAME
         # criterion for every model or it is not a comparison.
@@ -102,6 +113,32 @@ for ds in "${DATASETS[@]}"; do
 done
 
 STANDARD_MODELS=("vae-standard" "vae-3d-spatio-spectral" "vae-1d-pixelwise")
+
+# ---- Packed-shard preflight ---------------------------------------------------
+# Training ran on data/packed/<DS>/{train,valid,test}.npy and the requirement is
+# that evaluation runs on the same test.npy patches. build_dataset() does NOT
+# fail on a missing shard — it logs a WARNING and silently falls back to the
+# legacy per-patch tree, which is a different (and far slower) code path. Make
+# the shard a hard precondition so that can't happen unnoticed.
+#   - test.npy  : the split every step evaluates on
+#   - train.npy : probes.py needs it for the P1 trivial floors and P5 baseline
+MISSING_SHARDS=()
+for ds in "${DATASETS[@]}"; do
+    for split in train test; do
+        shard="${PACKED_ROOT}/${ds}/${split}.npy"
+        [[ -s "${shard}" ]] || MISSING_SHARDS+=("${shard}")
+    done
+done
+if [[ ${#MISSING_SHARDS[@]} -gt 0 ]]; then
+    echo "ERROR: packed shard(s) missing — evaluation must run on test.npy patches,"
+    echo "       not the legacy per-patch fallback. Missing:"
+    for s in "${MISSING_SHARDS[@]}"; do echo "         ${s}"; done
+    echo ""
+    echo "  Build them with:"
+    echo "    PYTHONPATH=. python utils/dataset/pack.py --verify"
+    echo "  or point PACKED_ROOT at a staged copy."
+    exit 4
+fi
 
 mkdir -p "${INFER_JSON_DIR}" "${DOWNSTREAM_DIR}" "${PROBES_DIR}"
 
@@ -163,40 +200,49 @@ run_inference() {
     fi
     echo ">>> inference  ${m} | ${ds} | ${loss}${sfx} [${SELECT}]"
     if ! python inference/inference.py --model "${m}" --dataset "${ds}" --loss "${loss}" \
-            --ckpt-dir "${CKPT_DIR}" --out-json "${out_json}" \
+            --ckpt-dir "${CKPT_DIR}" --packed-root "${PACKED_ROOT}/${ds}" --out-json "${out_json}" \
             --select "${SELECT}" ${seed_args[@]+"${seed_args[@]}"} "${EXTRA_ARGS[@]}"; then
         echo "!!! inference failed: ${m} | ${ds} | ${loss}${sfx}"
         FAILED+=("infer|${m}|${ds}|${loss}${sfx}")
     fi
 }
 
-# ---- Step 1: 28-cell reconstruction sweep ---------------------------------
+# ---- Step 1: reconstruction sweep ---------------------------------------------
+# The grid manifest trains the standard-loss baselines at the FIRST seed only
+# (the claim is about the physics regime); the physics cells get every seed. So
+# the standard-loss rows here run only for SEEDS[0], and every seed runs physics.
 if (( DO_RECON )); then
 for ds in "${DATASETS[@]}"; do
   for seed in "${SEEDS[@]}"; do
     run_inference vae-our "${ds}" physics vae-our "${seed}"
     for m in "${STANDARD_MODELS[@]}"; do
-        for loss in standard physics; do
-            run_inference "${m}" "${ds}" "${loss}" "${m}_${loss}" "${seed}"
-        done
+        run_inference "${m}" "${ds}" physics "${m}_physics" "${seed}"
+        if [[ "${seed}" == "${SEEDS[0]}" ]]; then
+            run_inference "${m}" "${ds}" standard "${m}_standard" "${seed}"
+        fi
     done
   done
 done
 fi
 
-# ---- Step 2: falsification suite (one call per dataset, all models) -------
-# One call per dataset rather than per cell: the trivial-predictor floors and
-# the 1000-draw random null are model-independent and get computed once and
-# reused across that dataset's seven cells.
+# ---- Step 2: falsification suite (one call per dataset x seed, all models) ----
+# One call rather than per cell: the trivial-predictor floors and the 1000-draw
+# random null are model-independent and are computed once per (dataset, seed)
+# and reused across that call's cells (inference/probes.py:p1_shared_floors).
+# For seeds after the first, only the physics cells exist, so --losses physics.
 if (( DO_PROBES )); then
 for ds in "${DATASETS[@]}"; do
   for seed in "${SEEDS[@]}"; do
     probe_seed_args=(); [[ -n "${seed}" ]] && probe_seed_args=(--seed "${seed}")
+    probe_loss_args=()
+    [[ -n "${seed}" && "${seed}" != "${SEEDS[0]}" ]] && probe_loss_args=(--losses physics)
     echo ""
     echo ">>> probes ${ds}${seed:+ seed ${seed}} [${SELECT}]"
     if ! python inference/probes.py --dataset "${ds}" --all-models \
-            --ckpt-dir "${CKPT_DIR}" --out-dir "${PROBES_DIR}" \
+            --ckpt-dir "${CKPT_DIR}" --packed-root "${PACKED_ROOT}/${ds}" \
+            --out-dir "${PROBES_DIR}" \
             --select "${SELECT}" ${probe_seed_args[@]+"${probe_seed_args[@]}"} \
+            ${probe_loss_args[@]+"${probe_loss_args[@]}"} \
             ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}; then
         echo "!!! probes failed for ${ds}${seed:+ seed ${seed}}"
         FAILED+=("probes|${ds}|seed${seed}")
@@ -205,13 +251,14 @@ for ds in "${DATASETS[@]}"; do
 done
 fi
 
-# ---- Step 3: downstream (one call per dataset) ----------------------------
+# ---- Step 3: downstream (one call per dataset, first seed) -------------------
 if (( DO_DOWNSTREAM )); then
 for ds in "${DATASETS[@]}"; do
     echo ">>> downstream ${ds}"
     ds_seed_args=(); [[ -n "${SEEDS[0]}" ]] && ds_seed_args=(--seed "${SEEDS[0]}")
     if ! python inference/downstream.py --dataset "${ds}" --save-plots \
-            --ckpt-dir "${CKPT_DIR}" --out-dir "${DOWNSTREAM_DIR}" \
+            --ckpt-dir "${CKPT_DIR}" --packed-root "${PACKED_ROOT}/${ds}" \
+            --out-dir "${DOWNSTREAM_DIR}" \
             --select "${SELECT}" ${ds_seed_args[@]+"${ds_seed_args[@]}"}; then
         echo "!!! downstream failed for ${ds}"
         FAILED+=("downstream|${ds}")

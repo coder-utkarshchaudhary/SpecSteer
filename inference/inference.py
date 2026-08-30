@@ -14,6 +14,7 @@ Run from the repo root with PYTHONPATH set:
 
 import argparse
 import json
+import math
 from collections import OrderedDict
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import torch
 from modules.losses import spectral_angle_mapper_loss
 from modules.registry import MODEL_NAMES, build_model, resolve_checkpoint
 from utils.config import DATASETS, apply_dataset, settings
+from utils.hyperparams import apply_hyperparams, load_hyperparams
 from utils.logging_setup import get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
 
@@ -44,6 +46,11 @@ from modules.metrics import (  # noqa: E402,F401
     compute_psnr,
     compute_ssim,
 )
+
+
+def compute_psnr_from_mse(mse: float, data_range: float = 1.0) -> float:
+    """PSNR (dB) from an already-pooled MSE. data_range matches modules/metrics.py."""
+    return 10.0 * math.log10(data_range ** 2 / max(mse, 1e-12))
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +123,11 @@ def main():
     # actually on disk, so a mismatch fails here with both numbers rather
     # than as an opaque assert inside SpectralBranch.forward.
     apply_dataset(args.dataset, verify=True, processed_root=args.data_root)
+    # The per-dataset YAML sets the latent-rate and capacity knobs the model was
+    # TRAINED with. Without this the model is rebuilt at the Settings dataclass
+    # defaults and load_state_dict fails on a size mismatch for every cell.
+    # Mirrors train/train.py:588-590.
+    apply_hyperparams(settings, load_hyperparams(args.dataset))
 
     logger = get_run_logger(
         "inference", args.model, args.dataset, loss=args.loss, ts=timestamp(),
@@ -139,7 +151,7 @@ def main():
     logger.info(f"  device   : {device}")
     logger.info("==============================================")
 
-    model, _ = load_model(args.model, ckpt_file, device)
+    model, ckpt_meta = load_model(args.model, ckpt_file, device)
 
     loader = build_dataloader(
         args.dataset, args.split,
@@ -148,33 +160,49 @@ def main():
         batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
     )
 
-    mse_sum = sam_sum = psnr_sum = ssim_sum = 0.0
-    n = 0
+    # Sample-weighted, not batch-count-weighted: the test split runs with
+    # drop_last=False, so a short final batch (CRIMS: 369 patches at batch 16 ->
+    # a last batch of 1) would otherwise carry the same weight as a full one.
+    # MSE/SAM are means over elements/pixels, so weighting each batch mean by its
+    # sample count and dividing by the total recovers the split-wide mean; PSNR
+    # is derived once from the pooled MSE rather than averaged in dB.
+    mse_wsum = sam_wsum = ssim_wsum = 0.0
+    n_samples = 0
+    n_batches = 0
     with torch.no_grad():
         for x in loader:
             x = x.to(device)
+            b = x.shape[0]
             recon = model.reconstruct(x)
-            mse_sum += compute_mse(x, recon)
-            sam_sum += spectral_angle_mapper_loss(x, recon).item()
-            psnr_sum += compute_psnr(x, recon)
-            ssim_sum += compute_ssim(x, recon)
-            n += 1
+            mse_wsum += compute_mse(x, recon) * b
+            sam_wsum += spectral_angle_mapper_loss(x, recon).item() * b
+            ssim_wsum += compute_ssim(x, recon) * b
+            n_samples += b
+            n_batches += 1
 
-    n = max(n, 1)
+    n_samples = max(n_samples, 1)
+    mse = mse_wsum / n_samples
     metrics = {
         "model": args.model,
         "dataset": args.dataset,
         "loss": args.loss,
+        "seed": args.seed,
+        "select": args.select,
         "ckpt": str(ckpt_file),
         "split": args.split,
-        "n_batches": n,
+        "n_batches": n_batches,
         "n_samples": len(loader.dataset),
-        "mse": mse_sum / n,
-        "sam_rad": sam_sum / n,
-        "psnr": psnr_sum / n,
-        "ssim": ssim_sum / n,
+        "mse": mse,
+        "sam_rad": sam_wsum / n_samples,
+        "psnr": float(compute_psnr_from_mse(mse)),
+        "ssim": ssim_wsum / n_samples,
+        "trained_epochs": ckpt_meta.get("epoch"),
+        "batch_size_trained": ckpt_meta.get("batch_size"),
+        "platform_trained": ckpt_meta.get("platform"),
+        "lambda_physics": ckpt_meta.get("lambda_physics"),
+        "beta": ckpt_meta.get("beta"),
     }
-    logger.info(f"Results over {metrics['n_samples']} {args.split} patches ({n} batches):")
+    logger.info(f"Results over {metrics['n_samples']} {args.split} patches ({n_batches} batches):")
     logger.info(f"  MSE  : {metrics['mse']:.6f}")
     logger.info(f"  SAM  : {metrics['sam_rad']:.6f} rad")
     logger.info(f"  PSNR : {metrics['psnr']:.4f} dB")

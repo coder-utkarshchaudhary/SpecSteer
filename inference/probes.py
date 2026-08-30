@@ -238,24 +238,20 @@ def train_statistics(dataset: str, cfg: dict, packed_root=None, data_root=None) 
 # P1 — Trivial-predictor floors
 # ---------------------------------------------------------------------------
 
-def p1_trivial_floors(x, model_recon, stats, scenes, cfg, device) -> dict:
+def p1_shared_floors(x, stats, scenes, cfg) -> dict:
     """
-    Compare the model against predictors that contain no learning at all.
-
-    A model that cannot beat "broadcast the mean spectrum" has learned nothing,
-    however good its absolute numbers look. `mean_patch` — the patch's own
-    spatial-mean spectrum — is the strongest of these and needs no training set
-    whatsoever, so it is the one that really bites.
-
-    Also computes the identity oracle. A perfect copy does NOT score 0 on SAM
-    (measured: 0.0223 on IIRS) because of the epsilon in its norm, so the oracle
-    is the true ceiling and "headroom captured" is measured against it, not
-    against zero.
+    The MODEL-INDEPENDENT half of P1: the trivial-predictor floors, the
+    1000-draw random null, and the identity oracle. All of it is a function of
+    the shared patch sample and the train statistics only, so it is computed
+    ONCE per (dataset, seed) and reused across that cell's seven models --
+    exactly as inference/scripts/inference.sh already claims in its comments.
+    The random null alone is ~20 min of a run; recomputing it per cell was
+    multiplying that by five.
     """
     p = cfg["p1_trivial_floors"]
     eps = p["sam_valid_min_energy"]
     B, H, W, C = x.shape
-    out = {"baselines": {}}
+    shared = {"baselines": {}, "random_arrays": {}}
 
     def bcast(spec):
         return torch.as_tensor(spec, device=x.device).view(1, 1, 1, C).expand(B, H, W, C).contiguous()
@@ -273,11 +269,13 @@ def p1_trivial_floors(x, model_recon, stats, scenes, cfg, device) -> dict:
         cands["mean_region"] = sm.view(B, 1, 1, C).expand(B, H, W, C).contiguous()
 
     for name, pred in cands.items():
-        out["baselines"][name] = metrics(x, pred, eps)
+        shared["baselines"][name] = metrics(x, pred, eps)
 
     # Random null: an empirical distribution rather than a single draw, so the
     # model's score gets an exact percentile instead of a hand-waved "better
-    # than noise".
+    # than noise". The per-draw metric ARRAYS are kept (not just their means)
+    # because the per-cell percentile test compares them against that cell's
+    # own reconstruction score.
     rng = np.random.default_rng(cfg["sampling"]["seed"] + 2)
     lo, hi = float(x.min()), float(x.max())
     mu = torch.as_tensor(stats["mean_spectrum"], device=x.device).view(1, 1, 1, C)
@@ -294,28 +292,55 @@ def p1_trivial_floors(x, model_recon, stats, scenes, cfg, device) -> dict:
 
     for name, ds_ in draws.items():
         arr = {k: np.array([d[k] for d in ds_]) for k in ds_[0]}
-        out["baselines"][name] = {k: float(np.nanmean(v)) for k, v in arr.items()}
-        out[f"{name}_best"] = {
+        shared["random_arrays"][name] = {k: v.tolist() for k, v in arr.items()}
+        shared["baselines"][name] = {k: float(np.nanmean(v)) for k, v in arr.items()}
+        shared[f"{name}_best"] = {
             "psnr": float(np.nanmax(arr["psnr"])),
             "ssim": float(np.nanmax(arr["ssim"])),
             "sam": float(np.nanmin(arr["sam"])),
         }
-        out[f"{name}_percentile"] = {
-            "psnr": float(np.mean(arr["psnr"] >= model_recon["psnr"])),
-            "sam": float(np.mean(arr["sam"] <= model_recon["sam"])),
-        }
 
-    out["identity_oracle"] = metrics(x, x.clone(), eps)
+    shared["identity_oracle"] = metrics(x, x.clone(), eps)
 
-    # Best floor per metric, then the preregistered lift test.
-    fl = out["baselines"]
-    best = {
+    fl = shared["baselines"]
+    shared["best_floor"] = {
         "psnr": max(v["psnr"] for v in fl.values()),
         "ssim": max(v["ssim"] for v in fl.values()),
         "sam": min(v["sam"] for v in fl.values()),
         "sam_valid": min(v["sam_valid"] for v in fl.values()),
     }
-    out["best_floor"] = best
+    return shared
+
+
+def p1_trivial_floors(model_recon, shared, cfg) -> dict:
+    """
+    The PER-CELL half of P1: score this model's reconstruction against the
+    shared floors and the random null, and apply the preregistered lift test.
+
+    A model that cannot beat "broadcast the mean spectrum" has learned nothing,
+    however good its absolute numbers look. `mean_patch` -- the patch's own
+    spatial-mean spectrum -- is the strongest of these and needs no training set
+    whatsoever, so it is the one that really bites.
+
+    The identity oracle in `shared` is the true ceiling (a perfect copy scores
+    ~0.0223 on IIRS SAM, not 0, because of the norm epsilon), so "headroom
+    captured" is measured against it rather than against zero.
+    """
+    p = cfg["p1_trivial_floors"]
+    out = {
+        "baselines": shared["baselines"],
+        "identity_oracle": shared["identity_oracle"],
+        "best_floor": shared["best_floor"],
+    }
+    for name in ("random_uniform", "random_normal"):
+        arr = {k: np.asarray(v) for k, v in shared["random_arrays"][name].items()}
+        out[f"{name}_best"] = shared[f"{name}_best"]
+        out[f"{name}_percentile"] = {
+            "psnr": float(np.mean(arr["psnr"] >= model_recon["psnr"])),
+            "sam": float(np.mean(arr["sam"] <= model_recon["sam"])),
+        }
+
+    best = shared["best_floor"]
     lift = p["min_lift_over_best_floor"]
     checks = {
         "psnr": model_recon["psnr"] - best["psnr"] >= lift["psnr_db"],
@@ -735,7 +760,7 @@ def resolve_ckpt(model_name, dataset, loss, ckpt_dir, seed=None, select="sam"):
 
 
 def run_cell(model_name: str, dataset: str, loss: str, args, cfg,
-             x, scenes, stats, device) -> dict:
+             x, scenes, stats, device, p1_shared) -> dict:
     ckpt = (Path(args.ckpt) if args.ckpt else
             resolve_ckpt(model_name, dataset, loss, args.ckpt_dir,
                          seed=args.seed, select=args.select))
@@ -753,12 +778,13 @@ def run_cell(model_name: str, dataset: str, loss: str, args, cfg,
 
     res = {
         "model": model_name, "dataset": dataset, "loss": loss,
+        "seed": args.seed, "select": args.select,
         "checkpoint": str(ckpt), "n_patches": int(xd.shape[0]),
         "trained_epochs": ckpt_meta.get("epoch"),
         "best_val_loss": ckpt_meta.get("loss"),
         "preregistration": cfg.get("registered_on"),
         "reconstruction": recon_m,
-        "P1_trivial_floors": p1_trivial_floors(xd, recon_m, stats, scenes, cfg, device),
+        "P1_trivial_floors": p1_trivial_floors(recon_m, p1_shared, cfg),
         "P2_latent_budget": p2_latent_budget(model, xd, model_name, cfg),
         "P3_collapse": p3_collapse(model, xd, cfg, eps),
         "P4_spatial_reliance": p4_spatial_reliance(model, xd, model_name, cfg, eps),
@@ -795,6 +821,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--model", choices=list(MODEL_NAMES))
     p.add_argument("--all-models", action="store_true")
     p.add_argument("--loss", default=None, choices=["standard", "physics"])
+    p.add_argument("--losses", nargs="+", choices=["standard", "physics"], default=None,
+                   help="With --all-models: restrict to these loss regimes. "
+                        "Used to run only the physics cells for seeds that have "
+                        "no standard-loss checkpoints (the manifest trains those "
+                        "at the first seed only).")
     p.add_argument("--ckpt-dir", default="model")
     p.add_argument("--seed", type=int, default=None,
                     help="Which training seed's checkpoint to evaluate. Omit when only one seed exists; required once several do, since picking implicitly would make the result depend on file order.")
@@ -806,6 +837,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-root", default=None)
     p.add_argument("--max-patches", type=int, default=None,
                    help="Override the preregistered sampling cap (0 = whole split).")
+    p.add_argument("--n-random-draws", type=int, default=None,
+                   help="Override p1_trivial_floors.n_random_draws. For the smoke "
+                        "harness only — the real run must use the preregistered 1000.")
     p.add_argument("--probe-batch", type=int, default=None,
                    help="Chunk size for model forwards inside probes "
                         "(memory only; does not change results).")
@@ -818,6 +852,8 @@ def main() -> int:
     cfg = load_prereg()
     if args.max_patches is not None:
         cfg["sampling"]["max_patches"] = args.max_patches
+    if args.n_random_draws is not None:
+        cfg["p1_trivial_floors"]["n_random_draws"] = args.n_random_draws
     global PROBE_BATCH
     PROBE_BATCH = (args.probe_batch
                    or cfg["sampling"].get("probe_batch", PROBE_BATCH))
@@ -833,10 +869,19 @@ def main() -> int:
     stats = train_statistics(args.dataset, cfg, args.packed_root, args.data_root)
     print(f"  train statistics from {stats['n_used']} patches")
 
+    # The model-independent half of P1 (trivial floors + 1000-draw random null +
+    # identity oracle): computed once here, reused across every cell below.
+    xd = x.to(device)
+    p1_shared = p1_shared_floors(xd, stats, scenes, cfg)
+    print(f"  P1 shared floors + {cfg['p1_trivial_floors']['n_random_draws']}-draw "
+          f"random null computed once")
+
     cells = []
     if args.all_models:
         for m in MODEL_NAMES:
             losses = ["physics"] if m in PHYSICS_ONLY else ["standard", "physics"]
+            if args.losses:
+                losses = [l for l in losses if l in args.losses]
             cells += [(m, l) for l in losses]
     else:
         m = args.model or "vae-our"
@@ -847,7 +892,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     rc = 0
     for m, l in cells:
-        res = run_cell(m, args.dataset, l, args, cfg, x, scenes, stats, device)
+        res = run_cell(m, args.dataset, l, args, cfg, x, scenes, stats, device, p1_shared)
         name = checkpoint_name(m, l, seed=args.seed, select=args.select).replace(".pt", "")
         (out_dir / f"{args.dataset}__{name}.json").write_text(json.dumps(res, indent=1))
         if res.get("error"):

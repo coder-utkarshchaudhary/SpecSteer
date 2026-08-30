@@ -1,8 +1,31 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-08-21
+> **Last updated:** 2026-08-30
 > **Status:** All 4 ablation models + downstream experiments + falsification
 > suite implemented. IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay.
+>
+> **2026-08-30 grid — M3 dropped, 45 slots, ran to completion on the lab box.**
+> `scripts/grid_manifest.sh` is now `GRID_DATASETS=(IIRS AVIRIS CRIMS)`. 44/45
+> `[OK]`/`[STOP]`; the log export was taken with the last cell
+> (`vae-3d|CRIMS|standard`) mid-run. `vae-standard|IIRS|standard` and
+> `vae-3d|IIRS|standard` reproduced the π/2 decoder collapse (§10.5) at 50
+> epochs — P3 marks those INVALID, as intended. `vae-our` vs `vae-1d` on IIRS is
+> ~0.0005–0.0008 rad SAM, at the nondeterminism floor; the seed axis + effect
+> floor adjudicate it.
+>
+> **`scripts/inference.sh` now runs end to end.** It was broken in three steps:
+> `inference.py`/`downstream.py` never called `apply_hyperparams`, so every
+> model rebuilt at the `Settings` defaults and `load_state_dict` failed on a
+> size mismatch; `downstream.py` also crashed on import (sibling `inference.py`
+> shadowed the package) and defined `--seed` twice (RNG seed is now
+> `--rng-seed`). Also: a hard packed-shard preflight (no more silent legacy
+> fallback — eval runs on `test.npy`), sample-weighted metric accumulation in
+> `inference.py` (the short final test batch was over-weighted), seed/select
+> columns through `probes.csv`/`stats.csv`/`ablation_table.csv` (the Holm family
+> was comparing `vae-our` against itself across seeds), and P1's 1000-draw
+> random null hoisted to once per (dataset, seed) — ~3× faster, identical
+> numbers. `scripts/inference_smoke.sh` drives the whole thing on synthetic
+> fixtures (CPU, ~15 min) — run it before the real ~2–3 h sweep.
 >
 > **v3 grid post-mortem — the OOMs were a DOUBLE LAUNCH, not a memory
 > regression.** All 47 OOM messages name a second multi-GiB process on the card;
@@ -104,8 +127,8 @@ data/processed/<folder>/
 | `modules/metrics.py` | **Single** PSNR/SSIM implementation (windowed SSIM) | ✅ New |
 | `modules/registry.py` | CLI name → model class; model contract | ✅ |
 | `train/train.py` | Training loop, wandb, CLI, checkpointing | ✅ Rewritten |
-| `inference/inference.py` | Reconstruction eval (MSE/SAM/PSNR/SSIM) | ✅ |
-| `inference/downstream.py` | Latent noise-injection + interpolation experiments | ✅ |
+| `inference/inference.py` | Reconstruction eval (MSE/SAM/PSNR/SSIM); applies the per-dataset YAML, sample-weighted | ✅ Fixed |
+| `inference/downstream.py` | Latent noise-injection + interpolation experiments (RNG seed is `--rng-seed`) | ✅ Fixed |
 | `inference/probes.py` | **Falsification suite — 7 probes on frozen models** | ✅ New |
 | `inference/preregistration.yaml` | Thresholds, fixed before any run | ✅ New |
 | `inference/stats.py` | Paired bootstrap / permutation / Holm / effect sizes | ✅ New |
@@ -116,6 +139,9 @@ data/processed/<folder>/
 | `scripts/preprocess.sh` | One-command preprocessing runner | ✅ New |
 | `scripts/train.sh` | Training runner (single run or full 28-run grid, `--overwrite`) | ✅ |
 | `scripts/train_fixed.sh` | **pack → zip → smoke → full grid, one command** | ✅ New |
+| `scripts/inference.sh` | recon + probes + downstream + verdict + aggregate; packed-shard preflight, dataset list from the manifest | ✅ Fixed |
+| `scripts/inference_smoke.sh` | drive `inference.sh` end to end on synthetic fixtures (CPU) before the real sweep | ✅ New |
+| `scripts/_smoke_fixtures.py` | build the synthetic shards + checkpoints for `inference_smoke.sh` (not a general utility) | ✅ New |
 | `docs/file_processing.py` | Reference script (do not modify) | — |
 
 ### Ablation models & the model contract
@@ -1101,7 +1127,8 @@ produced a wall time at all. Run the M3 curve first; price the rest afterwards.
 ### Running it
 
 ```bash
-bash scripts/inference.sh                      # recon + probes + downstream + verdict
+bash scripts/inference_smoke.sh               # FIRST — synthetic end-to-end check (~15 min CPU)
+bash scripts/inference.sh                      # recon + probes + downstream + verdict (~2–3 h GPU)
 bash scripts/inference.sh --select mse         # read the best-recon-MSE ckpts instead
 bash scripts/inference.sh --seeds 42,7,1234    # default: every seed found on disk
 bash scripts/inference.sh --probes-only        # just the suite

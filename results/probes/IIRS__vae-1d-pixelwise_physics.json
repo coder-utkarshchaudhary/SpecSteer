@@ -1,7 +1,0 @@
-{
- "model": "vae-1d-pixelwise",
- "dataset": "IIRS",
- "loss": "physics",
- "error": "missing checkpoint model/IIRS/vae-1d-pixelwise_physics.pt",
- "verdict": "MISSING"
-}

@@ -49,7 +49,8 @@ def load_inference_rows(inference_dir: Path) -> list[dict]:
             print(f"[warn] failed to parse {path}: {e}")
             continue
         rows.append(data)
-    rows.sort(key=lambda r: (r.get("dataset", ""), r.get("model", ""), r.get("loss", "")))
+    rows.sort(key=lambda r: (r.get("dataset", ""), r.get("model", ""), r.get("loss", ""),
+                             r.get("seed") or 0, r.get("select", "")))
     return rows
 
 
@@ -108,7 +109,8 @@ def _diff(a: Optional[dict], b: Optional[dict], k: str) -> Optional[float]:
 # Rendering
 # ---------------------------------------------------------------------------
 
-INFERENCE_COLS = ["dataset", "model", "loss", "mse", "sam_rad", "psnr", "ssim", "n_samples"]
+INFERENCE_COLS = ["dataset", "model", "loss", "seed", "select",
+                  "mse", "sam_rad", "psnr", "ssim", "n_samples"]
 DOWNSTREAM_COLS = ["dataset", "model", "loss", "psnr_clean", "psnr_mid",
                    "psnr_drop", "sam_mid", "jaggedness", "path_length"]
 

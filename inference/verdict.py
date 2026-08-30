@@ -61,6 +61,7 @@ def flatten(c: dict) -> dict:
     r = c["reconstruction"]
     row = {
         "dataset": c["dataset"], "model": c["model"], "loss": c["loss"],
+        "seed": c.get("seed"), "select": c.get("select"),
         "verdict": c["verdict"], "reason": c.get("verdict_reason", ""),
         "n_patches": c["n_patches"], "epochs": c.get("trained_epochs"),
         "mse": r["mse"], "psnr": r["psnr"], "ssim": r["ssim"],
@@ -90,15 +91,31 @@ def flatten(c: dict) -> dict:
     return row
 
 
+def _cell_label(c: dict) -> str:
+    """`model|loss|seed<N>` — the seed keeps the Holm family from containing a
+    cell compared against itself once the grid has several seeds per cell."""
+    s = c.get("seed")
+    return f"{c['model']}|{c['loss']}" + (f"|seed{s}" if s is not None else "")
+
+
 def pairwise(cells: list[dict], cfg: dict) -> list[dict]:
-    """Every model pair within a dataset, on the shared patch sample."""
+    """
+    Every model pair within a (dataset, seed), on the shared patch sample.
+
+    Grouping by seed as well as dataset: the Holm family is the set of tests you
+    look across before making one claim, and that claim is "model A beats model
+    B at a given seed". Mixing seeds into one family would both pad it with
+    same-model/different-seed pairs (a nondeterminism measurement, not a model
+    comparison) and, before the seed made it into the label, compare a cell
+    against itself.
+    """
     st = cfg["p8_statistics"]
     rows = []
-    by_ds: dict[str, list[dict]] = {}
+    by_grp: dict[tuple, list[dict]] = {}
     for c in cells:
-        by_ds.setdefault(c["dataset"], []).append(c)
+        by_grp.setdefault((c["dataset"], c.get("seed")), []).append(c)
 
-    for ds, cs in sorted(by_ds.items()):
+    for (ds, seed), cs in sorted(by_grp.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
         usable = [c for c in cs if c["verdict"] != "INVALID"]
         for metric, (eff_key, hib) in METRICS.items():
             min_eff = st["min_meaningful_effect"][eff_key]
@@ -112,20 +129,24 @@ def pairwise(cells: list[dict], cfg: dict) -> list[dict]:
                     if n < 4:
                         continue
                     family.append(compare(
-                        metric, f"{a['model']}|{a['loss']}", f"{b['model']}|{b['loss']}",
+                        metric, _cell_label(a), _cell_label(b),
                         va[:n], vb[:n], min_effect=min_eff, higher_is_better=hib,
                         cfg=st, seed=cfg["sampling"]["seed"]))
             for r in apply_holm(family, st):
-                d = r.as_row(); d["dataset"] = ds
+                d = r.as_row(); d["dataset"] = ds; d["seed"] = seed
                 rows.append(d)
     return rows
 
 
 def write_csv(rows: list[dict], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
+        # Still create the file — callers and the pipeline treat it as a
+        # guaranteed artifact. An empty stats.csv is the correct output when
+        # every cell is INVALID (nothing to compare).
+        path.write_text("")
         return
     cols = list({k: None for r in rows for k in r})
-    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
@@ -151,20 +172,27 @@ def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
     for r in rows:
         by_ds.setdefault(r["dataset"], []).append(r)
 
+    def lbl(r):
+        s = r.get("seed")
+        return f"{r['model']}|{r['loss']}" + (f"|s{s}" if s is not None else "")
+
+    def sort_key(r):
+        return (r["model"], r["loss"], r.get("seed") or 0)
+
     for ds, rs in sorted(by_ds.items()):
         A("")
         A("=" * 78)
         A(f" {ds}")
         A("=" * 78)
         A("")
-        A(f"  {'model|loss':<34}{'verdict':<9}{'PSNR':>7}{'SAMv':>8}"
+        A(f"  {'model|loss|seed':<34}{'verdict':<9}{'PSNR':>7}{'SAMv':>8}"
           f"{'lift dB':>9}{'headrm':>8}  probes")
         A("  " + "-" * 74)
-        for r in sorted(rs, key=lambda z: -z["psnr"]):
+        for r in sorted(rs, key=lambda z: (-z["psnr"], sort_key(z))):
             probes = "".join(
                 "." if r[p] == "PASS" else ("X" if r[p] in ("FAIL",) else "!")
                 for p in ("P1", "P2", "P3", "P4", "P5", "P6", "P7"))
-            A(f"  {r['model'] + '|' + r['loss']:<34}{r['verdict']:<9}"
+            A(f"  {lbl(r):<34}{r['verdict']:<9}"
               f"{r['psnr']:>7.2f}{r['sam_valid']:>8.4f}"
               f"{r['lift_psnr_db']:>9.2f}{r['headroom_captured_psnr']:>8.2f}  {probes}")
         A("  " + " " * 72 + "P1234567")
@@ -174,20 +202,20 @@ def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
             A("")
             A("  NOT USABLE:")
             for r in inval:
-                A(f"    {r['model']}|{r['loss']}: {r['reason']}")
+                A(f"    {lbl(r)}: {r['reason']}")
 
         A("")
         A("  Latent rate (must be matched for the reconstruction comparison to mean anything):")
-        for r in sorted(rs, key=lambda z: z["model"]):
+        for r in sorted(rs, key=sort_key):
             ok = "matched" if r["rate_matched"] else "UNMATCHED"
-            A(f"    {r['model'] + '|' + r['loss']:<34}{r['latent_elements']:>9,} elements"
+            A(f"    {lbl(r):<34}{r['latent_elements']:>9,} elements"
               f"  {r['compression_ratio']:>7.1f}:1  ({r['rate_dev_pct']:+5.1f}%)  {ok}")
 
         A("")
         A("  Mechanism probes:")
-        A(f"    {'model|loss':<34}{'SRI':>8}{'inpaint':>9}{'NPR':>7}{'phys R2':>9}{'scene acc':>11}")
-        for r in sorted(rs, key=lambda z: z["model"]):
-            A(f"    {r['model'] + '|' + r['loss']:<34}{r['sri']:>8.3f}"
+        A(f"    {'model|loss|seed':<34}{'SRI':>8}{'inpaint':>9}{'NPR':>7}{'phys R2':>9}{'scene acc':>11}")
+        for r in sorted(rs, key=sort_key):
+            A(f"    {lbl(r):<34}{r['sri']:>8.3f}"
               f"{r['inpaint_gain']:>9.3f}{r['mean_npr']:>7.3f}"
               f"{r['physics_r2']:>9.3f}{r['scene_id_acc']:>11.3f}")
         A("      SRI     <0.02 => uses no spatial context (expected for vae-1d)")
@@ -195,11 +223,12 @@ def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
         A("      NPR     <0.90 => genuinely denoises; ~1.0 => passes noise through")
         A("      phys R2 >=0.5 => latent encodes absorption chemistry")
 
-        ours = [r for r in rs if r["model"] == "vae-our" and "our_mse_final" in r]
+        ours = sorted((r for r in rs if r["model"] == "vae-our" and "our_mse_final" in r),
+                      key=sort_key)
         if ours:
             o = ours[0]
             A("")
-            A("  vae-our loss decomposition (total = final + 0.5*spatial + 0.5*spectral):")
+            A(f"  vae-our loss decomposition ({lbl(o)}; total = final + 0.5*spatial + 0.5*spectral):")
             A(f"    mse_final    {o['our_mse_final']:.6f}   <- what it actually reconstructs")
             A(f"    mse_spatial  {o['our_mse_spatial']:.6f}   <- 256-dim whole-patch bottleneck")
             A(f"    mse_spectral {o['our_mse_spectral']:.6f}")

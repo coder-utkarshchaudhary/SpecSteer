@@ -1,7 +1,0 @@
-{
- "model": "vae-3d-spatio-spectral",
- "dataset": "IIRS",
- "loss": "standard",
- "error": "missing checkpoint model/IIRS/vae-3d-spatio-spectral_standard.pt",
- "verdict": "MISSING"
-}

@@ -1,7 +1,0 @@
-{
- "model": "vae-standard",
- "dataset": "IIRS",
- "loss": "standard",
- "error": "missing checkpoint model/IIRS/vae-standard_standard.pt",
- "verdict": "MISSING"
-}

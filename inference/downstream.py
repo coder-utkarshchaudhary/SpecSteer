@@ -36,17 +36,27 @@ Results are printed as comparison tables and (with --save-plots) written under
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from inference.inference import compute_mse, compute_psnr, compute_ssim, load_model
-from modules.losses import spectral_angle_mapper_loss
-from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name, resolve_checkpoint
-from utils.config import DATASETS, apply_dataset, settings
-from utils.logging_setup import get_console_logger, get_run_logger, timestamp
-from utils.training.dataloader import build_dataloader
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# Repo root must come FIRST: this file's own directory is sys.path[0] when run as
+# a script, and it contains inference.py, which would otherwise shadow the
+# `inference` package and break `from inference.inference import ...`.
+if str(REPO_ROOT) in sys.path:
+    sys.path.remove(str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT))
+
+from inference.inference import compute_mse, compute_psnr, compute_ssim, load_model  # noqa: E402
+from modules.losses import spectral_angle_mapper_loss  # noqa: E402
+from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name, resolve_checkpoint  # noqa: E402
+from utils.config import DATASETS, apply_dataset, settings  # noqa: E402
+from utils.hyperparams import apply_hyperparams, load_hyperparams  # noqa: E402
+from utils.logging_setup import get_console_logger, get_run_logger, timestamp  # noqa: E402
+from utils.training.dataloader import build_dataloader  # noqa: E402
 
 
 # Default sigma sweep for the noise-injection test (absolute, per the spec).
@@ -340,7 +350,7 @@ def parse_args() -> argparse.Namespace:
                         help="Override the packed-shard dir (data/packed/<DS>).")
     parser.add_argument("--ckpt-dir", default="model", help="Checkpoint root (per-dataset subfolders).")
     parser.add_argument("--seed", type=int, default=None,
-                    help="Which training seed's checkpoint to evaluate. Omit when only one seed exists; required once several do, since picking implicitly would make the result depend on file order.")
+                    help="Which training seed's CHECKPOINT to evaluate. Omit when only one seed exists; required once several do, since picking implicitly would make the result depend on file order. (RNG seed for the noise draws is --rng-seed.)")
     parser.add_argument("--select", choices=("sam", "mse"), default="sam",
                     help="Which checkpoint to load: the epoch selected on best val SAM (default) or on best val reconstruction MSE. Every cell writes both; a comparison must read the SAME criterion for every model.")
     parser.add_argument("--ckpt", default=None,
@@ -362,8 +372,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pixel", type=int, nargs=2, default=[32, 32],
                         help="(row col) pixel whose spectrum is tracked during interpolation.")
 
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out-dir", default="visualisations/downstream")
+    parser.add_argument("--rng-seed", type=int, default=42,
+                        help="Seed for the latent-noise / interpolation RNG (not the checkpoint seed).")
+    parser.add_argument("--out-dir", default="results/downstream")
     parser.add_argument("--save-plots", action="store_true", help="Write PNG figures under --out-dir.")
     return parser.parse_args()
 
@@ -379,8 +390,12 @@ def main():
     # actually on disk, so a mismatch fails here with both numbers rather
     # than as an opaque assert inside SpectralBranch.forward.
     apply_dataset(args.dataset, verify=True, processed_root=args.data_root)
-    torch.manual_seed(args.seed)
-    generator = torch.Generator(device=device).manual_seed(args.seed)
+    # Per-dataset latent-rate / capacity knobs the models were trained with;
+    # without this the models rebuild at the dataclass defaults and
+    # load_state_dict fails. Mirrors train/train.py and inference.py.
+    apply_hyperparams(settings, load_hyperparams(args.dataset))
+    torch.manual_seed(args.rng_seed)
+    generator = torch.Generator(device=device).manual_seed(args.rng_seed)
 
     ts = timestamp()
     console = get_console_logger()
@@ -422,7 +437,7 @@ def main():
     all_results = []
     for model_name in args.models:
         # Fresh generator per model so each sees the same noise draw sequence.
-        gen = torch.Generator(device=device).manual_seed(args.seed)
+        gen = torch.Generator(device=device).manual_seed(args.rng_seed)
         # For per-model progress ("[skip] ..."), pair the model's file logger
         # with the console so it also lands on stdout.
         per_model_loggers = [console, model_loggers[model_name]]
