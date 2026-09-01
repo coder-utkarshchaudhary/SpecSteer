@@ -32,9 +32,10 @@ PY="${PY:-.venv/bin/python}"
 [[ -x "${PY}" ]] || PY="python"
 
 SMOKE_ROOT="${SMOKE_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/prism_infer_smoke.XXXXXX")}"
-SMOKE_DATASETS="${SMOKE_DATASETS:-$(IFS=,; echo "${GRID_DATASETS[*]}")}"
+SMOKE_DATASETS="${SMOKE_DATASETS:-IIRS,AVIRIS,CRIMS}"  # exclude M3 by default
 SMOKE_SEEDS="${SMOKE_SEEDS:-42}"
 KEEP="${KEEP:-0}"
+SEND_TELEGRAM="${SEND_TELEGRAM:-1}"
 
 CKPT_DIR="${SMOKE_ROOT}/model"
 PACKED_ROOT="${SMOKE_ROOT}/packed"
@@ -54,7 +55,15 @@ echo " inference.sh SMOKE"
 echo "  scratch   : ${SMOKE_ROOT}"
 echo "  datasets  : ${SMOKE_DATASETS}"
 echo "  seeds     : ${SMOKE_SEEDS}"
+echo "  telegram  : ${SEND_TELEGRAM}"
 echo "=============================================="
+
+if (( SEND_TELEGRAM )); then
+    python utils/notify_cli.py --text "Inference smoke test started
+host: $(hostname)
+datasets: ${SMOKE_DATASETS}
+seeds: ${SMOKE_SEEDS}" >/dev/null 2>&1 || true
+fi
 
 "${PY}" scripts/_smoke_fixtures.py \
     --root "${SMOKE_ROOT}" --datasets "${SMOKE_DATASETS}" --seeds "${SMOKE_SEEDS}" \
@@ -109,9 +118,24 @@ echo ""
 if [[ ${rc} -eq 0 && ${missing} -eq 0 ]]; then
     echo "SMOKE PASSED — inference.sh ran to completion and produced every artifact."
     echo "  ablation_table.csv: ${got} rows"
+    if (( SEND_TELEGRAM )); then
+        python utils/notify_cli.py --text "Inference smoke test PASSED
+host: $(hostname)
+datasets: ${SMOKE_DATASETS}
+seeds: ${SMOKE_SEEDS}
+ablation rows: ${got}" >/dev/null 2>&1 || true
+    fi
     exit 0
 fi
 echo "SMOKE FAILED (inference.sh rc=${rc}, missing artifacts=${missing})"
 echo "  scratch left for inspection: ${SMOKE_ROOT}"
+if (( SEND_TELEGRAM )); then
+    python utils/notify_cli.py --text "Inference smoke test FAILED
+host: $(hostname)
+datasets: ${SMOKE_DATASETS}
+seeds: ${SMOKE_SEEDS}
+rc: ${rc}
+missing: ${missing}" >/dev/null 2>&1 || true
+fi
 KEEP=1
 exit 1

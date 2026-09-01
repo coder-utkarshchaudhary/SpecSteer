@@ -180,6 +180,15 @@ if (( DO_PROBES )); then
 fi
 echo "=============================================="
 
+if (( SEND_TELEGRAM )); then
+    python utils/notify_cli.py --text "Inference sweep started
+host: $(hostname)
+datasets: ${DATASETS[*]}
+select: best-${SELECT}
+seeds: ${SEEDS[*]:-<unseeded>}
+steps: recon=${DO_RECON} probes=${DO_PROBES} downstream=${DO_DOWNSTREAM}" >/dev/null 2>&1 || true
+fi
+
 SKIPPED=()
 FAILED=()
 
@@ -210,14 +219,14 @@ run_inference() {
 # ---- Step 1: reconstruction sweep ---------------------------------------------
 # The grid manifest trains the standard-loss baselines at the FIRST seed only
 # (the claim is about the physics regime); the physics cells get every seed. So
-# the standard-loss rows here run only for SEEDS[0], and every seed runs physics.
+# the standard-loss rows here run only for GRID_SEEDS[0], and every seed runs physics.
 if (( DO_RECON )); then
 for ds in "${DATASETS[@]}"; do
   for seed in "${SEEDS[@]}"; do
     run_inference vae-our "${ds}" physics vae-our "${seed}"
     for m in "${STANDARD_MODELS[@]}"; do
         run_inference "${m}" "${ds}" physics "${m}_physics" "${seed}"
-        if [[ "${seed}" == "${SEEDS[0]}" ]]; then
+        if [[ "${seed}" == "${GRID_SEEDS[0]}" ]]; then
             run_inference "${m}" "${ds}" standard "${m}_standard" "${seed}"
         fi
     done
@@ -235,7 +244,7 @@ for ds in "${DATASETS[@]}"; do
   for seed in "${SEEDS[@]}"; do
     probe_seed_args=(); [[ -n "${seed}" ]] && probe_seed_args=(--seed "${seed}")
     probe_loss_args=()
-    [[ -n "${seed}" && "${seed}" != "${SEEDS[0]}" ]] && probe_loss_args=(--losses physics)
+    [[ -n "${seed}" && "${seed}" != "${GRID_SEEDS[0]}" ]] && probe_loss_args=(--losses physics)
     echo ""
     echo ">>> probes ${ds}${seed:+ seed ${seed}} [${SELECT}]"
     if ! python inference/probes.py --dataset "${ds}" --all-models \
@@ -255,7 +264,7 @@ fi
 if (( DO_DOWNSTREAM )); then
 for ds in "${DATASETS[@]}"; do
     echo ">>> downstream ${ds}"
-    ds_seed_args=(); [[ -n "${SEEDS[0]}" ]] && ds_seed_args=(--seed "${SEEDS[0]}")
+    ds_seed_args=(); [[ -n "${GRID_SEEDS[0]}" ]] && ds_seed_args=(--seed "${GRID_SEEDS[0]}")
     if ! python inference/downstream.py --dataset "${ds}" --save-plots \
             --ckpt-dir "${CKPT_DIR}" --packed-root "${PACKED_ROOT}/${ds}" \
             --out-dir "${DOWNSTREAM_DIR}" \
@@ -307,4 +316,13 @@ if [[ ${#FAILED[@]} -gt 0 ]]; then
     for f in "${FAILED[@]}"; do echo "    - ${f}"; done
 fi
 echo "=============================================="
+
+if (( SEND_TELEGRAM )); then
+    python utils/notify_cli.py --text "Inference sweep finished
+host: $(hostname)
+datasets: ${DATASETS[*]}
+skipped: ${#SKIPPED[@]}
+failed: ${#FAILED[@]}" >/dev/null 2>&1 || true
+fi
+
 exit $(( ${#FAILED[@]} > 0 ? 1 : 0 ))
