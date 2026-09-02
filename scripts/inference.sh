@@ -200,15 +200,25 @@ run_inference() {
         sfx="_seed${seed}"; seed_args=(--seed "${seed}")
     fi
     local ckpt="${CKPT_DIR}/${ds}/${name}${sfx}_best${SELECT}.pt"
-    [[ -s "${ckpt}" ]] || ckpt="${CKPT_DIR}/${ds}/${name}.pt"   # pre-seed-axis fallback
+    # Pre-seed-axis fallback (<name>.pt) ONLY when no seed was requested. A seeded
+    # request that misses must NOT silently load an unseeded checkpoint from an
+    # older grid — and it must not pass this guard on the unseeded file only to
+    # fail later inside inference.py, which re-resolves from --seed independently.
+    if [[ ! -s "${ckpt}" && -z "${seed}" ]]; then
+        ckpt="${CKPT_DIR}/${ds}/${name}.pt"
+    fi
     local out_json="${INFER_JSON_DIR}/${ds}__${name}${sfx}_${SELECT}.json"
     if [[ ! -s "${ckpt}" ]]; then
-        echo "[skip] inference  ${m} | ${ds} | ${loss}  (missing ${ckpt})"
+        echo "[skip] inference  ${m} | ${ds} | ${loss}${sfx}  (missing ${ckpt})"
         SKIPPED+=("infer|${m}|${ds}|${loss}${sfx}")
         return 0
     fi
     echo ">>> inference  ${m} | ${ds} | ${loss}${sfx} [${SELECT}]"
+    # Pass the resolved path explicitly so inference.py evaluates this exact file
+    # rather than re-deriving one from --ckpt-dir/--seed/--select (which can and
+    # did diverge from the shell's choice).
     if ! python inference/inference.py --model "${m}" --dataset "${ds}" --loss "${loss}" \
+            --ckpt "${ckpt}" \
             --ckpt-dir "${CKPT_DIR}" --packed-root "${PACKED_ROOT}/${ds}" --out-json "${out_json}" \
             --select "${SELECT}" ${seed_args[@]+"${seed_args[@]}"} "${EXTRA_ARGS[@]}"; then
         echo "!!! inference failed: ${m} | ${ds} | ${loss}${sfx}"
