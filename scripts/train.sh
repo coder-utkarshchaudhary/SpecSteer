@@ -21,8 +21,15 @@
 #
 # Environment overrides:
 #   CKPT_DIR   — checkpoint root directory   (default: model)
-#   EPOCHS     — passed through as --epochs  (default: 100 unless overridden)
+#   EPOCHS     — passed through as --epochs. UNSET by default (2026-09-04): the
+#                per-dataset YAML rules (IIRS/AVIRIS 50, CRIMS 80), which is how
+#                the CRIMS-only training fix stays per-dataset. Set EPOCHS only
+#                to force one value everywhere (smoke tests).
 #   OVERWRITE  — 1 is equivalent to passing --overwrite
+#
+# --models filter (2026-09-04): restrict --all to a comma list of models, e.g.
+#   bash scripts/train.sh --all --models vae-our                 # PRISM iteration
+#   bash scripts/train.sh --all --models vae-standard,vae-1d-pixelwise,vae-3d-spatio-spectral
 #
 # Without --overwrite, a slot whose checkpoint already exists is SKIPPED. That
 # skip is printed to stdout only — it never reaches Telegram — which is how a
@@ -37,7 +44,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 
 CKPT_DIR="${CKPT_DIR:-model}"
-DEFAULT_EPOCHS="${EPOCHS:-100}"
+# Empty means "let the per-dataset YAML decide" (train.py: CLI > YAML > 100).
+DEFAULT_EPOCHS="${EPOCHS:-}"
 
 cd "${REPO_ROOT}"
 
@@ -52,6 +60,7 @@ if [[ "${1:-}" == "--all" ]]; then
 
     # Filter subset (comma-separated).
     DATASETS_SUBSET=""
+    MODELS_SUBSET=""
     EXTRA_ARGS=()
     HAS_EPOCHS=0
     OVERWRITE="${OVERWRITE:-0}"
@@ -61,13 +70,17 @@ if [[ "${1:-}" == "--all" ]]; then
             # filter takes a comma list, but a single dataset is the common case
             # and typing the singular is the natural thing to do.
             --datasets|--dataset)  DATASETS_SUBSET="$2"; shift 2 ;;
+            --models|--model)      MODELS_SUBSET="$2"; shift 2 ;;
             --epochs)    HAS_EPOCHS=1; EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
             --overwrite) OVERWRITE=1; shift ;;
             --allow-concurrent) export ALLOW_CONCURRENT=1; shift ;;
             *)           EXTRA_ARGS+=("$1"); shift ;;
         esac
     done
-    if (( HAS_EPOCHS == 0 )); then
+    # Only force a uniform epoch count when explicitly asked (EPOCHS env or
+    # --epochs). Otherwise the per-dataset YAML rules — that is how CRIMS gets
+    # its 80-epoch fix while IIRS/AVIRIS stay at 50.
+    if (( HAS_EPOCHS == 0 )) && [[ -n "${DEFAULT_EPOCHS}" ]]; then
         EXTRA_ARGS+=(--epochs "${DEFAULT_EPOCHS}")
     fi
 
@@ -86,11 +99,21 @@ if [[ "${1:-}" == "--all" ]]; then
         done
         return 1
     }
+    IFS=',' read -r -a MODELS_FILTER <<< "${MODELS_SUBSET}"
+    _in_model_filter() {
+        local m="$1"
+        [[ -z "${MODELS_SUBSET}" ]] && return 0
+        for mm in "${MODELS_FILTER[@]}"; do
+            [[ "${mm}" == "${m}" ]] && return 0
+        done
+        return 1
+    }
 
     echo "=============================================="
     echo " HSI VAE Ablation — grid launch"
     echo "  slots     : ${GRID_TOTAL}  (seeds: ${GRID_SEEDS[*]})"
     echo "  datasets  : ${DATASETS_SUBSET:-<all>}"
+    echo "  models    : ${MODELS_SUBSET:-<all>}"
     echo "  ckpt dir  : ${REPO_ROOT}/${CKPT_DIR}"
     echo "  overwrite : ${OVERWRITE}"
     echo "  extra     : ${EXTRA_ARGS[*]:-<none>}"
@@ -116,6 +139,9 @@ extra: ${EXTRA_ARGS[*]:-<none>}" >/dev/null 2>&1 || true
         seed="${rest#*|}"
 
         if ! _in_filter "${ds}"; then
+            continue
+        fi
+        if ! _in_model_filter "${m}"; then
             continue
         fi
 

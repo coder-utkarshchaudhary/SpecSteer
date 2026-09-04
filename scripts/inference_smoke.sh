@@ -88,11 +88,12 @@ exists()   { [[ -f "$1" ]] || { echo "  MISSING: $1"; missing=1; }; }
 nonempty "${OUT_DIR}/ablation_table.csv"
 nonempty "${OUT_DIR}/downstream_table.csv"
 nonempty "${OUT_DIR}/probes.csv"
-# stats.csv is legitimately empty here: every synthetic cell is INVALID (random
-# weights cannot beat a mean predictor), so there are 0 pairwise comparisons.
-# The real run has valid cells. Require only that the artifact exists.
+# stats.csv may legitimately be empty here: synthetic random-weight cells can
+# trip the P3 collapse detector, and collapsed cells are excluded from the
+# pairwise stats (the INVALID adjudication itself was retired 2026-09-04).
+# The real run has usable cells. Require only that the artifact exists.
 exists   "${OUT_DIR}/stats.csv"
-nonempty "${OUT_DIR}/VERDICT.txt"
+nonempty "${OUT_DIR}/DIAGNOSTICS.txt"
 first_seed="$(echo "${SMOKE_SEEDS}" | cut -d, -f1)"
 IFS=',' read -r -a _dl <<< "${SMOKE_DATASETS}"
 for ds in "${_dl[@]}"; do

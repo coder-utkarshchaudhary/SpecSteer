@@ -110,7 +110,8 @@ def _diff(a: Optional[dict], b: Optional[dict], k: str) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 INFERENCE_COLS = ["dataset", "model", "loss", "seed", "select",
-                  "mse", "sam_rad", "psnr", "ssim", "n_samples"]
+                  "mse", "sam_rad", "sam_valid", "valid_pixel_frac",
+                  "psnr", "ssim", "n_samples"]
 DOWNSTREAM_COLS = ["dataset", "model", "loss", "psnr_clean", "psnr_mid",
                    "psnr_drop", "sam_mid", "jaggedness", "path_length"]
 

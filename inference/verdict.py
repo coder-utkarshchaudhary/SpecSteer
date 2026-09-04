@@ -1,17 +1,29 @@
 """
 inference/verdict.py
 --------------------
-Turn the per-cell probe JSONs into the three analysis artifacts:
+Aggregate the per-cell diagnostic JSONs (inference/probes.py) into three
+analysis artifacts:
 
-    results/probes.csv    one row per cell, every probe metric + verdict
-    results/stats.csv     pairwise model comparisons with CIs, p, effect sizes
-    results/VERDICT.txt   the human-readable answer to "why does my model beat
-                          or get beaten on each dataset"
+    results/probes.csv       one row per cell: reconstruction metrics + the
+                             P2/P3/P4 diagnostics
+    results/stats.csv        pairwise model comparisons with bootstrap CIs,
+                             permutation p-values (Holm-corrected), effect sizes
+    results/DIAGNOSTICS.txt  the human-readable summary
 
-VERDICT.txt is the deliverable. It reports, per dataset: which cells are usable
-at all, how much of the achievable headroom each captured, whether the rate
-match held, which probes each model passed, and which pairwise differences are
-both statistically significant AND large enough to matter.
+2026-09-04 DEMOTION (docs/new_plan.md): this module used to render VERDICT.txt
+with a suite-level PASS/FAIL/INVALID adjudication driven by the P1 trivial
+floor. That floor was miscalibrated (it flagged every cell INVALID, including
+a 39 dB vae-3d), so the adjudication layer was retired together with probes
+P1/P5/P6/P7. What remains has no pass/fail semantics:
+
+  * the latent-rate audit (P2)      — the fairness certificate,
+  * collapse detection (P3)         — the one exclusion that survives: a
+                                      collapsed cell is skipped by the stats,
+  * spatial reliance / SRI (P4)     — the architecture-story figure,
+  * sam_valid                       — the cross-dataset-comparable SAM,
+  * the paired statistics           — rankings still need significance + the
+                                      preregistered effect floors; they just no
+                                      longer pass through a verdict gate.
 """
 
 from __future__ import annotations
@@ -55,36 +67,22 @@ def load_cells(d: Path) -> list[dict]:
 
 
 def flatten(c: dict) -> dict:
-    p1, p2, p3 = c["P1_trivial_floors"], c["P2_latent_budget"], c["P3_collapse"]
-    p4, p5, p6, p7 = (c["P4_spatial_reliance"], c["P5_spectral_inpainting"],
-                      c["P6_purification"], c["P7_linear_probe"])
+    p2, p3, p4 = c["P2_latent_budget"], c["P3_collapse"], c["P4_spatial_reliance"]
     r = c["reconstruction"]
     row = {
         "dataset": c["dataset"], "model": c["model"], "loss": c["loss"],
         "seed": c.get("seed"), "select": c.get("select"),
-        "verdict": c["verdict"], "reason": c.get("verdict_reason", ""),
         "n_patches": c["n_patches"], "epochs": c.get("trained_epochs"),
         "mse": r["mse"], "psnr": r["psnr"], "ssim": r["ssim"],
         "sam": r["sam"], "sam_valid": r["sam_valid"],
-        # P1
-        "floor_psnr": p1["best_floor"]["psnr"], "floor_sam": p1["best_floor"]["sam"],
-        "oracle_psnr": p1["identity_oracle"]["psnr"],
-        "oracle_sam": p1["identity_oracle"]["sam"],
-        "lift_psnr_db": p1["lift"]["psnr_db"], "lift_sam_rel": p1["lift"]["sam_relative"],
-        "headroom_captured_psnr": p1["headroom_captured_psnr"],
-        "P1": p1["verdict"],
-        # P2
+        # P2 — rate audit
         "latent_elements": p2["latent_elements"], "compression_ratio": p2["compression_ratio"],
-        "rate_dev_pct": p2["deviation_pct"], "rate_matched": p2["rate_matched"], "P2": p2["verdict"],
-        # P3
+        "rate_dev_pct": p2["deviation_pct"], "rate_matched": p2["rate_matched"],
+        # P3 — collapse
         "active_units": p3["active_unit_fraction"], "latent_swap_delta": p3["latent_swap_delta"],
-        "collapsed": p3["collapsed"], "P3": p3["verdict"],
-        # P4-P7
-        "sri": p4["sri"], "P4": p4["verdict"],
-        "inpaint_gain": p5["relative_gain"], "P5": p5["verdict"],
-        "mean_npr": p6["mean_npr"], "P6": p6["verdict"],
-        "physics_r2": p7["physics_r2"], "scene_id_acc": p7["scene_id_accuracy"],
-        "P7": p7["verdict"],
+        "collapsed": c.get("collapsed", p3["collapsed"]),
+        # P4 — spatial reliance
+        "sri": p4["sri"], "sri_note": p4.get("note", ""),
     }
     if "per_branch_mse" in p2:
         row.update({f"our_{k}": v for k, v in p2["per_branch_mse"].items()})
@@ -108,6 +106,9 @@ def pairwise(cells: list[dict], cfg: dict) -> list[dict]:
     same-model/different-seed pairs (a nondeterminism measurement, not a model
     comparison) and, before the seed made it into the label, compare a cell
     against itself.
+
+    Collapsed cells are excluded: a collapsed decoder emits a constant, so its
+    per-patch metrics describe a trivial predictor, not a model.
     """
     st = cfg["p8_statistics"]
     rows = []
@@ -116,7 +117,8 @@ def pairwise(cells: list[dict], cfg: dict) -> list[dict]:
         by_grp.setdefault((c["dataset"], c.get("seed")), []).append(c)
 
     for (ds, seed), cs in sorted(by_grp.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
-        usable = [c for c in cs if c["verdict"] != "INVALID"]
+        usable = [c for c in cs
+                  if not c.get("collapsed", c["P3_collapse"]["collapsed"])]
         for metric, (eff_key, hib) in METRICS.items():
             min_eff = st["min_meaningful_effect"][eff_key]
             family = []
@@ -143,7 +145,7 @@ def write_csv(rows: list[dict], path: Path) -> None:
     if not rows:
         # Still create the file — callers and the pipeline treat it as a
         # guaranteed artifact. An empty stats.csv is the correct output when
-        # every cell is INVALID (nothing to compare).
+        # every cell is collapsed (nothing to compare).
         path.write_text("")
         return
     cols = list({k: None for r in rows for k in r})
@@ -154,19 +156,19 @@ def write_csv(rows: list[dict], path: Path) -> None:
             w.writerow(r)
 
 
-def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
+def render_diagnostics(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
     L = []
     A = L.append
     A("=" * 78)
-    A(" FALSIFICATION SUITE — VERDICT")
+    A(" MECHANISM DIAGNOSTICS")
     A(f" preregistered {cfg.get('registered_on')} · split {cfg.get('split')} "
       f"· {cfg['sampling']['max_patches']} patches/cell")
     A("=" * 78)
     A("")
-    A("Probes: P1 trivial floors · P2 latent rate · P3 collapse · P4 spatial")
-    A("        reliance · P5 spectral inpainting · P6 purification · P7 probe")
-    A("Verdict INVALID = not a usable result (collapsed, or below a trivial")
-    A("        predictor). Such cells are findings, not scores.")
+    A("Diagnostics: P2 latent rate · P3 collapse · P4 spatial reliance · SAMv.")
+    A("No pass/fail adjudication (retired 2026-09-04). The one exclusion is")
+    A("collapse: a collapsed decoder emits a constant, so its metrics describe")
+    A("a trivial predictor — such cells are findings, not scores.")
 
     by_ds: dict[str, list[dict]] = {}
     for r in rows:
@@ -185,57 +187,44 @@ def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
         A(f" {ds}")
         A("=" * 78)
         A("")
-        A(f"  {'model|loss|seed':<34}{'verdict':<9}{'PSNR':>7}{'SAMv':>8}"
-          f"{'lift dB':>9}{'headrm':>8}  probes")
-        A("  " + "-" * 74)
+        A(f"  {'model|loss|seed':<36}{'PSNR':>7}{'SSIM':>7}{'SAMv':>8}  status")
+        A("  " + "-" * 70)
         for r in sorted(rs, key=lambda z: (-z["psnr"], sort_key(z))):
-            probes = "".join(
-                "." if r[p] == "PASS" else ("X" if r[p] in ("FAIL",) else "!")
-                for p in ("P1", "P2", "P3", "P4", "P5", "P6", "P7"))
-            A(f"  {lbl(r):<34}{r['verdict']:<9}"
-              f"{r['psnr']:>7.2f}{r['sam_valid']:>8.4f}"
-              f"{r['lift_psnr_db']:>9.2f}{r['headroom_captured_psnr']:>8.2f}  {probes}")
-        A("  " + " " * 72 + "P1234567")
-
-        inval = [r for r in rs if r["verdict"] == "INVALID"]
-        if inval:
-            A("")
-            A("  NOT USABLE:")
-            for r in inval:
-                A(f"    {lbl(r)}: {r['reason']}")
+            status = "COLLAPSED — excluded from stats" if r["collapsed"] else ""
+            A(f"  {lbl(r):<36}{r['psnr']:>7.2f}{r['ssim']:>7.3f}"
+              f"{r['sam_valid']:>8.4f}  {status}")
 
         A("")
         A("  Latent rate (must be matched for the reconstruction comparison to mean anything):")
         for r in sorted(rs, key=sort_key):
             ok = "matched" if r["rate_matched"] else "UNMATCHED"
-            A(f"    {lbl(r):<34}{r['latent_elements']:>9,} elements"
+            A(f"    {lbl(r):<36}{r['latent_elements']:>9,} elements"
               f"  {r['compression_ratio']:>7.1f}:1  ({r['rate_dev_pct']:+5.1f}%)  {ok}")
 
         A("")
-        A("  Mechanism probes:")
-        A(f"    {'model|loss|seed':<34}{'SRI':>8}{'inpaint':>9}{'NPR':>7}{'phys R2':>9}{'scene acc':>11}")
+        A("  Mechanism:")
+        A(f"    {'model|loss|seed':<36}{'SRI':>8}{'active':>8}{'swapDSAM':>10}")
         for r in sorted(rs, key=sort_key):
-            A(f"    {lbl(r):<34}{r['sri']:>8.3f}"
-              f"{r['inpaint_gain']:>9.3f}{r['mean_npr']:>7.3f}"
-              f"{r['physics_r2']:>9.3f}{r['scene_id_acc']:>11.3f}")
-        A("      SRI     <0.02 => uses no spatial context (expected for vae-1d)")
-        A("      inpaint <0.10 => no spectral prior; copies the input through")
-        A("      NPR     <0.90 => genuinely denoises; ~1.0 => passes noise through")
-        A("      phys R2 >=0.5 => latent encodes absorption chemistry")
+            A(f"    {lbl(r):<36}{r['sri']:>8.3f}"
+              f"{r['active_units']:>8.2f}{r['latent_swap_delta']:>10.3f}")
+        A("      SRI      < 0.02 => uses no spatial context (expected for vae-1d;")
+        A("               the Iteration-1 before/after number for vae-our)")
+        A("      active   fraction of latent dims with non-trivial KL")
+        A("      swapDSAM relative SAM change when decoding another patch's latent")
+        A("               (~0 => the decoder ignores the latent)")
 
         ours = sorted((r for r in rs if r["model"] == "vae-our" and "our_mse_final" in r),
                       key=sort_key)
         if ours:
             o = ours[0]
             A("")
-            A(f"  vae-our loss decomposition ({lbl(o)}; total = final + 0.5*spatial + 0.5*spectral):")
-            A(f"    mse_final    {o['our_mse_final']:.6f}   <- what it actually reconstructs")
-            A(f"    mse_spatial  {o['our_mse_spatial']:.6f}   <- 256-dim whole-patch bottleneck")
-            A(f"    mse_spectral {o['our_mse_spectral']:.6f}")
-            A(f"    final is {100 * o['our_final_share_of_total']:.1f}% of the reported total.")
-            if o["our_final_share_of_total"] < 0.5:
-                A("    => the headline MSE is dominated by the AUXILIARY terms, not by")
-                A("       reconstruction quality. Quote mse_final when comparing.")
+            A(f"  vae-our loss decomposition ({lbl(o)}; mix 0.5:w:w normalised — "
+              f"see modules/vae_our.py):")
+            A(f"    mse_final    {o['our_mse_final']:.6f}   <- the fused output; the ONLY")
+            A("                              cross-model comparable reconstruction number")
+            A(f"    mse_spatial  {o['our_mse_spatial']:.6f}   <- spatial stream alone (8x8 grid latent)")
+            A(f"    mse_spectral {o['our_mse_spectral']:.6f}   <- spectral stream alone")
+            A(f"    final contributes {100 * o['our_final_share_of_total']:.1f}% of the training mix.")
 
         srs = [s for s in stats_rows if s["dataset"] == ds and s["metric"] == "sam_valid"]
         if srs:
@@ -250,8 +239,8 @@ def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
     A("=" * 78)
     A(" HOW TO READ THIS")
     A("=" * 78)
-    A(" A win counts only if the cell is VALID, the rate is matched, and the")
-    A(" pairwise difference is both significant after Holm AND above the")
+    A(" A ranking claim needs: the cell not collapsed, the rate matched, and the")
+    A(" pairwise difference both significant after Holm AND above the")
     A(" preregistered effect floor. 'significant_but_negligible' is not a win —")
     A(" with hundreds of paired patches almost any difference reaches p<0.05.")
     A(" Raw SAM is not comparable across datasets (near-zero pixels contribute")
@@ -260,7 +249,9 @@ def render_verdict(rows: list[dict], stats_rows: list[dict], cfg: dict) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Aggregate probe results into CSV + verdict.")
+    ap = argparse.ArgumentParser(
+        description="Aggregate diagnostic results into probes.csv, stats.csv, "
+                    "DIAGNOSTICS.txt.")
     ap.add_argument("--probes-dir", type=Path, default=Path("results/probes"))
     ap.add_argument("--out-dir", type=Path, default=Path("results"))
     ap.add_argument("--prereg", type=Path,
@@ -270,7 +261,7 @@ def main() -> int:
     cfg = yaml.safe_load(args.prereg.read_text())
     cells = load_cells(args.probes_dir)
     if not cells:
-        print(f"no probe results under {args.probes_dir}")
+        print(f"no diagnostic results under {args.probes_dir}")
         return 1
 
     rows = [flatten(c) for c in cells]
@@ -279,10 +270,10 @@ def main() -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, args.out_dir / "probes.csv")
     write_csv(stats_rows, args.out_dir / "stats.csv")
-    txt = render_verdict(rows, stats_rows, cfg)
-    (args.out_dir / "VERDICT.txt").write_text(txt + "\n")
+    txt = render_diagnostics(rows, stats_rows, cfg)
+    (args.out_dir / "DIAGNOSTICS.txt").write_text(txt + "\n")
     print(txt)
-    print(f"\nwrote {args.out_dir}/probes.csv, stats.csv, VERDICT.txt "
+    print(f"\nwrote {args.out_dir}/probes.csv, stats.csv, DIAGNOSTICS.txt "
           f"({len(rows)} cells, {len(stats_rows)} comparisons)")
     return 0
 

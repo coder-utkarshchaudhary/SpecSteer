@@ -92,12 +92,31 @@ class Settings:
     patch_cap_seed: int = 1234
 
     # ------------------------------------------------------------------
-    # Spatial branch
+    # Spatial branch (vae-our)
     # ------------------------------------------------------------------
-    reduced_dims: int = 32            # Conv1D channel reduction per pixel spectrum
-    latent_dim: int = 256             # spatial latent dim (after reparameterize chunk)
-    n_2D_conv_blocks: int = 4        # 64 / 2^4 = 4 px spatial bottleneck
+    # Conv1D channel reduction per pixel spectrum. Block channels run
+    # r -> 2r -> 4r -> 8r, so this is also the width dial of the whole spatial
+    # stream — PRISM's natural capacity knob (per-dataset override in the YAMLs).
+    reduced_dims: int = 64
+    # Channels of the 8x8 spatial GRID latent (after the reparameterize chunk).
+    # Replaces the old `latent_dim` global 256-vector: z_s is now
+    # (B, vae_our_spatial_latent_ch, 8, 8) — spatially addressed, so texture no
+    # longer squeezes through a single whole-patch vector (docs/new_plan.md,
+    # Iteration 1). Latent budget: 64*d_s + H*W*d_p lands on the common T —
+    # see utils/match_latent_rate.py.
+    vae_our_spatial_latent_ch: int = 64
+    n_2D_conv_blocks: int = 3        # 64 / 2^3 = 8 px grid — this IS the latent grid
     conv2D_kernel_size: int = 3
+
+    # --- vae-our fusion (spatially-adaptive gated late fusion) ---
+    # Hidden width of the 2x(3x3 conv) gate network in modules/vae_our.py.
+    vae_our_fusion_hidden: int = 64
+    # Ablation flag: False falls back to the old global Linear(2C -> C) fusion.
+    vae_our_adaptive_fusion: bool = True
+    # Weight of each auxiliary per-stream MSE relative to the fused-recon MSE.
+    # The mix is 0.5 : w : w, normalised to sum to 1 in loss_terms() so the
+    # reconstruction term stays on the baselines' scale. It.3 sweeps {0.05, 0.1}.
+    vae_our_aux_mse_weight: float = 0.1
 
     # Derived spatial (computed in __post_init__)
     conv_output_c: int = field(init=False)
@@ -124,21 +143,33 @@ class Settings:
     spectral_transpose_l: int = field(init=False)
 
     # ------------------------------------------------------------------
-    # Baseline capacity knobs (overridden per-dataset by hyperparam YAML
-    # so each baseline matches vae-our's param count at that dataset).
-    # Defaults here are the IIRS picks, re-solved against the current vae-our
-    # (12.40M at IIRS). Regenerate after ANY architecture change with:
-    #     python utils/check-model-params.py --solve
+    # Baseline capacity knobs — REFERENCE WIDTHS (protocol change 2026-09-04).
+    #
+    # Baselines are no longer parameter-matched to vae-our. Each runs at the
+    # width of its citable reference implementation, identical across datasets:
+    #   vae-standard : base_ch 128, n_down 3 (128/256/512) — AutoencoderKL,
+    #                  Rombach et al., CVPR 2022 (latent-diffusion f8 encoder).
+    #   vae-3d       : base_ch 24 — compact 3-D conv stacks per the 3D-CAE of
+    #                  Mei et al., IEEE TGRS 2019 (representative default;
+    #                  swap in the exact per-layer counts if the PDF surfaces).
+    #   vae-1d       : hidden (512, 256, 128) — 4 fully-connected layers as in
+    #                  per-pixel spectral (V)AEs, e.g. Palsson et al., IEEE
+    #                  Access 2018; Liu et al., IEEE TGRS 2022.
+    # The capacity confound is handled post-hoc instead: a params column in
+    # every table plus capacity points (each competitive baseline re-trained at
+    # ~vae-our's param count, seed 42) — solve those with:
+    #     python utils/check-model-params.py --solve-capacity
+    # The LATENT-RATE knobs (below / per-dataset YAML) remain the hard control.
     # ------------------------------------------------------------------
-    vae_standard_base_ch: int = 94
+    vae_standard_base_ch: int = 128
     vae_standard_n_down: int = 3
     vae_standard_latent_ch: int = 16
 
-    vae_3d_base_ch: int = 48
+    vae_3d_base_ch: int = 24
     vae_3d_n_down: int = 3
     vae_3d_latent_ch: int = 8
 
-    vae_1d_hidden_dims: tuple = (2936, 1468, 734)
+    vae_1d_hidden_dims: tuple = (512, 256, 128)
     vae_1d_latent_dim: int = 32
 
     def __post_init__(self):

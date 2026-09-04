@@ -1,17 +1,25 @@
-# CRIMS (456 bands, cropped from the 457 on disk) — vae-our target = 11,276,895 params.
+# CRIMS (456 bands, cropped from the 457 on disk).
 #
-# Two controls are enforced in this file, and they are independent resources:
-#   * LATENT RATE  — the information bottleneck, matched to 64:1 (see below)
-#   * PARAMETERS   — the capacity of the function class, matched to vae-our
-# Regenerate, in this order (rate first — it moves the parameter target):
-#   python utils/match_latent_rate.py --ratio 64
-#   python utils/check-model-params.py --solve
+# Controls (protocol 2026-09-04 — see docs/new_plan.md):
+#   * LATENT RATE  — the information bottleneck, matched EXACTLY across models
+#                    (the hard fairness control; see the latent section below)
+#   * PARAMETERS   — NOT matched. Baselines run at citable reference widths;
+#                    the size objection is answered by a params column +
+#                    capacity points (check-model-params.py --solve-capacity).
+# Regenerate / audit:
+#   python utils/match_latent_rate.py --exact --check
+#   python utils/check-model-params.py            (params table, informational)
 #   python utils/find_max_batch.py --budget-gb 24 --fit
-# Audit:  python utils/check-model-params.py
-#         python utils/match_latent_rate.py --ratio 64 --check
 
 # --- Optimization ---
-epochs: 30
+# CRIMS trains on only 2,561 patches (uncapped) vs ~7,000 elsewhere, and the
+# 2026-08 grid showed undertraining + seed instability here (vae-1d never
+# converged; vae-standard seed-unstable; vae-our SSIM collapse). Per
+# docs/new_plan.md the CRIMS training config gets more room — epochs 50 -> 80,
+# patience 7 -> 12 — applied identically to ALL models (fairness holds within
+# the dataset; there is no cross-dataset comparison to protect). The 5-epoch
+# linear LR warmup lives in train/train.py and applies everywhere.
+epochs: 80
 lr: 1.0e-3
 
 # Batch size is held constant across all 4 models x 2 loss regimes WITHIN this
@@ -44,68 +52,63 @@ beta: 1.0e-3
 lambda_physics: 0.3
 seed: 42
 weight_decay: 1.0e-5
-early_stopping_patience: 7
+early_stopping_patience: 12
 
 # --- Latent budget: every model on the common target T = 28,672 (65.1:1) ---
 #
-# Rate and parameter count are INDEPENDENT resources — the bottleneck sets how
-# much information can pass, the widths below set how complex a mapping can be
-# learned — so the ablation controls for both.
+# The latent RATE is the ablation's hard fairness control: for an autoencoder,
+# reconstruction quality is bounded by the bottleneck width almost by
+# definition, so every model encodes to the same scalar budget T (the nearest
+# multiple of H*W = 4,096 to the 64:1 point). Latent SHAPE is deliberately not
+# equalised — that geometry IS the architecture under test.
 #
-# WHAT CHANGED, AND WHY. The previous version solved for a fixed 64:1 RATIO and
-# let each model land wherever its quantisation allowed. On M3 that left vae-1d
-# 23.8% below target, because a 64:1 target of 5,376 is not a multiple of 4,096
-# and 4,096 is vae-1d's grain (one latent channel per 64x64 pixel).
-#
-# This version solves for a common reachable BUDGET instead: T = the nearest
-# multiple of H*W = 4,096 to the 64:1 point. 4,096 is divisible by
-# vae-standard's grain of 64, so BOTH per-pixel and spatial models land on T
-# EXACTLY. Worst deviation across all four datasets drops 23.8% -> 6.2%.
-#
-# The two that do not land exactly:
-#   vae-3d   — grain is (C_pad/8)*64, whose odd factor (11, 53, 57) makes an
-#              exact common multiple astronomical. Padding its depth to a power
-#              of two WOULD make it exact, and was rejected: on M3 that means 44
-#              replicated bands, so only 65.6% of its latent depth would encode
-#              real data. It would match the nominal number while mismatching
-#              the effective rate the number is supposed to measure.
-#   vae-our  — carries a latent_dim-sized global vector on top of a multiple of
-#              4,096, so it is always +latent_dim above T. Forcing exactness
-#              needs latent_dim = 4,096, which takes this model from 10.9M to
-#              105.3M parameters and stops its spatial stream being a bottleneck
-#              at all (8192 -> 4096 is a 2x squeeze).
-#
-# Latent SHAPE is deliberately not equalised — vae-standard is a spatial grid
-# with no spectral axis, vae-our is a global vector beside a full-resolution
-# per-pixel spectral map. That geometry IS the architecture under test. Only the
-# scalar count matches.
+# vae-our (post-Iteration-1) splits T between an 8x8 spatial grid and the
+# per-pixel spectral map: 64*d_s + 4,096*d_p. Both terms are multiples of 64,
+# so vae-our now lands on T EXACTLY (the old +256 global-vector residue is
+# gone). vae-3d's grain — (C_pad/8)*64, odd factor 11/53/57 — still prevents an
+# exact landing for it; its deviation is reported per cell.
 #
 # Regenerate with:  python utils/match_latent_rate.py --exact
 # Verify with:      python utils/match_latent_rate.py --exact --check
-spectral_latent_dim: 7           # vae-our  :  28,928 elements (+0.9%)
+spectral_latent_dim: 5           # vae-our d_p:  20,480 of T per-pixel spectral
+vae_our_spatial_latent_ch: 128   # vae-our d_s: + 8,192 spatial grid = 28,672 (EXACT)
 vae_standard_latent_ch: 448      # vae-std  :  28,672 elements (EXACT)
 vae_3d_latent_ch: 8            # vae-3d   :  29,184 elements (+1.8%)
 vae_1d_latent_dim: 7            # vae-1d   :  28,672 elements (EXACT)
 # worst deviation from T: 1.8% (tolerance +/-10%)
 
-# --- Baseline capacity: matched to vae-our within 0.99% ---
+# --- Capacity: REFERENCE WIDTHS, not parameter matching (protocol 2026-09-04) --
 #
-# RE-SOLVED after the latent-budget change above. Order matters: the rate knobs
-# feed the parameter count (vae-standard's 1x1 projections scale with
-# latent_ch; vae-our's LazyLinear scales with spectral_latent_dim), so the
-# parameter target moves whenever the latent does. Rate first, then parameters —
-# never the reverse.
+# Baselines run at the widths of their citable reference implementations,
+# identical across datasets (band count is the only thing that varies):
+#   vae_standard_base_ch 128 : AutoencoderKL encoder/decoder widths
+#                              (Rombach et al., CVPR 2022, latent-diffusion f8).
+#   vae_3d_base_ch 24        : compact 3-D conv stacks per the 3D-CAE of
+#                              Mei et al., IEEE TGRS 2019. REPRESENTATIVE
+#                              default — swap in the exact per-layer counts if
+#                              the PDF becomes accessible.
+#   vae_1d_hidden_dims       : 4 fully-connected layers, per-pixel spectral
+#                              (V)AE line (Palsson et al., IEEE Access 2018;
+#                              Liu et al., IEEE TGRS 2022).
 #
-# NOTE: parameter matching is no longer the PRIMARY defence against the capacity
-# confound. It is brittle (it moves every time the latent moves) and it forces
-# four architectures onto one number they have no reason to share. The primary
-# control is now post-hoc: capacity scaling curves, covariate regression on
-# log2(params) and log2(latent), and the Pareto frontier — see CLAUDE.md 12.
-# These widths are kept because a rough match costs nothing and removes the
-# crudest objection.
+# The old param-matched widths (85 / 46 / [2656,1328,664], solved to vae-our's
+# 11.3M) inflated vae-1d ~5x over any published spectral VAE and are suspected
+# in two training failures (vae-standard|AVIRIS|physics and vae-1d|CRIMS —
+# early-stopped at 21-27 epochs, val MSE ~0.018, never converged).
 #
-# vae-our target = 11,276,895 params
-# Regenerate with:  python utils/check-model-params.py --solve
-vae_standard_base_ch: 85                # 11,325,902 (+0.43%)
-vae_3d_base_ch: 46                      # 11,388,329 (+0.99%)
-vae_1d_hidden_dims: [2656, 1328, 664]   # 11,282,494 (+0.05%)
+# The capacity confound is handled post-hoc instead:
+#   * params column in every results table,
+#   * capacity points: the baselines SMALLER than vae-our and competitive on an
+#     axis — vae-1d (~0.8M, SAM) and vae-3d (~3.1M, fidelity) — re-trained at
+#     ~vae-our's param count (seed 42, IIRS+AVIRIS) via
+#     `check-model-params.py --solve-capacity`; vae-standard (~24M) is larger
+#     than vae-our, so it is defended by direction,
+#   * covariate regression + Pareto frontier (CLAUDE.md 12) unchanged.
+vae_standard_base_ch: 128               # Rombach et al. 2022 (AutoencoderKL)
+vae_3d_base_ch: 24                      # Mei et al. 2019 (3D-CAE, representative)
+vae_1d_hidden_dims: [512, 256, 128]     # Palsson 2018 / Liu 2022 (FC spectral AE)
+
+# vae-our capacity: natural width of the Iteration-1 spatial stream (block
+# channels r -> 2r -> 4r -> 8r). No longer solved to a baseline target — report
+# the params column and let the capacity points carry the size objection.
+reduced_dims: 64

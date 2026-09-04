@@ -36,3 +36,4 @@ AuthorKit27/
 # Kaggle upload archive built by scripts/train_fixed.sh (data/ is already ignored)
 dataset.zip
 ChatExport_*
+results*/

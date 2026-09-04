@@ -4,14 +4,15 @@
 # Run the full evaluation sweep after the overnight training grid finishes:
 #   1. inference/inference.py on every (model x dataset x loss) checkpoint,
 #      dumping metrics JSON under results/inference/.
-#   2. inference/probes.py — the FALSIFICATION SUITE, once per dataset (all
-#      models internally). Seven probes against thresholds preregistered in
-#      inference/preregistration.yaml. Writes results/probes/.
+#   2. inference/probes.py — mechanism DIAGNOSTICS (P2 latent rate, P3
+#      collapse, P4 spatial reliance + sam_valid), once per dataset (all
+#      models internally). No pass/fail adjudication — the falsification
+#      layer was demoted 2026-09-04 (docs/new_plan.md). Writes results/probes/.
 #   3. inference/downstream.py once per dataset (latent noise + interpolation),
 #      writing PNGs + JSON under results/downstream/<DATASET>/.
 #   4. inference/verdict.py — probes.csv, stats.csv (paired bootstrap +
-#      permutation + Holm) and VERDICT.txt, the readable answer to "why does my
-#      model beat or get beaten on each dataset".
+#      permutation + Holm) and DIAGNOSTICS.txt, the readable per-dataset
+#      summary (rate audit, collapse exclusions, SRI, pairwise SAMv).
 #   5. inference/aggregate.py for the reconstruction/downstream CSVs and one
 #      final Telegram summary.
 #
@@ -121,7 +122,8 @@ STANDARD_MODELS=("vae-standard" "vae-3d-spatio-spectral" "vae-1d-pixelwise")
 # legacy per-patch tree, which is a different (and far slower) code path. Make
 # the shard a hard precondition so that can't happen unnoticed.
 #   - test.npy  : the split every step evaluates on
-#   - train.npy : probes.py needs it for the P1 trivial floors and P5 baseline
+#   - train.npy : kept as a precondition for provenance/debugging even though
+#                 the P1/P5 probes that consumed it were removed (2026-09-04)
 MISSING_SHARDS=()
 for ds in "${DATASETS[@]}"; do
     for split in train test; do
@@ -244,10 +246,8 @@ for ds in "${DATASETS[@]}"; do
 done
 fi
 
-# ---- Step 2: falsification suite (one call per dataset x seed, all models) ----
-# One call rather than per cell: the trivial-predictor floors and the 1000-draw
-# random null are model-independent and are computed once per (dataset, seed)
-# and reused across that call's cells (inference/probes.py:p1_shared_floors).
+# ---- Step 2: mechanism diagnostics (one call per dataset x seed, all models) --
+# P2 latent-rate audit, P3 collapse detection, P4 spatial reliance + sam_valid.
 # For seeds after the first, only the physics cells exist, so --losses physics.
 if (( DO_PROBES )); then
 for ds in "${DATASETS[@]}"; do
@@ -313,9 +313,9 @@ echo "  failed  : ${#FAILED[@]}"
 if (( DO_PROBES )); then
     echo ""
     echo "  Results:"
-    echo "    ${OUT_DIR}/VERDICT.txt   <- read this one"
-    echo "    ${OUT_DIR}/probes.csv    per-cell probe metrics + verdicts"
-    echo "    ${OUT_DIR}/stats.csv     pairwise CIs, p-values, effect sizes"
+    echo "    ${OUT_DIR}/DIAGNOSTICS.txt   <- read this one"
+    echo "    ${OUT_DIR}/probes.csv        per-cell diagnostics (P2/P3/P4 + SAMv)"
+    echo "    ${OUT_DIR}/stats.csv         pairwise CIs, p-values, effect sizes"
 fi
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
     echo "  skipped runs:"

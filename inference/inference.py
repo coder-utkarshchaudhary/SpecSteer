@@ -23,7 +23,7 @@ import torch
 from modules.losses import spectral_angle_mapper_loss
 from modules.registry import MODEL_NAMES, build_model, resolve_checkpoint
 from utils.config import DATASETS, apply_dataset, settings
-from utils.hyperparams import apply_hyperparams, load_hyperparams
+from utils.hyperparams import apply_cli_overrides, apply_hyperparams, load_hyperparams
 from utils.logging_setup import get_run_logger, timestamp
 from utils.training.dataloader import build_dataloader
 
@@ -51,6 +51,46 @@ from modules.metrics import (  # noqa: E402,F401
 def compute_psnr_from_mse(mse: float, data_range: float = 1.0) -> float:
     """PSNR (dB) from an already-pooled MSE. data_range matches modules/metrics.py."""
     return 10.0 * math.log10(data_range ** 2 / max(mse, 1e-12))
+
+
+def _sam_valid_min_energy(default: float = 1.0e-8) -> float:
+    """
+    The valid-pixel energy threshold, from inference/preregistration.yaml
+    (p1_trivial_floors.sam_valid_min_energy) — the SAME epsilon probes.py uses,
+    so the headline table and the probe diagnostics agree on what a valid pixel
+    is. Falls back to the preregistered default if the YAML is unreadable.
+    """
+    try:
+        import yaml
+        cfg = yaml.safe_load(
+            (Path(__file__).parent / "preregistration.yaml").read_text())
+        return float(cfg["p1_trivial_floors"]["sam_valid_min_energy"])
+    except Exception:
+        return default
+
+
+def sam_valid_sums(x: torch.Tensor, recon: torch.Tensor,
+                   min_energy: float) -> tuple[float, int, int]:
+    """
+    Batch accumulator for pi/2-excluded SAM (same definition as
+    inference/probes.py:sam_valid, pooled over the whole split).
+
+    SAM normalises by sqrt(sum(x^2) + 1e-8); a pixel with spectral energy far
+    below that epsilon contributes exactly pi/2 whatever the model predicts
+    (CRIMS: ~24% of pixels -> a hard raw-SAM floor of ~0.38 rad unrelated to
+    model quality). Restricting the mean to valid pixels is what makes SAM
+    comparable across datasets.
+
+    Returns (sum of angles over valid pixels, n valid pixels, n total pixels).
+    """
+    energy = (x ** 2).sum(dim=-1)
+    mask = energy >= min_energy
+    dot = (x * recon).sum(dim=-1)
+    nt = torch.sqrt((x ** 2).sum(dim=-1) + 1e-8)
+    np_ = torch.sqrt((recon ** 2).sum(dim=-1) + 1e-8)
+    cos = torch.clamp(dot / (nt * np_ + 1e-8), -1 + 1e-8, 1 - 1e-8)
+    angles = torch.acos(cos)
+    return (float(angles[mask].sum()), int(mask.sum()), int(mask.numel()))
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +152,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=settings.num_workers)
     parser.add_argument("--out-json", default=None,
                         help="Optional path to dump the metrics as JSON for aggregation.")
+    parser.add_argument("--set", action="append", default=None, metavar="KEY=VALUE",
+                        help="One-off Settings override, repeatable — MUST match "
+                             "the --set values the checkpoint was trained with "
+                             "(capacity-point runs), or the rebuilt model's "
+                             "shapes will not match the state dict.")
     return parser.parse_args()
 
 
@@ -126,8 +171,12 @@ def main():
     # The per-dataset YAML sets the latent-rate and capacity knobs the model was
     # TRAINED with. Without this the model is rebuilt at the Settings dataclass
     # defaults and load_state_dict fails on a size mismatch for every cell.
-    # Mirrors train/train.py:588-590.
+    # Mirrors train/train.py. --set re-applies any one-off overrides the
+    # checkpoint was trained with (capacity points).
     apply_hyperparams(settings, load_hyperparams(args.dataset))
+    overrides = apply_cli_overrides(settings, args.set)
+    if overrides:
+        print(f"--set overrides active: {overrides}")
 
     logger = get_run_logger(
         "inference", args.model, args.dataset, loss=args.loss, ts=timestamp(),
@@ -167,6 +216,8 @@ def main():
     # sample count and dividing by the total recovers the split-wide mean; PSNR
     # is derived once from the pooled MSE rather than averaged in dB.
     mse_wsum = sam_wsum = ssim_wsum = 0.0
+    sam_valid_sum, n_valid_px, n_total_px = 0.0, 0, 0
+    min_energy = _sam_valid_min_energy()
     n_samples = 0
     n_batches = 0
     with torch.no_grad():
@@ -177,6 +228,10 @@ def main():
             mse_wsum += compute_mse(x, recon) * b
             sam_wsum += spectral_angle_mapper_loss(x, recon).item() * b
             ssim_wsum += compute_ssim(x, recon) * b
+            sv_sum, sv_n, sv_total = sam_valid_sums(x, recon, min_energy)
+            sam_valid_sum += sv_sum
+            n_valid_px += sv_n
+            n_total_px += sv_total
             n_samples += b
             n_batches += 1
 
@@ -194,6 +249,11 @@ def main():
         "n_samples": len(loader.dataset),
         "mse": mse,
         "sam_rad": sam_wsum / n_samples,
+        # pi/2-excluded SAM — the cross-dataset-comparable spectral number
+        # (definition shared with inference/probes.py). Any ranking on CRIMS
+        # MUST use this, never raw sam_rad.
+        "sam_valid": (sam_valid_sum / n_valid_px) if n_valid_px else float("nan"),
+        "valid_pixel_frac": (n_valid_px / n_total_px) if n_total_px else float("nan"),
         "psnr": float(compute_psnr_from_mse(mse)),
         "ssim": ssim_wsum / n_samples,
         "trained_epochs": ckpt_meta.get("epoch"),
@@ -205,6 +265,8 @@ def main():
     logger.info(f"Results over {metrics['n_samples']} {args.split} patches ({n_batches} batches):")
     logger.info(f"  MSE  : {metrics['mse']:.6f}")
     logger.info(f"  SAM  : {metrics['sam_rad']:.6f} rad")
+    logger.info(f"  SAMv : {metrics['sam_valid']:.6f} rad "
+                f"(pi/2-excluded; {100 * metrics['valid_pixel_frac']:.1f}% pixels valid)")
     logger.info(f"  PSNR : {metrics['psnr']:.4f} dB")
     logger.info(f"  SSIM : {metrics['ssim']:.4f}")
 

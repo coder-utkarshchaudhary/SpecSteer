@@ -79,6 +79,10 @@ CHECKED = [
     "spectral_latent_dim", "vae_standard_latent_ch", "vae_3d_latent_ch",
     "vae_1d_latent_dim",
     "vae_standard_base_ch", "vae_3d_base_ch", "vae_1d_hidden_dims",
+    # Iteration-1 vae-our knobs (2026-09-04): grid latent + natural width +
+    # fusion. latent_dim was REMOVED from Settings with the global vector.
+    "vae_our_spatial_latent_ch", "reduced_dims",
+    "vae_our_fusion_hidden", "vae_our_aux_mse_weight",
 ]
 
 

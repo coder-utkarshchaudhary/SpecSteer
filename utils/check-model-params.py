@@ -1,25 +1,27 @@
 """
 utils/check-model-params.py
 ---------------------------
-Fair-ablation parameter audit.
+Parameter audit + capacity-point solver.
 
-For every (model, dataset) pair, applies the dataset settings + per-dataset
-hyperparam YAML overrides, builds the model, runs a dummy forward to
-materialize LazyLinear layers, and prints total parameter count. Emits a
-4x3 table where every row should read within ~3% of vae-our per column.
+PROTOCOL (2026-09-04, docs/new_plan.md): baselines are NOT parameter-matched.
+They run at citable reference widths (see the YAML capacity sections); the
+capacity confound is answered post-hoc by (a) a params column in every results
+table — the audit here feeds it — and (b) CAPACITY POINTS: the baselines that
+compete with vae-our on the axis it wins get one extra training run at
+~vae-our's parameter count (seed 42), showing the ranking is capacity-robust.
 
-Also solves for the baseline capacity knobs: `--solve` binary-searches each
-baseline's width so its parameter count lands within tolerance of vae-our on
-that dataset, and prints YAML ready to paste into
-utils/hyperparam_configs/hyperparam-config-<DS>.yaml.
+The audit builds every (model, dataset) pair from the current YAMLs and prints
+total parameter counts with deltas vs vae-our. The deltas are INFORMATIONAL —
+they are expected to be large and are reported, not enforced.
 
-Re-run `--solve` after ANY change to modules/vae_*.py or to the spectral/spatial
-width knobs in utils/config.py — the widths currently in the YAMLs were solved
-against a different vae-our and will be stale.
+`--solve-capacity` binary-searches each baseline's width knob so its parameter
+count lands at vae-our's for that dataset. The output is the config for the
+CAPACITY-POINT runs only — do NOT paste it into the main hyperparam YAMLs
+(those hold the reference widths).
 
 Usage (from repo root, with venv active):
-    python utils/check-model-params.py            # audit the current YAMLs
-    python utils/check-model-params.py --solve    # re-derive the widths
+    python utils/check-model-params.py                   # params table (audit)
+    python utils/check-model-params.py --solve-capacity  # capacity-point knobs
 """
 
 from __future__ import annotations
@@ -142,13 +144,24 @@ def audit() -> None:
         print(f"{name:<24} {cells}   {ratios}")
 
 
-def solve(tolerance: float) -> None:
-    """Re-derive every baseline width and print paste-ready YAML."""
-    dataset_names = sorted(DATASETS)
+def solve_capacity(tolerance: float, datasets: list[str] | None = None) -> None:
+    """
+    Solve the CAPACITY-POINT configs: each baseline's width knob at ~vae-our's
+    parameter count for the dataset.
+
+    Protocol note: a capacity point is needed only for baselines SMALLER than
+    vae-our and competitive on some axis — at the reference widths that is
+    vae-1d (~0.6-0.8M, the SAM competitor) and vae-3d (~3.1M, the fidelity
+    competitor), seed 42, IIRS + AVIRIS. vae-standard (~23-24M, AutoencoderKL
+    widths) is LARGER than vae-our, so it is defended by direction and its row
+    here is informational. These values go into the capacity-point training
+    invocations, NOT into the main hyperparam YAMLs.
+    """
+    dataset_names = datasets or sorted(DATASETS)
     for ds in dataset_names:
         target = build_and_count("vae-our", ds)
-        print(f"\n# --- {ds}: vae-our target = {target:,} ({target / 1e6:.2f}M) ---")
-        print(f"# paste into utils/hyperparam_configs/hyperparam-config-{ds}.yaml")
+        print(f"\n# --- {ds}: capacity point = vae-our params = {target:,} ({target / 1e6:.2f}M) ---")
+        print("# For the capacity-point runs only (seed 42). Do NOT paste into the main YAMLs.")
         worst = 0.0
         for name in _WIDTH_KNOB:
             knob, make = _WIDTH_KNOB[name]
@@ -158,20 +171,25 @@ def solve(tolerance: float) -> None:
             value = make(w)
             rendered = (f"[{', '.join(str(v) for v in value)}]"
                         if isinstance(value, tuple) else str(value))
-            print(f"{knob}: {rendered}  # {n:,} ({err:+.2f}%)")
+            note = "" if name != "vae-standard" else "   (informational — already larger than vae-our)"
+            print(f"{knob}: {rendered}  # {n:,} ({err:+.2f}%){note}")
         flag = "" if worst <= tolerance else f"   <-- WORST {worst:.2f}% EXCEEDS {tolerance}%"
         print(f"# worst deviation: {worst:.2f}%{flag}")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Fair-ablation parameter audit.")
-    ap.add_argument("--solve", action="store_true",
-                    help="Re-derive baseline widths to match vae-our; print YAML.")
+    ap = argparse.ArgumentParser(description="Parameter audit + capacity-point solver.")
+    ap.add_argument("--solve-capacity", action="store_true",
+                    help="Solve baseline widths at ~vae-our's param count — the "
+                         "capacity-point configs (not for the main YAMLs).")
+    ap.add_argument("--datasets", nargs="*", default=None,
+                    help="Restrict --solve-capacity to these datasets "
+                         "(default: all; the protocol needs IIRS AVIRIS).")
     ap.add_argument("--tolerance", type=float, default=3.0,
                     help="Percent deviation considered acceptable (default 3).")
     args = ap.parse_args()
-    if args.solve:
-        solve(args.tolerance)
+    if args.solve_capacity:
+        solve_capacity(args.tolerance, args.datasets)
     else:
         audit()
 

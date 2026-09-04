@@ -87,8 +87,12 @@ def latent_elements_closed_form(model_name: str, s) -> int:
     if model_name == "vae-1d-pixelwise":
         return H * W * s.vae_1d_latent_dim
     if model_name == "vae-our":
-        # spatial global vector + full-resolution per-pixel spectral map
-        return s.latent_dim + s.spectral_latent_dim * H * W
+        # 8x8 spatial grid latent + full-resolution per-pixel spectral map.
+        # (Iteration 1 replaced the old `latent_dim` global vector with the
+        # grid — the +latent_dim residue that kept vae-our off T is gone, so
+        # vae-our now lands on T exactly wherever 64*d_s + 4096*d_p can.)
+        g = H // (2 ** s.n_2D_conv_blocks)
+        return s.vae_our_spatial_latent_ch * g * g + s.spectral_latent_dim * H * W
     raise ValueError(model_name)
 
 
@@ -110,9 +114,10 @@ def common_target(s, quantum: int = None) -> int:
     arbitrary: 4096 is `vae-1d`'s grain (one latent channel per pixel) and it is
     divisible by `vae-standard`'s grain of 64, so BOTH of those models land on T
     exactly. `vae-3d`'s grain is (C_pad/8)*64, whose odd factor (11, 53, 57)
-    makes an exact common multiple astronomical, and `vae-our` carries a
-    `latent_dim`-sized global vector on top of a multiple of 4096 -- so those two
-    land near T rather than on it, and their deviation is reported per cell.
+    makes an exact common multiple astronomical -- it lands near T rather than
+    on it, and its deviation is reported per cell. `vae-our` (post-Iteration-1)
+    is 64*d_s + 4096*d_p: since 4096 is a multiple of 64, any T that is a
+    multiple of 4096 is reachable EXACTLY by choosing d_s = (T - 4096*d_p)/64.
 
     Solving for a fixed 64:1 RATIO instead is what left M3's vae-1d 23.8% off:
     5,376 is not a multiple of 4,096, so the model nearest the target could only

@@ -38,10 +38,15 @@ _SETTINGS_FIELDS: set[str] = {
     # Latent-rate knobs. These set the size of the information bottleneck and are
     # per-dataset because a constant COMPRESSION RATIO implies a latent budget
     # that scales with band count. Distinct from the capacity knobs below, which
-    # set parameter count: rate and capacity are independent resources and the
-    # ablation controls for both. See utils/match_latent_rate.py.
-    "latent_dim",
+    # set parameter count: rate and capacity are independent resources; rate is
+    # matched exactly, capacity is reported + probed with capacity points.
+    # See utils/match_latent_rate.py.
     "spectral_latent_dim",
+    "vae_our_spatial_latent_ch",
+    # vae-our capacity/architecture knobs (per-dataset overridable).
+    "reduced_dims",
+    "vae_our_fusion_hidden",
+    "vae_our_aux_mse_weight",
     "vae_standard_base_ch",
     "vae_standard_n_down",
     "vae_standard_latent_ch",
@@ -94,6 +99,46 @@ def load_hyperparams(
             f"Allowed: {sorted(_ALL_ALLOWED)}."
         )
     return raw
+
+
+def apply_cli_overrides(settings, pairs: list[str] | None) -> dict[str, Any]:
+    """
+    Apply repeatable ``--set KEY=VALUE`` CLI overrides onto `settings`, AFTER
+    apply_hyperparams, so a one-off run can deviate from the YAML without
+    editing it. This exists for the CAPACITY-POINT runs (docs/new_plan.md):
+    e.g. ``--set vae_3d_base_ch=30`` or ``--set vae_1d_hidden_dims=[1788,894,447]``.
+
+    Values are parsed as Python literals (int/float/list/bool), falling back to
+    the raw string; lists become tuples (matching the dataclass field types).
+    KEY must be an existing Settings attribute — typos fail loudly. Derived
+    dims are recomputed. Returns {key: parsed_value} for logging/provenance.
+
+    IMPORTANT: a checkpoint trained with overrides must be evaluated with the
+    SAME overrides (inference.py also accepts --set), or the rebuilt model's
+    shapes will not match the state dict. Keep such checkpoints in their own
+    --ckpt-dir so they can never be confused with the main grid's.
+    """
+    import ast
+
+    applied: dict[str, Any] = {}
+    for pair in pairs or []:
+        if "=" not in pair:
+            raise ValueError(f"--set expects KEY=VALUE, got {pair!r}")
+        key, raw = pair.split("=", 1)
+        key = key.strip()
+        if not hasattr(settings, key):
+            raise ValueError(f"--set {key}: unknown Settings attribute")
+        try:
+            value = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            value = raw
+        if isinstance(value, list):
+            value = tuple(value)
+        setattr(settings, key, value)
+        applied[key] = value
+    if applied:
+        settings.__post_init__()
+    return applied
 
 
 def apply_hyperparams(settings, hp: dict[str, Any]) -> None:

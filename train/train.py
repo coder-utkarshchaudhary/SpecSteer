@@ -55,7 +55,7 @@ from modules.registry import (
     checkpoint_name,
 )
 from utils.config import DATASETS, apply_dataset, settings, verify_channels
-from utils.hyperparams import apply_hyperparams, load_hyperparams
+from utils.hyperparams import apply_cli_overrides, apply_hyperparams, load_hyperparams
 from utils.logging_setup import (
     get_run_logger,
     log_tensor,
@@ -234,7 +234,24 @@ def train_vae(
         logger = logging.getLogger(__name__)
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    # 5-epoch linear warmup (0.01x -> 1x lr), then the cosine decay over the
+    # remaining epochs. Added for the 2026-09 retrain (docs/new_plan.md): the
+    # 2026-08 grid showed early-epoch instability on the small/unstable cells
+    # (vae-standard|AVIRIS frozen from epoch 2; CRIMS seed instability), and a
+    # warmup is the standard, model-agnostic fix. Applied identically to every
+    # model x dataset x loss cell, so within-dataset fairness is untouched.
+    warmup_epochs = min(5, max(1, epochs // 10))
+    scheduler = optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.01, end_factor=1.0,
+                total_iters=warmup_epochs),
+            optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(1, epochs - warmup_epochs)),
+        ],
+        milestones=[warmup_epochs],
+    )
 
     model.to(device)
     ckpt_meta = ckpt_meta or {}
@@ -539,6 +556,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--beta", type=float, default=None)
     parser.add_argument("--lambda-physics", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--set", action="append", default=None, metavar="KEY=VALUE",
+                        help="One-off Settings override, repeatable (e.g. "
+                             "--set vae_3d_base_ch=30). Applied after the "
+                             "dataset YAML. For the capacity-point runs — "
+                             "evaluate with the SAME --set values and keep "
+                             "such checkpoints in their own --ckpt-dir.")
 
     # Checkpointing
     parser.add_argument("--ckpt-dir", default="model")
@@ -588,6 +611,9 @@ def main():
     apply_dataset(args.dataset)
     hp = load_hyperparams(args.dataset)
     apply_hyperparams(settings, hp)
+    # One-off Settings overrides (capacity points etc.). Applied AFTER the YAML
+    # so they win; evaluate such checkpoints with the same --set values.
+    overrides = apply_cli_overrides(settings, args.set)
 
     epochs = _resolve(args.epochs, hp, "epochs", 100)
     batch_size = _resolve(args.batch_size, hp, "batch_size", settings.batch_size)
@@ -619,6 +645,8 @@ def main():
     logger.info(f"  epochs        : {epochs}  batch_size: {batch_size}  workers: {num_workers}")
     logger.info(f"  lr            : {lr}  beta: {beta}  lambda_physics: {lambda_physics}")
     logger.info(f"  wd            : {weight_decay}  patience: {patience}  seed: {seed}")
+    if overrides:
+        logger.info(f"  --set         : {overrides}  (one-off Settings overrides)")
     logger.info(f"  compile       : {args.compile}  allow_multi_gpu: {args.allow_multi_gpu}")
     logger.info(f"  debug_epochs  : {args.debug_epochs}")
     logger.info("==============================================")
