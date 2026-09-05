@@ -33,7 +33,7 @@ GRID_DATASETS=("IIRS" "AVIRIS" "CRIMS")
 
 # Seeds. Override with e.g. GRID_SEEDS="42 7" to split work across machines.
 # shellcheck disable=SC2206
-GRID_SEEDS=(${GRID_SEEDS:-42 7 1234})
+GRID_SEEDS=(${GRID_SEEDS:-69})
 
 # For each dataset, 7 configs in this fixed order. Field 4 marks whether the cell
 # carries the claim (and therefore gets every seed).

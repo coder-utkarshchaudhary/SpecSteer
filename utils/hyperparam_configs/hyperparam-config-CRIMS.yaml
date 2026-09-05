@@ -19,7 +19,7 @@
 # patience 7 -> 12 — applied identically to ALL models (fairness holds within
 # the dataset; there is no cross-dataset comparison to protect). The 5-epoch
 # linear LR warmup lives in train/train.py and applies everywhere.
-epochs: 80
+epochs: 60
 lr: 1.0e-3
 
 # Batch size is held constant across all 4 models x 2 loss regimes WITHIN this

@@ -15,7 +15,7 @@
 # 50 is the operative grid value (the 2026-08 grid trained 50 planned epochs via
 # a CLI override; the YAML now carries it directly so scripts/train.sh no longer
 # injects a uniform --epochs and CRIMS can differ).
-epochs: 50
+epochs: 30
 lr: 1.0e-3
 
 # Batch size is held constant across all 4 models x 2 loss regimes WITHIN this
