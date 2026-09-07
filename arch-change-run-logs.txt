@@ -1,0 +1,1230 @@
+[05/09/2026 15:11] AAAI KA BOT: [START] vae-our | IIRS | physics | seed 69  #10493
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 15:37] AAAI KA BOT: [HB] vae-our | IIRS | physics | seed 69  #10493
+epoch 10/30  ·  wall 25m22s  ·  ETA 33m18s
+               train         val
+loss        0.240313    0.236728
+mse         0.143384    0.142245
+sam         0.319337    0.311147
+kld         1.127377    1.138434
+psnr               -        9.03
+ssim               -      0.1598
+best SAM so far: epoch 10 (val_sam=0.311147)
+[05/09/2026 15:53] AAAI KA BOT: [HB] vae-our | IIRS | physics | seed 69  #10493
+epoch 20/30  ·  wall 42m08s  ·  ETA 16m37s
+               train         val
+loss        0.239610    0.235925
+mse         0.143798    0.142067
+sam         0.315893    0.309322
+kld         1.044489    1.061463
+psnr               -        9.03
+ssim               -      0.1584
+best SAM so far: epoch 18 (val_sam=0.307670)
+[05/09/2026 16:10] AAAI KA BOT: [HB] vae-our | IIRS | physics | seed 69  #10493
+epoch 30/30  ·  wall 58m48s  ·  ETA 0m00s
+               train         val
+loss        0.239507    0.235862
+mse         0.143836    0.142644
+sam         0.315455    0.307230
+kld         1.034490    1.048602
+psnr               -        9.05
+ssim               -      0.1592
+best SAM so far: epoch 23 (val_sam=0.306878)
+[05/09/2026 16:10] AAAI KA BOT: [STOP] vae-our | IIRS | physics | seed 69  #10493
+epochs 30/30  ·  wall 58m49s  ·  peak GPU 15.4 GB
+best @ epoch 23: 0.306878 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.2403     0.2367     0.1422     0.3111     9.03   0.1598  
+  20     0.2396     0.2359     0.1421     0.3093     9.03   0.1584  
+  30     0.2395     0.2359     0.1426     0.3072     9.05   0.1592  
+ckpt: vae-our_seed69_bestsam.pt, vae-our_seed69_bestmse.pt
+[05/09/2026 16:10] AAAI KA BOT: [START] vae-standard | IIRS | standard | seed 69  #11055
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 16:17] AAAI KA BOT: [HB] vae-standard | IIRS | standard | seed 69  #11055
+epoch 10/30  ·  wall 6m41s  ·  ETA 13m11s
+               train         val
+loss        0.000289    0.000289
+mse         0.000278    0.000273
+sam         0.286970    0.289346
+kld         0.010863    0.015420
+psnr               -       35.95
+ssim               -      0.9147
+best SAM so far: epoch 10 (val_sam=0.289346)
+[05/09/2026 16:23] AAAI KA BOT: [HB] vae-standard | IIRS | standard | seed 69  #11055
+epoch 20/30  ·  wall 13m14s  ·  ETA 6m32s
+               train         val
+loss        0.000263    0.000273
+mse         0.000251    0.000257
+sam         0.272666    0.280102
+kld         0.012671    0.016087
+psnr               -       36.22
+ssim               -      0.9194
+best SAM so far: epoch 19 (val_sam=0.278835)
+[05/09/2026 16:30] AAAI KA BOT: [HB] vae-standard | IIRS | standard | seed 69  #11055
+epoch 30/30  ·  wall 19m52s  ·  ETA 0m00s
+               train         val
+loss        0.000249    0.000255
+mse         0.000239    0.000245
+sam         0.268270    0.276922
+kld         0.009646    0.010434
+psnr               -       36.45
+ssim               -      0.9236
+best SAM so far: epoch 26 (val_sam=0.276299)
+[05/09/2026 16:30] AAAI KA BOT: [OK] vae-standard | IIRS | standard | seed 69  #11055
+epochs 30/30  ·  wall 19m54s  ·  peak GPU 5.5 GB
+best @ epoch 26: 0.276299 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0003     0.0003     0.0003     0.2893    35.95   0.9147  
+  20     0.0003     0.0003     0.0003     0.2801    36.22   0.9194  
+  30     0.0002     0.0003     0.0002     0.2769    36.45   0.9236  
+ckpt: vae-standard_standard_seed69_bestsam.pt, vae-standard_standard_seed69_bestmse.pt
+[05/09/2026 16:30] AAAI KA BOT: [START] vae-standard | IIRS | physics | seed 69  #11286
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 16:37] AAAI KA BOT: [HB] vae-standard | IIRS | physics | seed 69  #11286
+epoch 10/30  ·  wall 6m40s  ·  ETA 13m10s
+               train         val
+loss        0.072334    0.074915
+mse         0.000336    0.000371
+sam         0.239449    0.247803
+kld         0.162987    0.202268
+psnr               -       34.59
+ssim               -      0.8869
+best SAM so far: epoch 10 (val_sam=0.247803)
+[05/09/2026 16:43] AAAI KA BOT: [HB] vae-standard | IIRS | physics | seed 69  #11286
+epoch 20/30  ·  wall 13m18s  ·  ETA 6m36s
+               train         val
+loss        0.063602    0.066382
+mse         0.000191    0.000199
+sam         0.209836    0.218981
+kld         0.460048    0.488719
+psnr               -       37.34
+ssim               -      0.9311
+best SAM so far: epoch 20 (val_sam=0.218981)
+[05/09/2026 16:50] AAAI KA BOT: [HB] vae-standard | IIRS | physics | seed 69  #11286
+epoch 30/30  ·  wall 19m57s  ·  ETA 0m00s
+               train         val
+loss        0.058158    0.061532
+mse         0.000142    0.000154
+sam         0.191007    0.202176
+kld         0.713598    0.724747
+psnr               -       38.49
+ssim               -      0.9407
+best SAM so far: epoch 30 (val_sam=0.202176)
+[05/09/2026 16:50] AAAI KA BOT: [OK] vae-standard | IIRS | physics | seed 69  #11286
+epochs 30/30  ·  wall 19m58s  ·  peak GPU 5.5 GB
+best @ epoch 30: 0.202176 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0723     0.0749     0.0004     0.2478    34.59   0.8869  
+  20     0.0636     0.0664     0.0002     0.2190    37.34   0.9311  
+  30     0.0582     0.0615     0.0002     0.2022    38.49   0.9407 *
+(*) new best val SAM checkpoint
+ckpt: vae-standard_physics_seed69_bestsam.pt, vae-standard_physics_seed69_bestmse.pt
+[05/09/2026 16:50] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | standard | seed 69  #11519
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 16:57] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | standard | seed 69  #11519
+epoch 10/30  ·  wall 6m57s  ·  ETA 13m42s
+               train         val
+loss        0.000517    0.000571
+mse         0.000373    0.000391
+sam         0.284073    0.293765
+kld         0.144153    0.180340
+psnr               -       34.18
+ssim               -      0.8339
+best SAM so far: epoch 9 (val_sam=0.291529)
+[05/09/2026 17:04] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | standard | seed 69  #11519
+epoch 20/30  ·  wall 13m48s  ·  ETA 6m49s
+               train         val
+loss        0.000514    0.000567
+mse         0.000367    0.000390
+sam         0.282851    0.291786
+kld         0.147150    0.177830
+psnr               -       34.19
+ssim               -      0.8328
+best SAM so far: epoch 19 (val_sam=0.290691)
+[05/09/2026 17:11] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | standard | seed 69  #11519
+epoch 30/30  ·  wall 20m39s  ·  ETA 0m00s
+               train         val
+loss        0.000507    0.000558
+mse         0.000344    0.000365
+sam         0.277233    0.285139
+kld         0.163402    0.193145
+psnr               -       34.47
+ssim               -      0.8355
+best SAM so far: epoch 29 (val_sam=0.284917)
+[05/09/2026 17:11] AAAI KA BOT: [OK] vae-1d-pixelwise | IIRS | standard | seed 69  #11519
+epochs 30/30  ·  wall 20m41s  ·  peak GPU 3.5 GB
+best @ epoch 29: 0.284917 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0005     0.0006     0.0004     0.2938    34.18   0.8339  
+  20     0.0005     0.0006     0.0004     0.2918    34.19   0.8328  
+  30     0.0005     0.0006     0.0004     0.2851    34.47   0.8355  
+ckpt: vae-1d-pixelwise_standard_seed69_bestsam.pt, vae-1d-pixelwise_standard_seed69_bestmse.pt
+[05/09/2026 17:11] AAAI KA BOT: [START] vae-1d-pixelwise | IIRS | physics | seed 69  #11757
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 17:18] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | physics | seed 69  #11757
+epoch 10/30  ·  wall 7m00s  ·  ETA 13m51s
+               train         val
+loss        0.038827    0.040787
+mse         0.000364    0.000483
+sam         0.119705    0.125782
+kld         2.551275    2.569783
+psnr               -       33.59
+ssim               -      0.8605
+best SAM so far: epoch 10 (val_sam=0.125782)
+[05/09/2026 17:25] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | physics | seed 69  #11757
+epoch 20/30  ·  wall 13m56s  ·  ETA 6m54s
+               train         val
+loss        0.037773    0.039742
+mse         0.000351    0.000461
+sam         0.115986    0.122153
+kld         2.626218    2.634983
+psnr               -       33.78
+ssim               -      0.8653
+best SAM so far: epoch 19 (val_sam=0.121981)
+[05/09/2026 17:32] AAAI KA BOT: [HB] vae-1d-pixelwise | IIRS | physics | seed 69  #11757
+epoch 30/30  ·  wall 20m52s  ·  ETA 0m00s
+               train         val
+loss        0.037316    0.039312
+mse         0.000346    0.000441
+sam         0.114384    0.120666
+kld         2.655434    2.670573
+psnr               -       33.92
+ssim               -      0.8671
+best SAM so far: epoch 28 (val_sam=0.120634)
+[05/09/2026 17:32] AAAI KA BOT: [OK] vae-1d-pixelwise | IIRS | physics | seed 69  #11757
+epochs 30/30  ·  wall 20m53s  ·  peak GPU 3.3 GB
+best @ epoch 28: 0.120634 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0388     0.0408     0.0005     0.1258    33.59   0.8605  
+  20     0.0378     0.0397     0.0005     0.1222    33.78   0.8653  
+  30     0.0373     0.0393     0.0004     0.1207    33.92   0.8671  
+ckpt: vae-1d-pixelwise_physics_seed69_bestsam.pt, vae-1d-pixelwise_physics_seed69_bestmse.pt
+[05/09/2026 17:32] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | physics | seed 69  #11996
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 17:36] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | physics | seed 69  #12108
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 17:40] AAAI KA BOT: [START] vae-3d-spatio-spectral | IIRS | standard | seed 69  #12222
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 32
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 18:03] AAAI KA BOT: [HB] vae-3d-spatio-spectral | IIRS | standard | seed 69  #12222
+epoch 10/30  ·  wall 22m59s  ·  ETA 40m26s
+               train         val
+loss        0.000307    0.000314
+mse         0.000258    0.000259
+sam         0.294330    0.305247
+kld         0.048951    0.055125
+psnr               -       36.12
+ssim               -      0.9084
+best SAM so far: epoch 10 (val_sam=0.305247)
+[05/09/2026 18:23] AAAI KA BOT: [HB] vae-3d-spatio-spectral | IIRS | standard | seed 69  #12222
+epoch 20/30  ·  wall 43m12s  ·  ETA 20m11s
+               train         val
+loss        0.000291    0.000300
+mse         0.000240    0.000246
+sam         0.283158    0.296129
+kld         0.050511    0.053893
+psnr               -       36.34
+ssim               -      0.9116
+best SAM so far: epoch 17 (val_sam=0.295764)
+[05/09/2026 18:44] AAAI KA BOT: [HB] vae-3d-spatio-spectral | IIRS | standard | seed 69  #12222
+epoch 30/30  ·  wall 1h03m25s  ·  ETA 0m00s
+               train         val
+loss        0.000288    0.000298
+mse         0.000238    0.000243
+sam         0.282100    0.295331
+kld         0.050606    0.054503
+psnr               -       36.39
+ssim               -      0.9126
+best SAM so far: epoch 27 (val_sam=0.295068)
+[05/09/2026 18:44] AAAI KA BOT: [OK] vae-3d-spatio-spectral | IIRS | standard | seed 69  #12222
+epochs 30/30  ·  wall 1h03m26s  ·  peak GPU 22.6 GB
+best @ epoch 27: 0.295068 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0003     0.0003     0.0003     0.3052    36.12   0.9084  
+  20     0.0003     0.0003     0.0002     0.2961    36.34   0.9116  
+  30     0.0003     0.0003     0.0002     0.2953    36.39   0.9126  
+ckpt: vae-3d-spatio-spectral_standard_seed69_bestsam.pt, vae-3d-spatio-spectral_standard_seed69_bestmse.pt
+[05/09/2026 18:44] AAAI KA BOT: [START] vae-our | AVIRIS | physics | seed 69  #12699
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 19:23] AAAI KA BOT: [HB] vae-our | AVIRIS | physics | seed 69  #12699
+epoch 10/30  ·  wall 39m19s  ·  ETA 52m50s
+               train         val
+loss        0.125595    0.123651
+mse         0.058357    0.057453
+sam         0.221113    0.217697
+kld         0.904799    0.888176
+psnr               -       15.86
+ssim               -      0.6796
+best SAM so far: epoch 10 (val_sam=0.217697)
+[05/09/2026 19:41] AAAI KA BOT: [STOP] vae-our | AVIRIS | physics | seed 69  #12699
+epochs 17/30  ·  wall 57m49s  ·  peak GPU 12.8 GB
+best @ epoch 10: 0.217697 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.1256     0.1237     0.0575     0.2177    15.86   0.6796 *
+  17     0.1251     0.1231     0.0567     0.2191    15.80   0.6811  
+(*) new best val SAM checkpoint
+ckpt: vae-our_seed69_bestsam.pt, vae-our_seed69_bestmse.pt
+[05/09/2026 19:42] AAAI KA BOT: [START] vae-standard | AVIRIS | standard | seed 69  #13138
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 19:51] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard | seed 69  #13138
+epoch 10/30  ·  wall 9m45s  ·  ETA 19m13s
+               train         val
+loss        0.002094    0.002999
+mse         0.002020    0.002918
+sam         0.081449    0.106864
+kld         0.074759    0.081447
+psnr               -       25.64
+ssim               -      0.7457
+best SAM so far: epoch 7 (val_sam=0.082666)
+[05/09/2026 20:01] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard | seed 69  #13138
+epoch 20/30  ·  wall 19m29s  ·  ETA 9m42s
+               train         val
+loss        0.000958    0.000994
+mse         0.000892    0.000926
+sam         0.056531    0.058623
+kld         0.066003    0.067261
+psnr               -       30.64
+ssim               -      0.7847
+best SAM so far: epoch 20 (val_sam=0.058623)
+[05/09/2026 20:11] AAAI KA BOT: [HB] vae-standard | AVIRIS | standard | seed 69  #13138
+epoch 30/30  ·  wall 29m12s  ·  ETA 0m00s
+               train         val
+loss        0.000818    0.000910
+mse         0.000754    0.000845
+sam         0.052067    0.055161
+kld         0.064191    0.065618
+psnr               -       31.02
+ssim               -      0.7918
+best SAM so far: epoch 28 (val_sam=0.055137)
+[05/09/2026 20:11] AAAI KA BOT: [OK] vae-standard | AVIRIS | standard | seed 69  #13138
+epochs 30/30  ·  wall 29m18s  ·  peak GPU 7.7 GB
+best @ epoch 28: 0.055137 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0021     0.0030     0.0029     0.1069    25.64   0.7457  
+  20     0.0010     0.0010     0.0009     0.0586    30.64   0.7847  
+  30     0.0008     0.0009     0.0008     0.0552    31.02   0.7918  
+ckpt: vae-standard_standard_seed69_bestsam.pt, vae-standard_standard_seed69_bestmse.pt
+[05/09/2026 20:11] AAAI KA BOT: [START] vae-standard | AVIRIS | physics | seed 69  #13419
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 20:11] AAAI KA BOT: [START] vae-standard | AVIRIS | physics | seed 69  #13512
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 20:21] AAAI KA BOT: [HB] vae-standard | AVIRIS | physics | seed 69  #13512
+epoch 10/30  ·  wall 9m51s  ·  ETA 19m16s
+               train         val
+loss        0.062519    0.062603
+mse         0.035153    0.034041
+sam         0.091219    0.095207
+kld         0.000401    0.000417
+psnr               -       15.61
+ssim               -      0.7320
+best SAM so far: epoch 5 (val_sam=0.095060)
+[05/09/2026 20:23] AAAI KA BOT: [STOP] vae-standard | AVIRIS | physics | seed 69  #13512
+epochs 12/30  ·  wall 11m52s  ·  peak GPU 7.7 GB
+best @ epoch 5: 0.095060 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0625     0.0626     0.0340     0.0952    15.61   0.7320  
+  12     0.0625     0.0628     0.0341     0.0956    15.56   0.7308  
+ckpt: vae-standard_physics_seed69_bestsam.pt, vae-standard_physics_seed69_bestmse.pt
+[05/09/2026 20:23] AAAI KA BOT: [START] vae-1d-pixelwise | AVIRIS | standard | seed 69  #13700
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 20:32] AAAI KA BOT: [HB] vae-1d-pixelwise | AVIRIS | standard | seed 69  #13700
+epoch 10/30  ·  wall 8m53s  ·  ETA 17m45s
+               train         val
+loss        0.001542    0.001435
+mse         0.000929    0.000827
+sam         0.051800    0.052179
+kld         0.612366    0.608454
+psnr               -       31.02
+ssim               -      0.7631
+best SAM so far: epoch 10 (val_sam=0.052179)
+[05/09/2026 20:41] AAAI KA BOT: [HB] vae-1d-pixelwise | AVIRIS | standard | seed 69  #13700
+epoch 20/30  ·  wall 17m44s  ·  ETA 8m51s
+               train         val
+loss        0.001138    0.001202
+mse         0.000505    0.000540
+sam         0.044204    0.044999
+kld         0.632390    0.662063
+psnr               -       32.83
+ssim               -      0.7779
+best SAM so far: epoch 19 (val_sam=0.044912)
+[05/09/2026 20:50] AAAI KA BOT: [HB] vae-1d-pixelwise | AVIRIS | standard | seed 69  #13700
+epoch 30/30  ·  wall 26m30s  ·  ETA 0m00s
+               train         val
+loss        0.001054    0.001113
+mse         0.000439    0.000465
+sam         0.043316    0.044367
+kld         0.614835    0.648682
+psnr               -       33.44
+ssim               -      0.7912
+best SAM so far: epoch 27 (val_sam=0.044344)
+[05/09/2026 20:50] AAAI KA BOT: [OK] vae-1d-pixelwise | AVIRIS | standard | seed 69  #13700
+epochs 30/30  ·  wall 26m31s  ·  peak GPU 2.2 GB
+best @ epoch 27: 0.044344 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0015     0.0014     0.0008     0.0522    31.02   0.7631  
+  20     0.0011     0.0012     0.0005     0.0450    32.83   0.7779  
+  30     0.0011     0.0011     0.0005     0.0444    33.44   0.7912  
+ckpt: vae-1d-pixelwise_standard_seed69_bestsam.pt, vae-1d-pixelwise_standard_seed69_bestmse.pt
+[05/09/2026 20:50] AAAI KA BOT: [START] vae-1d-pixelwise | AVIRIS | physics | seed 69  #13969
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 21:00] AAAI KA BOT: [HB] vae-1d-pixelwise | AVIRIS | physics | seed 69  #13969
+epoch 10/30  ·  wall 9m55s  ·  ETA 19m37s
+               train         val
+loss        0.011998    0.011579
+mse         0.000795    0.000520
+sam         0.033237    0.032683
+kld         1.231811    1.253891
+psnr               -       33.05
+ssim               -      0.8107
+best SAM so far: epoch 10 (val_sam=0.032683)
+[05/09/2026 21:10] AAAI KA BOT: [HB] vae-1d-pixelwise | AVIRIS | physics | seed 69  #13969
+epoch 20/30  ·  wall 19m45s  ·  ETA 9m48s
+               train         val
+loss        0.010355    0.010740
+mse         0.000334    0.000436
+sam         0.028788    0.029645
+kld         1.384159    1.410497
+psnr               -       33.85
+ssim               -      0.8333
+best SAM so far: epoch 19 (val_sam=0.029601)
+[05/09/2026 21:20] AAAI KA BOT: [HB] vae-1d-pixelwise | AVIRIS | physics | seed 69  #13969
+epoch 30/30  ·  wall 29m34s  ·  ETA 0m00s
+               train         val
+loss        0.010066    0.010187
+mse         0.000278    0.000291
+sam         0.028034    0.028305
+kld         1.378290    1.403771
+psnr               -       35.52
+ssim               -      0.8393
+best SAM so far: epoch 30 (val_sam=0.028305)
+[05/09/2026 21:20] AAAI KA BOT: [OK] vae-1d-pixelwise | AVIRIS | physics | seed 69  #13969
+epochs 30/30  ·  wall 29m40s  ·  peak GPU 2.0 GB
+best @ epoch 30: 0.028305 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0120     0.0116     0.0005     0.0327    33.05   0.8107  
+  20     0.0104     0.0107     0.0004     0.0296    33.85   0.8333  
+  30     0.0101     0.0102     0.0003     0.0283    35.52   0.8393 *
+(*) new best val SAM checkpoint
+ckpt: vae-1d-pixelwise_physics_seed69_bestsam.pt, vae-1d-pixelwise_physics_seed69_bestmse.pt
+[05/09/2026 21:20] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | physics | seed 69  #14254
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 21:25] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | physics | seed 69  #14408
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 21:30] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | standard | seed 69  #14554
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 21:35] AAAI KA BOT: [START] vae-3d-spatio-spectral | AVIRIS | standard | seed 69  #14713
+host: mlr-nihal-workstation
+planned: 30 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 30
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 7
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 21:40] AAAI KA BOT: [START] vae-our | CRIMS | physics | seed 69  #14864
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 21:54] AAAI KA BOT: [HB] vae-our | CRIMS | physics | seed 69  #14864
+epoch 10/60  ·  wall 13m51s  ·  ETA 47m20s
+               train         val
+loss        0.256481    0.247649
+mse         0.076625    0.073685
+sam         0.595717    0.576127
+kld         1.140534    1.125138
+psnr               -       12.46
+ssim               -      0.5613
+best SAM so far: epoch 8 (val_sam=0.575706)
+[05/09/2026 22:03] AAAI KA BOT: [HB] vae-our | CRIMS | physics | seed 69  #14864
+epoch 20/60  ·  wall 23m23s  ·  ETA 37m46s
+               train         val
+loss        0.254815    0.246145
+mse         0.076551    0.073529
+sam         0.591102    0.572353
+kld         0.933425    0.910446
+psnr               -       12.49
+ssim               -      0.5618
+best SAM so far: epoch 19 (val_sam=0.570227)
+[05/09/2026 22:13] AAAI KA BOT: [HB] vae-our | CRIMS | physics | seed 69  #14864
+epoch 30/60  ·  wall 32m48s  ·  ETA 28m09s
+               train         val
+loss        0.254811    0.246273
+mse         0.076699    0.073917
+sam         0.590806    0.571622
+kld         0.870061    0.869442
+psnr               -       12.52
+ssim               -      0.5646
+best SAM so far: epoch 19 (val_sam=0.570227)
+[05/09/2026 22:14] AAAI KA BOT: [STOP] vae-our | CRIMS | physics | seed 69  #14864
+epochs 31/60  ·  wall 33m46s  ·  peak GPU 13.7 GB
+best @ epoch 19: 0.570227 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.2565     0.2476     0.0737     0.5761    12.46   0.5613  
+  20     0.2548     0.2461     0.0735     0.5724    12.49   0.5618  
+  30     0.2548     0.2463     0.0739     0.5716    12.52   0.5646  
+  31     0.2548     0.2462     0.0737     0.5722    12.50   0.5638  
+ckpt: vae-our_seed69_bestsam.pt, vae-our_seed69_bestmse.pt
+[05/09/2026 22:14] AAAI KA BOT: [START] vae-standard | CRIMS | standard | seed 69  #15169
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 22:17] AAAI KA BOT: [HB] vae-standard | CRIMS | standard | seed 69  #15169
+epoch 10/60  ·  wall 3m21s  ·  ETA 16m17s
+               train         val
+loss        0.002608    0.002442
+mse         0.002455    0.002302
+sam         0.554833    0.529287
+kld         0.152630    0.139878
+psnr               -       26.94
+ssim               -      0.9073
+best SAM so far: epoch 10 (val_sam=0.529287)
+[05/09/2026 22:20] AAAI KA BOT: [HB] vae-standard | CRIMS | standard | seed 69  #15169
+epoch 20/60  ·  wall 6m33s  ·  ETA 12m45s
+               train         val
+loss        0.002022    0.002144
+mse         0.001912    0.002033
+sam         0.549751    0.528921
+kld         0.109811    0.110559
+psnr               -       27.48
+ssim               -      0.9142
+best SAM so far: epoch 19 (val_sam=0.526736)
+[05/09/2026 22:24] AAAI KA BOT: [HB] vae-standard | CRIMS | standard | seed 69  #15169
+epoch 30/60  ·  wall 9m47s  ·  ETA 9m25s
+               train         val
+loss        0.001870    0.002080
+mse         0.001785    0.001999
+sam         0.550823    0.525914
+kld         0.085451    0.080525
+psnr               -       27.67
+ssim               -      0.9210
+best SAM so far: epoch 25 (val_sam=0.525674)
+[05/09/2026 22:27] AAAI KA BOT: [HB] vae-standard | CRIMS | standard | seed 69  #15169
+epoch 40/60  ·  wall 12m57s  ·  ETA 6m17s
+               train         val
+loss        0.001693    0.001888
+mse         0.001621    0.001815
+sam         0.554363    0.533491
+kld         0.071351    0.073102
+psnr               -       28.11
+ssim               -      0.9215
+best SAM so far: epoch 25 (val_sam=0.525674)
+[05/09/2026 22:30] AAAI KA BOT: [HB] vae-standard | CRIMS | standard | seed 69  #15169
+epoch 50/60  ·  wall 16m15s  ·  ETA 3m15s
+               train         val
+loss        0.000805    0.001050
+mse         0.000723    0.000967
+sam         0.538167    0.518231
+kld         0.081385    0.082590
+psnr               -       30.89
+ssim               -      0.9229
+best SAM so far: epoch 50 (val_sam=0.518231)
+[05/09/2026 22:33] AAAI KA BOT: [HB] vae-standard | CRIMS | standard | seed 69  #15169
+epoch 60/60  ·  wall 19m31s  ·  ETA 0m00s
+               train         val
+loss        0.000740    0.001017
+mse         0.000658    0.000934
+sam         0.534971    0.514714
+kld         0.082240    0.083019
+psnr               -       31.08
+ssim               -      0.9236
+best SAM so far: epoch 60 (val_sam=0.514714)
+[05/09/2026 22:33] AAAI KA BOT: [OK] vae-standard | CRIMS | standard | seed 69  #15169
+epochs 60/60  ·  wall 19m33s  ·  peak GPU 8.2 GB
+best @ epoch 60: 0.514714 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0026     0.0024     0.0023     0.5293    26.94   0.9073  
+  20     0.0020     0.0021     0.0020     0.5289    27.48   0.9142  
+  30     0.0019     0.0021     0.0020     0.5259    27.67   0.9210  
+  40     0.0017     0.0019     0.0018     0.5335    28.11   0.9215  
+  50     0.0008     0.0010     0.0010     0.5182    30.89   0.9229  
+  60     0.0007     0.0010     0.0009     0.5147    31.08   0.9236 *
+(*) new best val SAM checkpoint
+ckpt: vae-standard_standard_seed69_bestsam.pt, vae-standard_standard_seed69_bestmse.pt
+[05/09/2026 22:34] AAAI KA BOT: [START] vae-standard | CRIMS | physics | seed 69  #15405
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 22:37] AAAI KA BOT: [HB] vae-standard | CRIMS | physics | seed 69  #15405
+epoch 10/60  ·  wall 3m17s  ·  ETA 15m40s
+               train         val
+loss        0.166002    0.160728
+mse         0.003005    0.003123
+sam         0.542468    0.524472
+kld         0.257561    0.262781
+psnr               -       26.01
+ssim               -      0.9092
+best SAM so far: epoch 9 (val_sam=0.520149)
+[05/09/2026 22:40] AAAI KA BOT: [HB] vae-standard | CRIMS | physics | seed 69  #15405
+epoch 20/60  ·  wall 6m27s  ·  ETA 12m35s
+               train         val
+loss        0.164401    0.160073
+mse         0.002527    0.003171
+sam         0.538777    0.522241
+kld         0.241401    0.229682
+psnr               -       25.90
+ssim               -      0.8966
+best SAM so far: epoch 18 (val_sam=0.518428)
+[05/09/2026 22:43] AAAI KA BOT: [HB] vae-standard | CRIMS | physics | seed 69  #15405
+epoch 30/60  ·  wall 9m47s  ·  ETA 10m01s
+               train         val
+loss        0.161097    0.154134
+mse         0.001879    0.001618
+sam         0.530042    0.507779
+kld         0.204660    0.182124
+psnr               -       28.27
+ssim               -      0.9094
+best SAM so far: epoch 30 (val_sam=0.507779)
+[05/09/2026 22:47] AAAI KA BOT: [HB] vae-standard | CRIMS | physics | seed 69  #15405
+epoch 40/60  ·  wall 13m07s  ·  ETA 6m38s
+               train         val
+loss        0.157224    0.151349
+mse         0.000861    0.001097
+sam         0.520434    0.500037
+kld         0.232428    0.240865
+psnr               -       30.30
+ssim               -      0.9195
+best SAM so far: epoch 40 (val_sam=0.500037)
+[05/09/2026 22:50] AAAI KA BOT: [HB] vae-standard | CRIMS | physics | seed 69  #15405
+epoch 50/60  ·  wall 16m26s  ·  ETA 3m17s
+               train         val
+loss        0.156195    0.150213
+mse         0.000789    0.000995
+sam         0.517211    0.496550
+kld         0.242307    0.253169
+psnr               -       30.80
+ssim               -      0.9212
+best SAM so far: epoch 50 (val_sam=0.496550)
+[05/09/2026 22:53] AAAI KA BOT: [HB] vae-standard | CRIMS | physics | seed 69  #15405
+epoch 60/60  ·  wall 19m41s  ·  ETA 0m00s
+               train         val
+loss        0.154525    0.148965
+mse         0.000726    0.000973
+sam         0.511830    0.492449
+kld         0.250897    0.258016
+psnr               -       30.92
+ssim               -      0.9192
+best SAM so far: epoch 60 (val_sam=0.492449)
+[05/09/2026 22:53] AAAI KA BOT: [OK] vae-standard | CRIMS | physics | seed 69  #15405
+epochs 60/60  ·  wall 19m42s  ·  peak GPU 8.0 GB
+best @ epoch 60: 0.492449 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.1660     0.1607     0.0031     0.5245    26.01   0.9092  
+  20     0.1644     0.1601     0.0032     0.5222    25.90   0.8966  
+  30     0.1611     0.1541     0.0016     0.5078    28.27   0.9094  
+  40     0.1572     0.1513     0.0011     0.5000    30.30   0.9195  
+  50     0.1562     0.1502     0.0010     0.4966    30.80   0.9212  
+  60     0.1545     0.1490     0.0010     0.4924    30.92   0.9192 *
+(*) new best val SAM checkpoint
+ckpt: vae-standard_physics_seed69_bestsam.pt, vae-standard_physics_seed69_bestmse.pt
+[05/09/2026 22:53] AAAI KA BOT: [START] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 22:57] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epoch 10/60  ·  wall 3m17s  ·  ETA 16m02s
+               train         val
+loss        0.003323    0.002296
+mse         0.002664    0.001625
+sam         0.537448    0.514371
+kld         0.658986    0.671004
+psnr               -       28.56
+ssim               -      0.8570
+best SAM so far: epoch 9 (val_sam=0.514318)
+[05/09/2026 23:00] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epoch 20/60  ·  wall 6m29s  ·  ETA 12m42s
+               train         val
+loss        0.001702    0.001848
+mse         0.001045    0.001198
+sam         0.529646    0.507927
+kld         0.657018    0.649466
+psnr               -       30.13
+ssim               -      0.8792
+best SAM so far: epoch 20 (val_sam=0.507927)
+[05/09/2026 23:03] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epoch 30/60  ·  wall 9m43s  ·  ETA 9m31s
+               train         val
+loss        0.001976    0.001336
+mse         0.001333    0.000689
+sam         0.531734    0.503763
+kld         0.643334    0.647085
+psnr               -       32.60
+ssim               -      0.8880
+best SAM so far: epoch 30 (val_sam=0.503763)
+[05/09/2026 23:06] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epoch 40/60  ·  wall 12m53s  ·  ETA 6m17s
+               train         val
+loss        0.001220    0.001223
+mse         0.000589    0.000579
+sam         0.526195    0.503575
+kld         0.630490    0.643722
+psnr               -       33.45
+ssim               -      0.8955
+best SAM so far: epoch 33 (val_sam=0.503062)
+[05/09/2026 23:09] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epoch 50/60  ·  wall 16m04s  ·  ETA 3m10s
+               train         val
+loss        0.001145    0.001187
+mse         0.000510    0.000540
+sam         0.525277    0.501630
+kld         0.635136    0.647033
+psnr               -       33.84
+ssim               -      0.8935
+best SAM so far: epoch 50 (val_sam=0.501630)
+[05/09/2026 23:13] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epoch 60/60  ·  wall 19m15s  ·  ETA 0m00s
+               train         val
+loss        0.001129    0.001175
+mse         0.000491    0.000525
+sam         0.523495    0.501527
+kld         0.638119    0.649955
+psnr               -       34.00
+ssim               -      0.8935
+best SAM so far: epoch 60 (val_sam=0.501527)
+[05/09/2026 23:13] AAAI KA BOT: [OK] vae-1d-pixelwise | CRIMS | standard | seed 69  #15631
+epochs 60/60  ·  wall 19m16s  ·  peak GPU 2.2 GB
+best @ epoch 60: 0.501527 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.0033     0.0023     0.0016     0.5144    28.56   0.8570  
+  20     0.0017     0.0018     0.0012     0.5079    30.13   0.8792  
+  30     0.0020     0.0013     0.0007     0.5038    32.60   0.8880  
+  40     0.0012     0.0012     0.0006     0.5036    33.45   0.8955  
+  50     0.0011     0.0012     0.0005     0.5016    33.84   0.8935  
+  60     0.0011     0.0012     0.0005     0.5015    34.00   0.8935 *
+(*) new best val SAM checkpoint
+ckpt: vae-1d-pixelwise_standard_seed69_bestsam.pt, vae-1d-pixelwise_standard_seed69_bestmse.pt
+[05/09/2026 23:13] AAAI KA BOT: [START] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 23:16] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epoch 10/60  ·  wall 3m16s  ·  ETA 15m47s
+               train         val
+loss        0.161769    0.158640
+mse         0.003787    0.007495
+sam         0.522968    0.500233
+kld         1.090890    1.075555
+psnr               -       23.33
+ssim               -      0.7460
+best SAM so far: epoch 9 (val_sam=0.499173)
+[05/09/2026 23:19] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epoch 20/60  ·  wall 6m42s  ·  ETA 12m43s
+               train         val
+loss        0.156708    0.150179
+mse         0.001701    0.001554
+sam         0.513570    0.492215
+kld         0.935186    0.961349
+psnr               -       29.14
+ssim               -      0.9066
+best SAM so far: epoch 20 (val_sam=0.492215)
+[05/09/2026 23:23] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epoch 30/60  ·  wall 9m54s  ·  ETA 9m32s
+               train         val
+loss        0.154484    0.147821
+mse         0.001032    0.000758
+sam         0.508119    0.486810
+kld         1.015587    1.019841
+psnr               -       32.18
+ssim               -      0.9180
+best SAM so far: epoch 30 (val_sam=0.486810)
+[05/09/2026 23:26] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epoch 40/60  ·  wall 13m12s  ·  ETA 6m22s
+               train         val
+loss        0.152827    0.146970
+mse         0.000432    0.000447
+sam         0.504553    0.484909
+kld         1.029052    1.050141
+psnr               -       35.18
+ssim               -      0.9268
+best SAM so far: epoch 40 (val_sam=0.484909)
+[05/09/2026 23:29] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epoch 50/60  ·  wall 16m27s  ·  ETA 3m13s
+               train         val
+loss        0.152524    0.146842
+mse         0.000377    0.000432
+sam         0.503727    0.484572
+kld         1.028894    1.037561
+psnr               -       35.35
+ssim               -      0.9266
+best SAM so far: epoch 50 (val_sam=0.484572)
+[05/09/2026 23:32] AAAI KA BOT: [HB] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epoch 60/60  ·  wall 19m41s  ·  ETA 0m00s
+               train         val
+loss        0.152231    0.146739
+mse         0.000363    0.000418
+sam         0.502793    0.484272
+kld         1.030101    1.039615
+psnr               -       35.58
+ssim               -      0.9276
+best SAM so far: epoch 59 (val_sam=0.484270)
+[05/09/2026 23:32] AAAI KA BOT: [OK] vae-1d-pixelwise | CRIMS | physics | seed 69  #15858
+epochs 60/60  ·  wall 19m43s  ·  peak GPU 2.0 GB
+best @ epoch 59: 0.484270 (checkpoint saved)
+  ep    tr_loss   val_loss    val_mse   val_sam     psnr     ssim
+-----------------------------------------------------------------
+  10     0.1618     0.1586     0.0075     0.5002    23.33   0.7460  
+  20     0.1567     0.1502     0.0016     0.4922    29.14   0.9066  
+  30     0.1545     0.1478     0.0008     0.4868    32.18   0.9180  
+  40     0.1528     0.1470     0.0004     0.4849    35.18   0.9268  
+  50     0.1525     0.1468     0.0004     0.4846    35.35   0.9266  
+  60     0.1522     0.1467     0.0004     0.4843    35.58   0.9276  
+ckpt: vae-1d-pixelwise_physics_seed69_bestsam.pt, vae-1d-pixelwise_physics_seed69_bestmse.pt
+[05/09/2026 23:33] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16097
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[05/09/2026 23:46] AAAI KA BOT: [HB] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16097
+epoch 10/60  ·  wall 13m45s  ·  ETA 57m34s
+               train         val
+loss        0.154543    0.148690
+mse         0.000895    0.000861
+sam         0.509136    0.489789
+kld         0.907801    0.892158
+psnr               -       31.35
+ssim               -      0.9252
+best SAM so far: epoch 8 (val_sam=0.486655)
+[05/09/2026 23:58] AAAI KA BOT: [HB] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16097
+epoch 20/60  ·  wall 25m19s  ·  ETA 46m08s
+               train         val
+loss        0.152624    0.146538
+mse         0.000534    0.000598
+sam         0.504262    0.483672
+kld         0.811897    0.838500
+psnr               -       33.53
+ssim               -      0.9353
+best SAM so far: epoch 20 (val_sam=0.483672)
+[06/09/2026 00:09] AAAI KA BOT: [HB] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16097
+epoch 30/60  ·  wall 36m52s  ·  ETA 34m29s
+               train         val
+loss        0.152060    0.146145
+mse         0.000466    0.000543
+sam         0.502721    0.482680
+kld         0.778082    0.797866
+psnr               -       34.23
+ssim               -      0.9376
+best SAM so far: epoch 30 (val_sam=0.482680)
+[06/09/2026 00:11] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16565
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[06/09/2026 00:25] AAAI KA BOT: [HB] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16565
+epoch 10/60  ·  wall 13m44s  ·  ETA 57m27s
+               train         val
+loss        0.154011    0.147955
+mse         0.000869    0.000861
+sam         0.507591    0.487725
+kld         0.864804    0.776455
+psnr               -       31.41
+ssim               -      0.9257
+best SAM so far: epoch 9 (val_sam=0.485914)
+[06/09/2026 00:36] AAAI KA BOT: [HB] vae-3d-spatio-spectral | CRIMS | physics | seed 69  #16565
+epoch 20/60  ·  wall 25m14s  ·  ETA 45m57s
+               train         val
+loss        0.152679    0.146686
+mse         0.000563    0.000640
+sam         0.504475    0.484109
+kld         0.773909    0.813471
+psnr               -       33.12
+ssim               -      0.9358
+best SAM so far: epoch 20 (val_sam=0.484109)
+[06/09/2026 00:38] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | standard | seed 69  #16832
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05
+[06/09/2026 00:41] AAAI KA BOT: [START] vae-3d-spatio-spectral | CRIMS | standard | seed 69  #16974
+host: mlr-nihal-workstation
+planned: 60 epochs
+   allow_multi_gpu: False
+         amp_dtype: float16
+        batch_size: 16
+              beta: 0.001
+         cache_ram: False
+           compile: False
+            epochs: 60
+               gpu: NVIDIA TITAN RTX
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 8
+          patience: 12
+              seed: 69
+      weight_decay: 1e-05

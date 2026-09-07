@@ -145,8 +145,11 @@ class Decoder(nn.Module):
         # Unfold spatial dimensions back to the original geometry
         x = x.reshape(batch, h, w, settings.input_channels)
         # (B, H, W, input_channels)
-        
-        return x
+
+        # Sigmoid on the raw decoder output, matching every baseline decoder.
+        # The fusion in HSI_DualStream_PI_VAE is a convex blend of the two
+        # branch reconstructions and must not squash again downstream.
+        return torch.sigmoid(x)
 
 class SpectralEncoderDecoder(nn.Module):
     def __init__(self):

@@ -10,7 +10,8 @@ Two independent VAE streams each reconstruct the full cube:
   - Spectral stream : per-pixel 1D spectral conv -> spatially-resolved latent
                       map (B, d_p, H, W).
 A spatially-adaptive gated fusion combines the two reconstructions per pixel
-and per band (sigmoid output head).
+and per band. Each branch decoder ends in a sigmoid (like every baseline
+decoder), so the fusion is a plain convex blend with no output head.
 
 ITERATION-1 CHANGES (docs/new_plan.md, 2026-09-04)
 ==================================================
@@ -19,7 +20,8 @@ ITERATION-1 CHANGES (docs/new_plan.md, 2026-09-04)
    with one spectral recipe applied identically at every pixel. It is replaced
    by AdaptiveGatedFusion: a 2x(3x3 conv) network over the concatenated
    reconstructions emits a per-pixel, per-band gate alpha in [0, 1], and
-   `recon_final = sigmoid(alpha * h_s + (1 - alpha) * h_p)`. The gate sees a
+   `recon_final = alpha * h_s + (1 - alpha) * h_p` (a convex blend of two
+   [0, 1] branch reconstructions — no output sigmoid). The gate sees a
    spatial neighbourhood (3x3), so fusion can trust the spatial stream on
    texture and the spectral stream on absorption features, per location.
    `settings.vae_our_adaptive_fusion = False` restores the old Linear fusion
@@ -34,8 +36,8 @@ ITERATION-1 CHANGES (docs/new_plan.md, 2026-09-04)
 
 Other notes:
   - reparameterize clamps logvar to [-30, 20] before exp (numerical stability),
-  - the fused reconstruction passes through a sigmoid (inputs are max-normalized
-    to [0, 1] by the dataloader),
+  - each branch decoder ends in a sigmoid (inputs are max-normalized to [0, 1]
+    by the dataloader); the fusion is a convex blend and stays in [0, 1],
   - SAM is intrinsic to this model, so it is always physics-informed
     (``PHYSICS_ONLY`` in modules/registry.py).
 
@@ -56,13 +58,16 @@ class AdaptiveGatedFusion(nn.Module):
     Spatially-adaptive gated late fusion.
 
     alpha = sigmoid( Conv3x3( ReLU( Conv3x3( cat[h_s, h_p] ) ) ) )   # (B,C,H,W)
-    fused = sigmoid( alpha * h_s + (1 - alpha) * h_p )
+    fused = alpha * h_s + (1 - alpha) * h_p     # h_s, h_p already in [0, 1]
 
     alpha is per-pixel AND per-band, computed from a 3x3 neighbourhood of both
     reconstructions, so the fusion can locally arbitrate: spatial stream where
     texture/structure dominates, spectral stream where spectral shape does.
     At init the conv logits are near 0, so alpha starts around 0.5 — an even
-    blend, matching the old fusion's operating point.
+    blend, matching the old fusion's operating point. There is no output
+    sigmoid: fused is a convex combination of two [0, 1] tensors, so it is in
+    [0, 1] by construction. (Squashing it again is the 2026-09-05 bug that
+    trapped the reconstruction in [0.5, 0.73].)
     """
 
     def __init__(self, channels: int, hidden: int):
@@ -85,8 +90,10 @@ class AdaptiveGatedFusion(nn.Module):
         h_s = recon_s.permute(0, 3, 1, 2)
         h_p = recon_p.permute(0, 3, 1, 2)
         alpha = self._alpha(h_s, h_p)
+        # recon_s / recon_p are already in [0, 1] (each branch decoder ends in a
+        # sigmoid), so a convex blend of them is in [0, 1] too — no output head.
         fused = alpha * h_s + (1.0 - alpha) * h_p
-        return torch.sigmoid(fused).permute(0, 2, 3, 1)
+        return fused.permute(0, 2, 3, 1)
 
     @torch.no_grad()
     def gate_map(self, recon_s, recon_p):

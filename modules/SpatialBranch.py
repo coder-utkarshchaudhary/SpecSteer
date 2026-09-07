@@ -189,7 +189,11 @@ class Decoder(nn.Module):
         x = x.reshape(B, settings.input_height, settings.input_width, settings.input_channels)
         # (B, H, W, C)
 
-        return x
+        # Sigmoid here, on the raw decoder output, exactly like every baseline
+        # decoder (vae_standard/vae_3d/vae_1d). The fused output in
+        # HSI_DualStream_PI_VAE is a convex blend of the two branch
+        # reconstructions, so it must NOT be squashed again downstream.
+        return torch.sigmoid(x)
 
 
 class SpatialEncoderDecoder(nn.Module):
