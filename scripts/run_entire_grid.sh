@@ -40,14 +40,48 @@ cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 
+# Parse command-line arguments (datasets only)
+DATASETS_ARG=""
 CKPT_DIR="${CKPT_DIR:-model_fix}"
 OUT_DIR="${OUT_DIR:-results_fix}"
 SEEDS="${SEEDS:-69 67}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --datasets|--dataset)
+            shift
+            while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
+                if [[ -z "${DATASETS_ARG}" ]]; then
+                    DATASETS_ARG="$1"
+                else
+                    DATASETS_ARG="${DATASETS_ARG},$1"
+                fi
+                shift
+            done
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            echo "Usage: $0 [--datasets <dataset1,dataset2,...>]"
+            exit 1
+            ;;
+    esac
+done
+
+# Normalize datasets to comma-separated list
+DATASETS_COMMAS=""
+if [[ -n "${DATASETS_ARG}" ]]; then
+    DATASETS_COMMAS="$(echo "${DATASETS_ARG}" | tr ' ' ',' | tr -s ',')"
+fi
 
 mkdir -p logs "${CKPT_DIR}" "${OUT_DIR}"
 
 echo "=============================================================="
 echo " PRISM — full grid + eval sweep"
+if [[ -n "${DATASETS_COMMAS}" ]]; then
+echo "   datasets   : ${DATASETS_COMMAS}"
+else
+echo "   datasets   : all"
+fi
 echo "   seeds      : ${SEEDS}   (both physics and standard arms)"
 echo "   ckpt dir   : ${REPO_ROOT}/${CKPT_DIR}"
 echo "   out dir    : ${REPO_ROOT}/${OUT_DIR}"
@@ -56,6 +90,7 @@ echo "=============================================================="
 
 python utils/notify_cli.py --text "PRISM full grid launched
 host: $(hostname)
+datasets: ${DATASETS_COMMAS:-all}
 seeds: ${SEEDS} (physics + standard)
 ckpt: ${CKPT_DIR}" >/dev/null 2>&1 || true
 
@@ -70,8 +105,12 @@ python utils/match_latent_rate.py --exact --check || {
 for seed in ${SEEDS}; do
     echo ""
     echo ">>> TRAIN GRID — seed ${seed}  ($(date '+%H:%M:%S'))"
+    train_args=("--all")
+    if [[ -n "${DATASETS_COMMAS}" ]]; then
+        train_args+=("--datasets" "${DATASETS_COMMAS}")
+    fi
     GRID_SEEDS="${seed}" CKPT_DIR="${CKPT_DIR}" \
-        bash scripts/train.sh --all
+        bash scripts/train.sh "${train_args[@]}"
     rc=$?
     echo ">>> train grid seed ${seed} exit ${rc}"
 done
@@ -82,14 +121,21 @@ done
 for seed in ${SEEDS}; do
     echo ""
     echo ">>> EVAL — seed ${seed}, select sam  ($(date '+%H:%M:%S'))"
+    eval_args_sam=("--seeds" "${seed}" "--select" "sam" "--no-telegram")
+    if [[ -n "${DATASETS_COMMAS}" ]]; then
+        eval_args_sam+=("--datasets" "${DATASETS_COMMAS}")
+    fi
     GRID_SEEDS="${seed}" CKPT_DIR="${CKPT_DIR}" OUT_DIR="${OUT_DIR}" \
-        bash scripts/inference.sh --seeds "${seed}" --select sam --no-telegram
+        bash scripts/inference.sh "${eval_args_sam[@]}"
 
     echo ""
     echo ">>> EVAL — seed ${seed}, select mse (recon only)  ($(date '+%H:%M:%S'))"
+    eval_args_mse=("--seeds" "${seed}" "--select" "mse" "--skip-probes" "--skip-downstream" "--no-telegram")
+    if [[ -n "${DATASETS_COMMAS}" ]]; then
+        eval_args_mse+=("--datasets" "${DATASETS_COMMAS}")
+    fi
     GRID_SEEDS="${seed}" CKPT_DIR="${CKPT_DIR}" OUT_DIR="${OUT_DIR}" \
-        bash scripts/inference.sh --seeds "${seed}" --select mse \
-            --skip-probes --skip-downstream --no-telegram
+        bash scripts/inference.sh "${eval_args_mse[@]}"
 done
 
 echo ""
