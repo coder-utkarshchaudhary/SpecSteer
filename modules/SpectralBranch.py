@@ -151,6 +151,7 @@ class Decoder(nn.Module):
         # branch reconstructions and must not squash again downstream.
         return torch.sigmoid(x)
 
+
 class SpectralEncoderDecoder(nn.Module):
     def __init__(self):
         super().__init__()
