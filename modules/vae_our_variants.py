@@ -164,14 +164,23 @@ class SpectralViTEncoder(nn.Module):
         
     def forward(self, x):
         batch, h, w, c = x.shape
-        x = x.reshape(batch * h * w, 1, c)         # (B*H*W, 1, C)
+        total_pixels = batch * h * w
+        x = x.reshape(total_pixels, 1, c)         # (B*H*W, 1, C)
         
         x = self.input_proj(x)                     # (B*H*W, d_model, C)
         x = x.transpose(1, 2)                      # (B*H*W, C, d_model)
         x = x + self.pos_embed.unsqueeze(0)        # Broadcast position embeddings
         
-        x = self.transformer(x)                    # (B*H*W, C, d_model)
-        x = x.reshape(batch * h * w, -1)           # (B*H*W, C * d_model)
+        # Chunking transformer execution to avoid CUDA invalid configuration / OOM
+        chunk_size = 2048
+        outputs = []
+        for i in range(0, total_pixels, chunk_size):
+            chunk = x[i : i + chunk_size]
+            chunk_out = self.transformer(chunk)    # (chunk_size, C, d_model)
+            outputs.append(chunk_out)
+        x = torch.cat(outputs, dim=0)              # (B*H*W, C, d_model)
+        
+        x = x.reshape(total_pixels, -1)            # (B*H*W, C * d_model)
         x = self.linear(x)                         # (B*H*W, 2 * spectral_latent_dim)
         
         x = x.reshape(batch, h, w, 2 * settings.spectral_latent_dim)
@@ -204,13 +213,22 @@ class SpectralViTDecoder(nn.Module):
         
     def forward(self, z):
         batch, c, h, w = z.shape
-        x = z.permute(0, 2, 3, 1).reshape(batch * h * w, c)   # (B*H*W, spectral_latent_dim)
+        total_pixels = batch * h * w
+        x = z.permute(0, 2, 3, 1).reshape(total_pixels, c)   # (B*H*W, spectral_latent_dim)
         
         x = self.linear(x)                                    # (B*H*W, C * d_model)
-        x = x.reshape(batch * h * w, settings.input_channels, self.d_model) # (B*H*W, C, d_model)
+        x = x.reshape(total_pixels, settings.input_channels, self.d_model) # (B*H*W, C, d_model)
         x = x + self.pos_embed.unsqueeze(0)
         
-        x = self.transformer(x)                              # (B*H*W, C, d_model)
+        # Chunking transformer execution to avoid CUDA invalid configuration / OOM
+        chunk_size = 2048
+        outputs = []
+        for i in range(0, total_pixels, chunk_size):
+            chunk = x[i : i + chunk_size]
+            chunk_out = self.transformer(chunk)              # (chunk_size, C, d_model)
+            outputs.append(chunk_out)
+        x = torch.cat(outputs, dim=0)                        # (B*H*W, C, d_model)
+        
         x = x.transpose(1, 2)                                # (B*H*W, d_model, C)
         x = self.output_proj(x)                              # (B*H*W, 1, C)
         x = x.squeeze(1)                                     # (B*H*W, C)
