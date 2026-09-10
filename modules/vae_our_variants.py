@@ -15,6 +15,7 @@ Implemented Variants:
 
 import torch
 import torch.nn as nn
+import torch.utils.checkpoint as checkpoint
 from torch.nn import Conv2d, ConvTranspose2d, Conv1d, ConvTranspose1d
 
 from utils.config import settings
@@ -172,11 +173,15 @@ class SpectralViTEncoder(nn.Module):
         x = x + self.pos_embed.unsqueeze(0)        # Broadcast position embeddings
         
         # Chunking transformer execution to avoid CUDA invalid configuration / OOM
-        chunk_size = 2048
+        # and using gradient checkpointing during training to avoid activation OOMs
+        chunk_size = 512
         outputs = []
         for i in range(0, total_pixels, chunk_size):
             chunk = x[i : i + chunk_size]
-            chunk_out = self.transformer(chunk)    # (chunk_size, C, d_model)
+            if self.training:
+                chunk_out = checkpoint.checkpoint(self.transformer, chunk, use_reentrant=False)
+            else:
+                chunk_out = self.transformer(chunk)    # (chunk_size, C, d_model)
             outputs.append(chunk_out)
         x = torch.cat(outputs, dim=0)              # (B*H*W, C, d_model)
         
@@ -221,11 +226,15 @@ class SpectralViTDecoder(nn.Module):
         x = x + self.pos_embed.unsqueeze(0)
         
         # Chunking transformer execution to avoid CUDA invalid configuration / OOM
-        chunk_size = 2048
+        # and using gradient checkpointing during training to avoid activation OOMs
+        chunk_size = 512
         outputs = []
         for i in range(0, total_pixels, chunk_size):
             chunk = x[i : i + chunk_size]
-            chunk_out = self.transformer(chunk)              # (chunk_size, C, d_model)
+            if self.training:
+                chunk_out = checkpoint.checkpoint(self.transformer, chunk, use_reentrant=False)
+            else:
+                chunk_out = self.transformer(chunk)              # (chunk_size, C, d_model)
             outputs.append(chunk_out)
         x = torch.cat(outputs, dim=0)                        # (B*H*W, C, d_model)
         
