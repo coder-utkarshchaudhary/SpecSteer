@@ -156,37 +156,43 @@ class SpectralViTEncoder(nn.Module):
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=4 * d_model,
-            batch_first=True
+            batch_first=True,
+            norm_first=True,  # Pre-LN for training stability and faster convergence
+            activation='gelu' # GELU activation for smoother optimization landscape
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
         # Mapping token sequence back to latent space parameterisation
         self.linear = nn.Linear(settings.input_channels * d_model, 2 * settings.spectral_latent_dim)
         
+    def chunk_processor(self, chunk_input):
+        # chunk_input: (chunk_size, 1, C)
+        x = self.input_proj(chunk_input)                     # (chunk_size, d_model, C)
+        x = x.transpose(1, 2)                      # (chunk_size, C, d_model)
+        x = x + self.pos_embed.unsqueeze(0)        # Broadcast position embeddings
+        x = self.transformer(x)                    # (chunk_size, C, d_model)
+        x = x.reshape(x.shape[0], -1)              # (chunk_size, C * d_model)
+        x = self.linear(x)                         # (chunk_size, 2 * settings.spectral_latent_dim)
+        return x
+
     def forward(self, x):
         batch, h, w, c = x.shape
         total_pixels = batch * h * w
         x = x.reshape(total_pixels, 1, c)         # (B*H*W, 1, C)
         
-        x = self.input_proj(x)                     # (B*H*W, d_model, C)
-        x = x.transpose(1, 2)                      # (B*H*W, C, d_model)
-        x = x + self.pos_embed.unsqueeze(0)        # Broadcast position embeddings
-        
-        # Chunking transformer execution to avoid CUDA invalid configuration / OOM
-        # and using gradient checkpointing during training to avoid activation OOMs
+        # Chunking entire encoder execution to avoid CUDA invalid configuration / OOM
+        # and using gradient checkpointing over the whole chunk_processor during training
+        # to dramatically minimize activation VRAM usage (from GBs to MBs)
         chunk_size = 512
         outputs = []
         for i in range(0, total_pixels, chunk_size):
             chunk = x[i : i + chunk_size]
             if self.training:
-                chunk_out = checkpoint.checkpoint(self.transformer, chunk, use_reentrant=False)
+                chunk_out = checkpoint.checkpoint(self.chunk_processor, chunk, use_reentrant=False)
             else:
-                chunk_out = self.transformer(chunk)    # (chunk_size, C, d_model)
+                chunk_out = self.chunk_processor(chunk)    # (chunk_size, 2 * settings.spectral_latent_dim)
             outputs.append(chunk_out)
-        x = torch.cat(outputs, dim=0)              # (B*H*W, C, d_model)
-        
-        x = x.reshape(total_pixels, -1)            # (B*H*W, C * d_model)
-        x = self.linear(x)                         # (B*H*W, 2 * spectral_latent_dim)
+        x = torch.cat(outputs, dim=0)              # (B*H*W, 2 * settings.spectral_latent_dim)
         
         x = x.reshape(batch, h, w, 2 * settings.spectral_latent_dim)
         return x.permute(0, 3, 1, 2)               # (B, 2*spectral_latent_dim, H, W)
@@ -211,36 +217,42 @@ class SpectralViTDecoder(nn.Module):
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=4 * d_model,
-            batch_first=True
+            batch_first=True,
+            norm_first=True,  # Pre-LN for training stability and faster convergence
+            activation='gelu' # GELU activation for smoother optimization landscape
         )
         self.transformer = nn.TransformerEncoder(decoder_layer, num_layers=num_layers)
         self.output_proj = nn.Conv1d(d_model, 1, kernel_size=3, padding=1)
         
+    def chunk_processor(self, chunk_input):
+        # chunk_input: (chunk_size, spectral_latent_dim)
+        x = self.linear(chunk_input)                                    # (chunk_size, C * d_model)
+        x = x.reshape(x.shape[0], settings.input_channels, self.d_model) # (chunk_size, C, d_model)
+        x = x + self.pos_embed.unsqueeze(0)
+        x = self.transformer(x)                                         # (chunk_size, C, d_model)
+        x = x.transpose(1, 2)                                           # (chunk_size, d_model, C)
+        x = self.output_proj(x)                                         # (chunk_size, 1, C)
+        x = x.squeeze(1)                                                # (chunk_size, C)
+        return x
+
     def forward(self, z):
         batch, c, h, w = z.shape
         total_pixels = batch * h * w
         x = z.permute(0, 2, 3, 1).reshape(total_pixels, c)   # (B*H*W, spectral_latent_dim)
         
-        x = self.linear(x)                                    # (B*H*W, C * d_model)
-        x = x.reshape(total_pixels, settings.input_channels, self.d_model) # (B*H*W, C, d_model)
-        x = x + self.pos_embed.unsqueeze(0)
-        
-        # Chunking transformer execution to avoid CUDA invalid configuration / OOM
-        # and using gradient checkpointing during training to avoid activation OOMs
+        # Chunking entire decoder execution to avoid CUDA invalid configuration / OOM
+        # and using gradient checkpointing over the whole chunk_processor during training
+        # to dramatically minimize activation VRAM usage (from GBs to MBs)
         chunk_size = 512
         outputs = []
         for i in range(0, total_pixels, chunk_size):
             chunk = x[i : i + chunk_size]
             if self.training:
-                chunk_out = checkpoint.checkpoint(self.transformer, chunk, use_reentrant=False)
+                chunk_out = checkpoint.checkpoint(self.chunk_processor, chunk, use_reentrant=False)
             else:
-                chunk_out = self.transformer(chunk)              # (chunk_size, C, d_model)
+                chunk_out = self.chunk_processor(chunk)              # (chunk_size, C)
             outputs.append(chunk_out)
-        x = torch.cat(outputs, dim=0)                        # (B*H*W, C, d_model)
-        
-        x = x.transpose(1, 2)                                # (B*H*W, d_model, C)
-        x = self.output_proj(x)                              # (B*H*W, 1, C)
-        x = x.squeeze(1)                                     # (B*H*W, C)
+        x = torch.cat(outputs, dim=0)                        # (B*H*W, C)
         
         return torch.sigmoid(x.reshape(batch, h, w, settings.input_channels))
 
