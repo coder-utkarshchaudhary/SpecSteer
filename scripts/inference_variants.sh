@@ -76,14 +76,15 @@ for ds in "${DATASETS[@]}"; do
     for m in "${MODELS[@]}"; do
         for seed in "${SEEDS[@]}"; do
             echo ">>> Evaluating reconstruction: ${m} | ${ds} | seed ${seed}"
+            out_json="${INFER_JSON_DIR}/${ds}__${m}_seed${seed}_${SELECT}.json"
             python inference/inference_variants.py \
                 --model "${m}" \
                 --dataset "${ds}" \
                 --seed "${seed}" \
                 --select "${SELECT}" \
                 --ckpt-dir "${CKPT_DIR}" \
-                --out-dir "${OUT_DIR}" \
-                --packed-root "${PACKED_ROOT}"
+                --out-json "${out_json}" \
+                --packed-root "${PACKED_ROOT}/${ds}"
             echo "----------------------------------------------------------"
         done
     done
@@ -95,9 +96,11 @@ if (( DO_DOWNSTREAM == 1 )); then
         for m in "${MODELS[@]}"; do
             echo ">>> Evaluating downstream manifold: ${m} | ${ds}"
             python inference/downstream_variants.py \
-                --model "${m}" \
+                --models "${m}" \
                 --dataset "${ds}" \
                 --ckpt-dir "${CKPT_DIR}" \
+                --packed-root "${PACKED_ROOT}/${ds}" \
+                --out-dir "${DOWNSTREAM_DIR}/${ds}" \
                 --save-plots
             echo "----------------------------------------------------------"
         done
