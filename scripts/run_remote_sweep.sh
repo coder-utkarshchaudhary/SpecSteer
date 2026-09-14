@@ -21,6 +21,8 @@ cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 CKPT_DIR="${CKPT_DIR:-model}"
 OUT_DIR="${OUT_DIR:-results}"
+INFER_JSON_DIR="${OUT_DIR}/inference"
+DOWNSTREAM_DIR="${OUT_DIR}/downstream"
 
 # Default parameters
 DATASETS_STEP1="IIRS,AVIRIS,CRIMS"
