@@ -299,19 +299,14 @@ class HSI_DualStream_PI_VAE_NL_SpecViT(HSI_DualStream_PI_VAE):
 
 
 # ===========================================================================
-# 4. Dynamic Registry Registration
+# 4. Registration
 # ===========================================================================
-
-from modules.registry import MODELS, PHYSICS_ONLY
-import modules.registry
-
-MODELS["vae-our-nl"] = HSI_DualStream_PI_VAE_NL
-MODELS["vae-our-specvit"] = HSI_DualStream_PI_VAE_SpecViT
-MODELS["vae-our-nl-specvit"] = HSI_DualStream_PI_VAE_NL_SpecViT
-
-PHYSICS_ONLY.add("vae-our-nl")
-PHYSICS_ONLY.add("vae-our-specvit")
-PHYSICS_ONLY.add("vae-our-nl-specvit")
-
-# Re-build MODEL_NAMES tuple in modules.registry so subsequent imports see updated model options
-modules.registry.MODEL_NAMES = tuple(MODELS.keys())
+# These three classes are registered directly in modules/registry.py (imported
+# from here), not by mutating registry's MODELS/PHYSICS_ONLY/MODEL_NAMES from
+# this module — that self-registration used to run only when this file was
+# imported (i.e. only via train_variants.py / inference_variants.py /
+# downstream_variants.py), so `--model vae-our-nl` failed from the main
+# train.py/inference.py entry points, and importing registry.py FROM here
+# would have been a real import cycle. train_variants.py and friends still
+# work: their `import modules.vae_our_variants` is now a no-op for
+# registration, since modules/registry.py already imports this module itself.

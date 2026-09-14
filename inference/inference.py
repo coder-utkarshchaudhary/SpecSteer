@@ -200,7 +200,11 @@ def main():
     logger.info(f"  device   : {device}")
     logger.info("==============================================")
 
-    model, ckpt_meta = load_model(args.model, ckpt_file, device)
+    try:
+        model, ckpt_meta = load_model(args.model, ckpt_file, device)
+    except RuntimeError as e:
+        logger.error(f"load_state_dict failed for {ckpt_file}: {e}")
+        raise SystemExit(f"load_state_dict failed for {ckpt_file}: {e}")
 
     loader = build_dataloader(
         args.dataset, args.split,

@@ -12,10 +12,11 @@
 #   python utils/find_max_batch.py --budget-gb 24 --fit
 
 # --- Optimization ---
-# 50 is the operative grid value (the 2026-08 grid trained 50 planned epochs via
-# a CLI override; the YAML now carries it directly so scripts/train.sh no longer
-# injects a uniform --epochs and CRIMS can differ).
-epochs: 30
+# 60, patience 3 is the 2026-09-14 clean-slate grid value (scripts/run_clean_grid.sh),
+# fixed by hand across all four datasets to end the earlier per-dataset drift
+# (IIRS/AVIRIS 30, CRIMS 50/60/80 all appeared at different points). CLI
+# --epochs/--patience still override this when passed explicitly.
+epochs: 60
 lr: 1.0e-3
 
 # Batch size is held constant across all 4 models x 2 loss regimes WITHIN this
@@ -48,7 +49,7 @@ beta: 1.0e-3
 lambda_physics: 0.3
 seed: 42
 weight_decay: 1.0e-5
-early_stopping_patience: 7
+early_stopping_patience: 3
 
 # --- Latent budget: every model on the common target T = 16,384 (64.0:1) ---
 #

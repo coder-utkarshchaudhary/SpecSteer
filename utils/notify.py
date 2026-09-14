@@ -95,6 +95,7 @@ class TelegramNotifier:
     """
 
     API = "https://api.telegram.org/bot{token}/sendMessage"
+    DOCUMENT_API = "https://api.telegram.org/bot{token}/sendDocument"
 
     def __init__(self, enabled: bool = True):
         self.token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -118,6 +119,51 @@ class TelegramNotifier:
         for chunk in chunks:
             ok &= self._send_one(chunk)
         return ok
+
+    def send_document(self, path, caption: str = "") -> bool:
+        """
+        Send a local file as a Telegram document (e.g. a results CSV).
+
+        Direct-API tier ONLY — there is no relay route for a file (the relay,
+        utils/notify_relay.py, serves only POST /notify with a JSON text body)
+        and the on-disk queue fallback (logs/notify_queue.jsonl) is text-only
+        too. When there are no direct credentials, or the upload fails, this
+        falls back to a plain text message naming the file instead of trying
+        to route bytes through either of those.
+        """
+        if not self.enabled:
+            return False
+        path = Path(path)
+        if not path.is_file():
+            _LOG.warning("send_document: %s does not exist", path)
+            return False
+        if self._direct_ready and self._post_document(path, caption):
+            return True
+        return self.send(f"[attachment unavailable] {caption or path.name}: <code>{html.escape(str(path))}</code>")
+
+    def _post_document(self, path: Path, caption: str) -> bool:
+        try:
+            with path.open("rb") as fh:
+                resp = requests.post(
+                    self.DOCUMENT_API.format(token=self.token),
+                    data={
+                        "chat_id": self.chat_id,
+                        "caption": caption[:1024],
+                        "parse_mode": "HTML",
+                    },
+                    files={"document": (path.name, fh)},
+                    timeout=30,
+                )
+            if resp.status_code != 200:
+                _LOG.warning(
+                    "Telegram sendDocument returned %s: %s",
+                    resp.status_code, resp.text[:200],
+                )
+                return False
+            return True
+        except Exception as e:
+            _LOG.warning("Telegram sendDocument failed: %s", e)
+            return False
 
     def _send_one(self, text: str) -> bool:
         if self._relay_ready and self._post_relay(text):

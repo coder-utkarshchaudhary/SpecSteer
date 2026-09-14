@@ -1,8 +1,35 @@
 # Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
 
-> **Last updated:** 2026-08-30
+> **Last updated:** 2026-09-14
 > **Status:** All 4 ablation models + downstream experiments + falsification
 > suite implemented. IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay.
+>
+> **2026-09-14 — clean-slate protocol, 5 models, M3 back in, one entry point.**
+> `vae-our-nl` (PRISM-NL, `modules/vae_our_variants.py`) joined the ablation and
+> is now registered directly in `modules/registry.py` alongside the other four
+> — `--model vae-our-nl` works from `train/train.py` and `inference/*.py`
+> directly, no separate `*_variants.py` entry point needed (those still work;
+> their `import modules.vae_our_variants` is now a no-op for registration).
+> M3 is back in the dataset fold (`utils/match_latent_rate.py --exact --check`
+> passes with it included, worst deviation 6.2% on `vae-our`). The grid is now
+> **5 models × 4 datasets (IIRS, AVIRIS, M3, CRIMS) × 2 seeds (67, 69) = 64
+> cells** at **60 epochs, early-stopping patience 3** (all four hyperparam
+> YAMLs), superseding the 45-slot/3-dataset/seed-69 grid described below.
+> Single entry point: **`scripts/run_clean_grid.sh`** — trains and evaluates
+> (inference + probes + downstream) each cell in sequence, in a fixed order
+> (per dataset: `vae-our-nl` → `vae-standard` [physics, standard] →
+> `vae-1d-pixelwise` [physics, standard] → `vae-3d-spatio-spectral` [physics,
+> standard] → `vae-our`, seeds innermost), runs `verdict.py` + `aggregate.py`
+> once per dataset and sends the resulting CSVs to Telegram as **file
+> attachments** (`TelegramNotifier.send_document`, `utils/notify.py`) rather
+> than chunked text tables. Resumable by marker file
+> (`results/.done/<DS>__<stem>_seed<N>`, written only once training AND all
+> three eval steps for that cell have succeeded); a training failure skips
+> that cell's eval steps and moves on; a VRAM-preflight abort (another process
+> already on the GPU) stops the whole grid immediately instead of repeating
+> across all 64 cells. `scripts/grid_manifest.sh` / `scripts/inference.sh` /
+> `run_remote_sweep.sh` / `run_entire_grid.sh` / `run_variant_study.sh` are
+> untouched and still describe the older grid shapes — not the current one.
 >
 > **2026-08-30 grid — M3 dropped, 45 slots, ran to completion on the lab box.**
 > `scripts/grid_manifest.sh` is now `GRID_DATASETS=(IIRS AVIRIS CRIMS)`. 44/45
@@ -142,12 +169,13 @@ data/processed/<folder>/
 | `scripts/inference.sh` | recon + probes + downstream + verdict + aggregate; packed-shard preflight, dataset list from the manifest | ✅ Fixed |
 | `scripts/inference_smoke.sh` | drive `inference.sh` end to end on synthetic fixtures (CPU) before the real sweep | ✅ New |
 | `scripts/_smoke_fixtures.py` | build the synthetic shards + checkpoints for `inference_smoke.sh` (not a general utility) | ✅ New |
+| `scripts/run_clean_grid.sh` | **2026-09-14 clean-slate entry point** — self-contained 64-cell grid (5 models × 4 datasets × 2 seeds), train→infer→probes→downstream per cell, verdict+aggregate per dataset, CSVs to Telegram as file attachments, marker-file resume | ✅ New |
 | `docs/file_processing.py` | Reference script (do not modify) | — |
 
 ### Ablation models & the model contract
 
-All four models implement one model-agnostic contract (see `modules/registry.py`;
-`train.py`/`inference.py` never branch on model type):
+All five grid models implement one model-agnostic contract (see
+`modules/registry.py`; `train.py`/`inference.py` never branch on model type):
 
 ```
 forward(x)                                               # x: (B, H, W, C)
@@ -163,6 +191,14 @@ decode_latents(list[Tensor]) -> (B, H, W, C)
 | B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C/8, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
 | C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 4)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
 | Proposed: PRISM | `vae-our` | `[(B,256), (B,4,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
+| PRISM ablation: PRISM-NL | `vae-our-nl` | same shape as `vae-our` | `vae-our` with a 2D (not 1D) spatial-branch projection (`modules/vae_our_variants.py`) — isolates whether the linear pixelwise projection or the dual-stream split itself drives the result |
+
+`vae-our-nl` is registered in `modules/registry.py` itself (imported from
+`modules/vae_our_variants.py`, which also defines two further variants —
+`vae-our-specvit`, `vae-our-nl-specvit` — not part of this grid but reachable
+the same way). Of the five grid models, `vae-our-nl` and `vae-our` are
+`PHYSICS_ONLY` (SAM intrinsic to the loss, no `standard` variant); the three
+baselines run both loss regimes.
 
 Latent **shapes** differ by design — that geometry *is* what the ablation tests.
 Latent **budgets** are matched to 64:1 (§11), and parameter counts to within

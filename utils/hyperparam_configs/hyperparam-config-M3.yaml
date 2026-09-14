@@ -1,4 +1,7 @@
-# M3 (84 bands) — DROPPED from the grid; kept coherent for the audit scripts.
+# M3 (84 bands) — BACK in the grid as of the 2026-09-14 clean-slate protocol
+# (scripts/run_clean_grid.sh). `utils/match_latent_rate.py --exact --check`
+# passes with M3 included (worst deviation 6.2%, vae-our) — no latent-knob
+# change was needed to re-add it.
 #
 # Controls (protocol 2026-09-04 — see docs/new_plan.md):
 #   * LATENT RATE  — the information bottleneck, matched across models
@@ -12,7 +15,11 @@
 #   python utils/find_max_batch.py --budget-gb 24 --fit
 
 # --- Optimization ---
-epochs: 30
+# 60, patience 3 is the 2026-09-14 clean-slate grid value (scripts/run_clean_grid.sh),
+# fixed by hand across all four datasets to end the earlier per-dataset drift
+# (IIRS/AVIRIS 30, CRIMS 50/60/80 all appeared at different points). CLI
+# --epochs/--patience still override this when passed explicitly.
+epochs: 60
 lr: 1.0e-3
 
 # Batch size is held constant across all 4 models x 2 loss regimes WITHIN this
@@ -45,7 +52,7 @@ beta: 1.0e-3
 lambda_physics: 0.3
 seed: 42
 weight_decay: 1.0e-5
-early_stopping_patience: 7
+early_stopping_patience: 3
 
 # --- Latent budget: every model on the common target T = 4,096 (84.0:1) ---
 #

@@ -54,7 +54,7 @@ from inference.inference import compute_mse, compute_psnr, compute_ssim, load_mo
 from modules.losses import spectral_angle_mapper_loss  # noqa: E402
 from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name, resolve_checkpoint  # noqa: E402
 from utils.config import DATASETS, apply_dataset, settings  # noqa: E402
-from utils.hyperparams import apply_hyperparams, load_hyperparams  # noqa: E402
+from utils.hyperparams import apply_cli_overrides, apply_hyperparams, load_hyperparams  # noqa: E402
 from utils.logging_setup import get_console_logger, get_run_logger, timestamp  # noqa: E402
 from utils.training.dataloader import build_dataloader  # noqa: E402
 
@@ -227,13 +227,20 @@ def run_for_model(model_name, x, args, device, generator, logger):
         logger.warning(f"[skip] {model_name}: checkpoint not found ({ckpt_file})")
         return None
 
-    model, _ = load_model(model_name, ckpt_file, device)
+    # A shape mismatch (e.g. --set capacity overrides not matching how the
+    # checkpoint was trained) must not abort the whole run — skip this model.
+    try:
+        model, _ = load_model(model_name, ckpt_file, device)
+    except RuntimeError as e:
+        logger.warning(f"[skip] {model_name}: load_state_dict failed ({ckpt_file}): {e}")
+        return None
 
     noise = noise_injection(model, x, args.sigmas, generator=generator)
     interp = interpolation_smoothness(
         model, x, args.idx_a, args.idx_b, args.n_alpha, tuple(args.pixel)
     )
-    return {"model": model_name, "loss": loss, "ckpt": str(ckpt_file),
+    return {"model": model_name, "loss": loss, "seed": args.seed,
+            "select": args.select, "ckpt": str(ckpt_file),
             "noise": noise, "interp": interp}
 
 
@@ -279,9 +286,19 @@ def print_interp_table(all_results, loggers):
                 "  (lower = smoother chemical transition = more generative-ready manifold)")
 
 
+def _entry_key(entry: dict) -> tuple:
+    """(model, loss, seed, select) — the identity of one downstream cell.
+
+    Older entries (written before seed/select were tracked here) fall back to
+    None, which still lets a re-run of that same unseeded cell replace itself.
+    """
+    return (entry.get("model"), entry.get("loss"), entry.get("seed"), entry.get("select"))
+
+
 def save_outputs(all_results, args, loggers):
     out_dir = Path(args.out_dir) / args.dataset
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "downstream_results.json"
 
     # JSON dump (spectra arrays converted to lists).
     serializable = []
@@ -291,8 +308,30 @@ def save_outputs(all_results, args, loggers):
         it["spectra"] = np.asarray(it["spectra"]).tolist()
         rc["interp"] = it
         serializable.append(rc)
-    (out_dir / "downstream_results.json").write_text(json.dumps(serializable, indent=2))
-    _broadcast(loggers, logging.INFO, f"Saved metrics JSON to {out_dir / 'downstream_results.json'}")
+
+    # MERGE, don't clobber. This file is shared by every (model, loss, seed)
+    # cell for the dataset — a per-cell CLI invocation (one --models entry at a
+    # time) used to overwrite the whole list on every call, so cell N erased
+    # cells 1..N-1. Load whatever is already there, key by cell identity, and
+    # only replace matching entries.
+    existing = []
+    if out_path.is_file():
+        try:
+            existing = json.loads(out_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            _broadcast(loggers, logging.WARNING,
+                       f"[warn] could not parse existing {out_path} ({e}); overwriting.")
+            existing = []
+
+    merged = {_entry_key(e): e for e in existing}
+    for e in serializable:
+        merged[_entry_key(e)] = e
+    merged_list = list(merged.values())
+
+    out_path.write_text(json.dumps(merged_list, indent=2))
+    _broadcast(loggers, logging.INFO,
+               f"Saved metrics JSON to {out_path} ({len(serializable)} cell(s) "
+               f"this run, {len(merged_list)} total)")
 
     if not args.save_plots:
         return
@@ -376,6 +415,11 @@ def parse_args() -> argparse.Namespace:
                         help="Seed for the latent-noise / interpolation RNG (not the checkpoint seed).")
     parser.add_argument("--out-dir", default="results/downstream")
     parser.add_argument("--save-plots", action="store_true", help="Write PNG figures under --out-dir.")
+    parser.add_argument("--set", action="append", default=None, metavar="KEY=VALUE",
+                        help="One-off Settings override, repeatable (e.g. --set "
+                             "vae_3d_base_ch=30). Applied after the dataset YAML, "
+                             "same semantics as train/train.py --set. Must match "
+                             "whatever the checkpoint was actually trained with.")
     return parser.parse_args()
 
 
@@ -394,6 +438,9 @@ def main():
     # without this the models rebuild at the dataclass defaults and
     # load_state_dict fails. Mirrors train/train.py and inference.py.
     apply_hyperparams(settings, load_hyperparams(args.dataset))
+    overrides = apply_cli_overrides(settings, args.set)
+    if overrides:
+        print(f"--set overrides active: {overrides}")
     torch.manual_seed(args.rng_seed)
     generator = torch.Generator(device=device).manual_seed(args.rng_seed)
 
@@ -449,7 +496,9 @@ def main():
     if not all_results:
         _broadcast(shared_loggers, logging.WARNING,
                    "No models could be evaluated (no checkpoints found for this dataset). Skipping downstream gracefully.")
-        sys.exit(0)
+        # Non-zero: a caller sweeping over cells needs to see that this cell
+        # produced nothing, rather than reading exit 0 as "ran fine".
+        sys.exit(1)
 
     print_noise_table(all_results, args.sigmas, shared_loggers)
     print_interp_table(all_results, shared_loggers)

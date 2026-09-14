@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import html
 import json
 from pathlib import Path
 from typing import Optional
@@ -84,6 +83,8 @@ def load_downstream_rows(downstream_dir: Path) -> list[dict]:
                 "dataset": dataset_dir.name,
                 "model": entry.get("model", "?"),
                 "loss": entry.get("loss", "?"),
+                "seed": entry.get("seed"),
+                "select": entry.get("select"),
                 "psnr_clean": _get(noise.get(0.0), "psnr"),
                 "psnr_mid": _get(noise.get(0.5), "psnr"),
                 "psnr_drop": _diff(noise.get(0.0), noise.get(0.5), "psnr"),
@@ -92,7 +93,7 @@ def load_downstream_rows(downstream_dir: Path) -> list[dict]:
                 "path_length": interp.get("path_length"),
             }
             out.append(row)
-    out.sort(key=lambda r: (r["dataset"], r["model"]))
+    out.sort(key=lambda r: (r["dataset"], r["model"], r.get("seed") or 0, r.get("select") or ""))
     return out
 
 
@@ -112,8 +113,8 @@ def _diff(a: Optional[dict], b: Optional[dict], k: str) -> Optional[float]:
 INFERENCE_COLS = ["dataset", "model", "loss", "seed", "select",
                   "mse", "sam_rad", "sam_valid", "valid_pixel_frac",
                   "psnr", "ssim", "n_samples"]
-DOWNSTREAM_COLS = ["dataset", "model", "loss", "psnr_clean", "psnr_mid",
-                   "psnr_drop", "sam_mid", "jaggedness", "path_length"]
+DOWNSTREAM_COLS = ["dataset", "model", "loss", "seed", "select", "psnr_clean",
+                   "psnr_mid", "psnr_drop", "sam_mid", "jaggedness", "path_length"]
 
 
 def write_csv(rows: list[dict], cols: list[str], path: Path) -> None:
@@ -152,17 +153,47 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--inference-dir", default="results/inference", type=Path)
     p.add_argument("--downstream-dir", default="results/downstream", type=Path)
     p.add_argument("--out-dir", default="results", type=Path,
-                   help="Where the two CSVs are written.")
+                   help="Where the two CSVs are written. Also where "
+                        "probes.csv/stats.csv are looked for when sending to "
+                        "Telegram (inference/verdict.py's default output dir).")
     p.add_argument("--telegram", action="store_true",
-                   help="Also send a summary message to Telegram.")
+                   help="Send ablation_table.csv, downstream_table.csv, and — "
+                        "if present in --out-dir — probes.csv/stats.csv to "
+                        "Telegram as file attachments (not text tables).")
+    p.add_argument("--caption", default=None,
+                   help="Extra text prefixed to the Telegram summary, e.g. "
+                        "'cumulative through IIRS'.")
+    p.add_argument("--datasets", default=None,
+                   help="Comma-separated dataset filter (default: no filter, "
+                        "i.e. current behaviour — every JSON under the input "
+                        "dirs is included).")
+    p.add_argument("--seeds", default=None,
+                   help="Comma-separated seed filter (default: no filter).")
+    p.add_argument("--select", default=None, choices=("sam", "mse"),
+                   help="Restrict to rows read from this checkpoint-selection "
+                        "criterion (default: no filter, i.e. current behaviour).")
     return p.parse_args()
+
+
+def _apply_filters(rows: list[dict], datasets, seeds, select) -> list[dict]:
+    if datasets:
+        wanted = set(datasets.split(","))
+        rows = [r for r in rows if r.get("dataset") in wanted]
+    if seeds:
+        wanted = {int(s) for s in seeds.split(",")}
+        rows = [r for r in rows if r.get("seed") in wanted]
+    if select:
+        rows = [r for r in rows if r.get("select") == select]
+    return rows
 
 
 def main() -> None:
     args = parse_args()
 
-    inference_rows = load_inference_rows(args.inference_dir)
-    downstream_rows = load_downstream_rows(args.downstream_dir)
+    inference_rows = _apply_filters(
+        load_inference_rows(args.inference_dir), args.datasets, args.seeds, args.select)
+    downstream_rows = _apply_filters(
+        load_downstream_rows(args.downstream_dir), args.datasets, args.seeds, args.select)
 
     inference_csv = args.out_dir / "ablation_table.csv"
     downstream_csv = args.out_dir / "downstream_table.csv"
@@ -185,30 +216,31 @@ def main() -> None:
 
     if args.telegram:
         notifier = TelegramNotifier()
-        
-        # Send a compact summary and filenames
+
+        prefix = f"{args.caption}\n" if args.caption else ""
         summary = (
-            f"<b>Inference sweep finished</b>\n"
+            f"{prefix}<b>Inference sweep finished</b>\n"
             f"reconstruction cells: {len(inference_rows)}  |  "
-            f"downstream cells: {len(downstream_rows)}\n"
-            f"CSVs: <code>{inference_csv.name}</code>, <code>{downstream_csv.name}</code>"
+            f"downstream cells: {len(downstream_rows)}"
         )
         notifier.send(summary)
 
-        # Chunk reconstruction table to avoid Telegram's max character limits or unclosed tag split issues
-        chunk_size = 15
-        for i in range(0, len(inference_rows), chunk_size):
-            chunk = inference_rows[i:i + chunk_size]
-            title = f"Reconstruction metrics (Rows {i+1}-{min(i+len(chunk), len(inference_rows))} of {len(inference_rows)})"
-            chunk_table = render_table(chunk, INFERENCE_COLS, title)
-            notifier.send(f"<pre>{html.escape(chunk_table)}</pre>")
-
-        # Chunk downstream table
-        for i in range(0, len(downstream_rows), chunk_size):
-            chunk = downstream_rows[i:i + chunk_size]
-            title = f"Downstream latent probes (Rows {i+1}-{min(i+len(chunk), len(downstream_rows))} of {len(downstream_rows)})"
-            chunk_table = render_table(chunk, DOWNSTREAM_COLS, title)
-            notifier.send(f"<pre>{html.escape(chunk_table)}</pre>")
+        # CSVs go as file attachments, not chunked <pre> text tables — a
+        # partial CSV pasted as text is unreadable at grid scale and the old
+        # chunking re-split raw HTML inside <pre>, risking unclosed tags.
+        # probes.csv / stats.csv come from inference/verdict.py, which shares
+        # --out-dir with this script by default; stats.csv can legitimately be
+        # a genuine zero-byte file (no pairwise comparisons yet), so every send
+        # is guarded on the file being non-empty.
+        candidates = [
+            (inference_csv, "Reconstruction metrics (ablation_table.csv)"),
+            (downstream_csv, "Downstream latent probes (downstream_table.csv)"),
+            (args.out_dir / "probes.csv", "Falsification-suite diagnostics (probes.csv)"),
+            (args.out_dir / "stats.csv", "Pairwise statistics (stats.csv)"),
+        ]
+        for path, caption in candidates:
+            if path.is_file() and path.stat().st_size > 0:
+                notifier.send_document(path, caption=caption)
 
 
 if __name__ == "__main__":

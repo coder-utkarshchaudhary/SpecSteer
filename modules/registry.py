@@ -44,6 +44,11 @@ from modules.vae_our import HSI_DualStream_PI_VAE
 from modules.vae_standard import VAE_Standard
 from modules.vae_3d import VAE_3D_SpatioSpectral
 from modules.vae_1d import VAE_1D_Pixelwise
+from modules.vae_our_variants import (
+    HSI_DualStream_PI_VAE_NL,
+    HSI_DualStream_PI_VAE_SpecViT,
+    HSI_DualStream_PI_VAE_NL_SpecViT,
+)
 
 
 # CLI name -> model class.
@@ -52,11 +57,20 @@ MODELS = {
     "vae-standard": VAE_Standard,
     "vae-3d-spatio-spectral": VAE_3D_SpatioSpectral,
     "vae-1d-pixelwise": VAE_1D_Pixelwise,
+    # PRISM ablation variants (modules/vae_our_variants.py). Registered here,
+    # not by self-mutating this module from the variants file, so `--model
+    # vae-our-nl` works from train/train.py and inference/*.py directly — no
+    # separate *_variants.py entry point needed (train_variants.py /
+    # inference_variants.py still work; their `import modules.vae_our_variants`
+    # is now a no-op for registration purposes).
+    "vae-our-nl": HSI_DualStream_PI_VAE_NL,
+    "vae-our-specvit": HSI_DualStream_PI_VAE_SpecViT,
+    "vae-our-nl-specvit": HSI_DualStream_PI_VAE_NL_SpecViT,
 }
 
 # Models whose loss is intrinsically physics-informed (SAM baked in). These have
 # no separate "standard" variant — train.py rejects --loss standard for them.
-PHYSICS_ONLY = {"vae-our"}
+PHYSICS_ONLY = {"vae-our", "vae-our-nl", "vae-our-specvit", "vae-our-nl-specvit"}
 
 MODEL_NAMES = tuple(MODELS.keys())
 

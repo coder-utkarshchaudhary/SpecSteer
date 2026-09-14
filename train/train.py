@@ -556,6 +556,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--beta", type=float, default=None)
     parser.add_argument("--lambda-physics", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--patience", type=int, default=None,
+                        help="Early-stopping patience (epochs with neither val "
+                             "SAM nor val recon-MSE improving). CLI > dataset "
+                             "YAML's early_stopping_patience > 7.")
     parser.add_argument("--set", action="append", default=None, metavar="KEY=VALUE",
                         help="One-off Settings override, repeatable (e.g. "
                              "--set vae_3d_base_ch=30). Applied after the "
@@ -623,7 +627,7 @@ def main():
     lambda_physics = _resolve(args.lambda_physics, hp, "lambda_physics", 0.3)
     seed = _resolve(args.seed, hp, "seed", 42)
     weight_decay = hp.get("weight_decay", 1e-5)
-    patience = hp.get("early_stopping_patience", 7)
+    patience = _resolve(args.patience, hp, "early_stopping_patience", 7)
 
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

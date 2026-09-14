@@ -56,7 +56,7 @@ from inference.inference import compute_psnr, compute_ssim, load_model  # noqa: 
 from modules.losses import spectral_angle_mapper_loss  # noqa: E402
 from modules.registry import MODEL_NAMES, PHYSICS_ONLY, checkpoint_name, resolve_checkpoint  # noqa: E402
 from utils.config import DATASETS, apply_dataset, settings  # noqa: E402
-from utils.hyperparams import apply_hyperparams, load_hyperparams  # noqa: E402
+from utils.hyperparams import apply_cli_overrides, apply_hyperparams, load_hyperparams  # noqa: E402
 from utils.training.dataloader import build_dataset  # noqa: E402
 
 PREREG_PATH = REPO_ROOT / "inference" / "preregistration.yaml"
@@ -242,7 +242,7 @@ def p2_latent_budget(model, x, model_name, cfg) -> dict:
         "bits_per_pixel_per_band": 32.0 * elements / inp,
         "rate_matched": abs(dev) <= p["match_tolerance_pct"],
     }
-    if model_name == "vae-our" and p.get("report_per_branch_mse", True):
+    if model_name in ("vae-our", "vae-our-nl") and p.get("report_per_branch_mse", True):
         rf, rs, rp, *_ = batched_forward(model, x)
         out["per_branch_mse"] = {
             "mse_final": float(F.mse_loss(rf, x)),
@@ -397,7 +397,14 @@ def run_cell(model_name: str, dataset: str, loss: str, args, cfg,
                 "error": f"missing checkpoint {ckpt}"}
 
     # load_model returns (model, checkpoint_dict); it already calls .eval().
-    model, ckpt_meta = load_model(model_name, ckpt, device)
+    # A shape mismatch (e.g. a checkpoint trained under different --set
+    # capacity overrides than are active now) must not abort the remaining
+    # cells in the sweep — report it as an error cell instead.
+    try:
+        model, ckpt_meta = load_model(model_name, ckpt, device)
+    except RuntimeError as e:
+        return {"model": model_name, "dataset": dataset, "loss": loss,
+                "error": f"load_state_dict failed for {ckpt}: {e}"}
     xd = x.to(device)
     eps = cfg["p1_trivial_floors"]["sam_valid_min_energy"]
 
@@ -459,6 +466,11 @@ def parse_args() -> argparse.Namespace:
                    help="Chunk size for model forwards inside probes "
                         "(memory only; does not change results).")
     p.add_argument("--out-dir", default="results/probes")
+    p.add_argument("--set", action="append", default=None, metavar="KEY=VALUE",
+                   help="One-off Settings override, repeatable (e.g. --set "
+                        "vae_3d_base_ch=30). Applied after the dataset YAML, "
+                        "same semantics as train/train.py --set. Must match "
+                        "whatever the checkpoint was actually trained with.")
     return p.parse_args()
 
 
@@ -474,6 +486,9 @@ def main() -> int:
 
     apply_dataset(args.dataset, verify=True, processed_root=args.data_root)
     apply_hyperparams(settings, load_hyperparams(args.dataset))
+    overrides = apply_cli_overrides(settings, args.set)
+    if overrides:
+        print(f"--set overrides active: {overrides}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print(f"diagnostics | {args.dataset} | split={split} | preregistered {cfg['registered_on']}")
@@ -501,6 +516,7 @@ def main() -> int:
         (out_dir / f"{args.dataset}__{name}.json").write_text(json.dumps(res, indent=1))
         if res.get("error"):
             print(f"  {m:<24} {l:<9} MISSING  ({res['error']})")
+            rc = 1
             continue
         p2, p3, p4 = (res["P2_latent_budget"], res["P3_collapse"],
                       res["P4_spatial_reliance"])

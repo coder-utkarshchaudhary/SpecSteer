@@ -12,12 +12,11 @@
 #   python utils/find_max_batch.py --budget-gb 24 --fit
 
 # --- Optimization ---
-# CRIMS trains on only 2,561 patches (uncapped) vs ~7,000 elsewhere, and the
-# 2026-08 grid showed undertraining + seed instability here (vae-1d never
-# converged; vae-standard seed-unstable; vae-our SSIM collapse). Per
-# docs/new_plan.md the CRIMS training config gets more room — epochs 50 -> 80,
-# patience 7 -> 12 — applied identically to ALL models (fairness holds within
-# the dataset; there is no cross-dataset comparison to protect). The 5-epoch
+# 60, patience 3 is the 2026-09-14 clean-slate grid value (scripts/run_clean_grid.sh),
+# fixed by hand across all four datasets to end the earlier per-dataset drift
+# (IIRS/AVIRIS 30, CRIMS 50/60/80 all appeared at different points; CRIMS also
+# separately carried patience 12 for its smaller 2,561-patch split). CLI
+# --epochs/--patience still override this when passed explicitly. The 5-epoch
 # linear LR warmup lives in train/train.py and applies everywhere.
 epochs: 60
 lr: 1.0e-3
@@ -52,7 +51,7 @@ beta: 1.0e-3
 lambda_physics: 0.3
 seed: 42
 weight_decay: 1.0e-5
-early_stopping_patience: 12
+early_stopping_patience: 3
 
 # --- Latent budget: every model on the common target T = 28,672 (65.1:1) ---
 #
