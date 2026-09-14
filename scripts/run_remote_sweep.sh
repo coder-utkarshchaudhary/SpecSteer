@@ -27,7 +27,7 @@ DATASETS_STEP1="IIRS,AVIRIS,CRIMS"
 DATASETS_STEP2="IIRS,M3,AVIRIS,CRIMS"
 SEEDS_CSV="42"
 SELECT="sam"
-OVERWRITE=0
+OVERWRITE=1
 SEND_TELEGRAM=1
 STEPS_CSV="1,2,3,4"
 EXTRA_ARGS=()
@@ -175,8 +175,19 @@ if (( RUN_S1 )); then
                 --datasets "${ds}" \
                 --seeds "${SEEDS_CSV}" \
                 --select "${SELECT}" \
+                --models "vae-standard,vae-3d-spatio-spectral,vae-1d-pixelwise" \
                 "${extra_opts[@]}"
         done
+
+        # Explicitly aggregate and send baseline inference tables to Telegram
+        if (( SEND_TELEGRAM )); then
+            echo ">>> Aggregating baseline metrics and sending table to Telegram..."
+            python inference/aggregate.py \
+                --inference-dir "${INFER_JSON_DIR}" \
+                --downstream-dir "${DOWNSTREAM_DIR}" \
+                --out-dir "${OUT_DIR}" \
+                --telegram
+        fi
     }
 
     run_step "1" "Inference on Baselines (${DATASETS_STEP1})" run_baseline_inference

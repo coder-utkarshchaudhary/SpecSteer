@@ -184,15 +184,31 @@ def main() -> None:
     print(f"CSV: {downstream_csv}")
 
     if args.telegram:
+        notifier = TelegramNotifier()
+        
+        # Send a compact summary and filenames
         summary = (
             f"<b>Inference sweep finished</b>\n"
             f"reconstruction cells: {len(inference_rows)}  |  "
             f"downstream cells: {len(downstream_rows)}\n"
-            f"<pre>{html.escape(inference_table)}</pre>\n"
-            f"<pre>{html.escape(downstream_table)}</pre>\n"
-            f"CSVs: {inference_csv} , {downstream_csv}"
+            f"CSVs: <code>{inference_csv.name}</code>, <code>{downstream_csv.name}</code>"
         )
-        TelegramNotifier().send(summary)
+        notifier.send(summary)
+
+        # Chunk reconstruction table to avoid Telegram's max character limits or unclosed tag split issues
+        chunk_size = 15
+        for i in range(0, len(inference_rows), chunk_size):
+            chunk = inference_rows[i:i + chunk_size]
+            title = f"Reconstruction metrics (Rows {i+1}-{min(i+len(chunk), len(inference_rows))} of {len(inference_rows)})"
+            chunk_table = render_table(chunk, INFERENCE_COLS, title)
+            notifier.send(f"<pre>{html.escape(chunk_table)}</pre>")
+
+        # Chunk downstream table
+        for i in range(0, len(downstream_rows), chunk_size):
+            chunk = downstream_rows[i:i + chunk_size]
+            title = f"Downstream latent probes (Rows {i+1}-{min(i+len(chunk), len(downstream_rows))} of {len(downstream_rows)})"
+            chunk_table = render_table(chunk, DOWNSTREAM_COLS, title)
+            notifier.send(f"<pre>{html.escape(chunk_table)}</pre>")
 
 
 if __name__ == "__main__":
