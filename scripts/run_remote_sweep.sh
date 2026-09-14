@@ -156,11 +156,30 @@ fi
 # STEP 1: Baseline Inference on existing datasets
 # ------------------------------------------------------------------------------
 if (( RUN_S1 )); then
-    run_step "1" "Inference on Baselines (${DATASETS_STEP1})" \
-        bash scripts/inference.sh \
-            --datasets "${DATASETS_STEP1}" \
-            --seeds "${SEEDS_CSV}" \
-            --select "${SELECT}"
+    run_baseline_inference() {
+        # Split DATASETS_STEP1 into an array
+        IFS=',' read -r -a STEP1_DS_ARR <<< "${DATASETS_STEP1}"
+        for ds in "${STEP1_DS_ARR[@]}"; do
+            echo ">>> Running baseline inference for dataset ${ds} with old parameter-matched widths..."
+            local extra_opts=()
+            if [[ "${ds}" == "IIRS" ]]; then
+                extra_opts+=(--set "vae_standard_base_ch=86" --set "vae_3d_base_ch=45" --set "vae_1d_hidden_dims=[2748,1374,687]")
+            elif [[ "${ds}" == "AVIRIS" ]]; then
+                extra_opts+=(--set "vae_standard_base_ch=85" --set "vae_3d_base_ch=46" --set "vae_1d_hidden_dims=[2668,1334,667]")
+            elif [[ "${ds}" == "CRIMS" ]]; then
+                extra_opts+=(--set "vae_standard_base_ch=85" --set "vae_3d_base_ch=46" --set "vae_1d_hidden_dims=[2656,1328,664]")
+            fi
+            
+            # Run inference.sh for this single dataset
+            bash scripts/inference.sh \
+                --datasets "${ds}" \
+                --seeds "${SEEDS_CSV}" \
+                --select "${SELECT}" \
+                "${extra_opts[@]}"
+        done
+    }
+
+    run_step "1" "Inference on Baselines (${DATASETS_STEP1})" run_baseline_inference
 fi
 
 # ------------------------------------------------------------------------------
