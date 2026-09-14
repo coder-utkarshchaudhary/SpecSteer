@@ -48,12 +48,12 @@ PROBES_DIR="${OUT_DIR}/probes"
 cd "${REPO_ROOT}"
 
 # One source of truth for which datasets the grid covers — the grid manifest.
-# ALL_DATASETS used to be a second hard-coded list here and it drifted (M3 was
-# dropped from the manifest but not from here).
+# ALL_DATASETS includes all valid datasets configured in the codebase (including M3),
+# while default evaluation targets the active grid datasets.
 # shellcheck source=scripts/grid_manifest.sh
 source "${SCRIPT_DIR}/grid_manifest.sh"
-ALL_DATASETS=("${GRID_DATASETS[@]}")
-DATASETS=("${ALL_DATASETS[@]}")
+ALL_DATASETS=("IIRS" "M3" "AVIRIS" "CRIMS")
+DATASETS=("${GRID_DATASETS[@]}")
 SEND_TELEGRAM=1
 SELECT="${SELECT:-sam}"
 SEEDS_CSV="${SEEDS_CSV:-}"

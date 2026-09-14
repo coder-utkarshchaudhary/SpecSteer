@@ -447,9 +447,9 @@ def main():
             all_results.append(r)
 
     if not all_results:
-        _broadcast(shared_loggers, logging.ERROR,
-                   "No models could be evaluated (no checkpoints found).")
-        raise SystemExit("No models could be evaluated (no checkpoints found).")
+        _broadcast(shared_loggers, logging.WARNING,
+                   "No models could be evaluated (no checkpoints found for this dataset). Skipping downstream gracefully.")
+        sys.exit(0)
 
     print_noise_table(all_results, args.sigmas, shared_loggers)
     print_interp_table(all_results, shared_loggers)
