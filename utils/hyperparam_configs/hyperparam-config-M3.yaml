@@ -52,7 +52,23 @@ beta: 1.0e-3
 lambda_physics: 0.3
 seed: 42
 weight_decay: 1.0e-5
-early_stopping_patience: 3
+# 2026-09-16: raised 3 -> 10, M3-ONLY (IIRS/AVIRIS/CRIMS stay at 3). Evidence
+# from the 2026-09-15 clean-slate grid (ChatExport_2026-09-16): vae-our|M3
+# seed67 stopped at epoch 9 (val SAM 0.1141, 4th of 5 physics cells) while the
+# same model|dataset at seed69 ran the full 60 epochs without ever plateauing
+# for 3 straight and produced the BEST SAM_valid in the entire 64-cell grid
+# (0.0945) -- with correspondingly healthier probes.py diagnostics too
+# (latent_swap_delta 0.549 vs 0.242, sri 0.188 vs 0.061). M3's epochs-trained
+# distribution grid-wide was the most compressed of the three datasets with
+# usable probe data (only 1/16 cells reached 60, vs 5/16 on IIRS, 2/16 on
+# CRIMS) -- patience=3 was very likely firing before convergence here
+# specifically, plausibly because M3 also carries the tightest latent budget
+# of the four datasets (84.0:1, see below) so validation metrics plateau
+# noisily. 10 is a judgment call, not something this data pins exactly:
+# CRIMS previously ran at patience=12 for being the smallest split (2,561
+# patches); M3 trains on more (capped at 7,000) so needs less slack than
+# CRIMS did, but the seed67-vs-69 gap says 3 is clearly too tight.
+early_stopping_patience: 10
 
 # --- Latent budget: every model on the common target T = 4,096 (84.0:1) ---
 #

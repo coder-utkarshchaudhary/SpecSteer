@@ -37,6 +37,7 @@ import argparse
 import json
 import math
 import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -491,8 +492,28 @@ def main() -> int:
         print(f"--set overrides active: {overrides}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     print(f"diagnostics | {args.dataset} | split={split} | preregistered {cfg['registered_on']}")
-    x, scenes = load_patches(args.dataset, split, cfg, args.packed_root, args.data_root)
+    try:
+        x, scenes = load_patches(args.dataset, split, cfg, args.packed_root, args.data_root)
+    except Exception as e:  # noqa: BLE001
+        # Uncaught here used to kill the whole process before a single cell's
+        # JSON was written and with no trace anywhere else -- probes.py sends
+        # nothing to Telegram, so a crash at this line (e.g. the 2026-09-15
+        # AVIRIS run, which failed identically on all 16 model/loss/seed
+        # cells -- consistent with a shared-setup failure here rather than a
+        # per-model bug) left zero evidence of what broke. Write it down
+        # instead, so the next attempt is diagnosable without the original
+        # terminal/log.
+        tb = traceback.format_exc()
+        print(f"FATAL: load_patches failed for {args.dataset}/{split}: {e}\n{tb}")
+        (out_dir / f"{args.dataset}__LOAD_FAILURE.json").write_text(json.dumps({
+            "dataset": args.dataset, "split": split, "stage": "load_patches",
+            "error": str(e), "traceback": tb,
+        }, indent=1))
+        return 1
     print(f"  {x.shape[0]} patches, C={x.shape[-1]}, {len(set(scenes))} scenes")
 
     cells = []
@@ -507,11 +528,20 @@ def main() -> int:
         losses = ["physics"] if m in PHYSICS_ONLY else [args.loss or "physics"]
         cells = [(m, l) for l in losses]
 
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
     rc = 0
     for m, l in cells:
-        res = run_cell(m, args.dataset, l, args, cfg, x, scenes, device)
+        try:
+            res = run_cell(m, args.dataset, l, args, cfg, x, scenes, device)
+        except Exception as e:  # noqa: BLE001
+            # A crash inside one cell (P2/P3/P4, outside run_cell's own
+            # load_model guard) used to abort every remaining cell in an
+            # --all-models invocation. Record it as an error cell instead and
+            # keep going -- the caller (scripts/run_clean_grid.sh) already
+            # treats an "error" result as a per-cell failure.
+            tb = traceback.format_exc()
+            print(f"  {m:<24} {l:<9} CRASHED  ({e})")
+            res = {"model": m, "dataset": args.dataset, "loss": l,
+                   "error": f"run_cell crashed: {e}", "traceback": tb}
         name = checkpoint_name(m, l, seed=args.seed, select=args.select).replace(".pt", "")
         (out_dir / f"{args.dataset}__{name}.json").write_text(json.dumps(res, indent=1))
         if res.get("error"):

@@ -152,6 +152,34 @@ def compare(metric: str, model_a: str, model_b: str,
     """
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
+
+    # Per-patch metrics can be NaN -- sam_valid is 0/0 for any patch with zero
+    # SAM-valid pixels (a CRIMS-specific occurrence at ~50% valid_pixel_frac,
+    # 2026-09-15 grid). A NaN anywhere poisons every summary statistic derived
+    # from the paired difference, and worse: paired_permutation_test's
+    # `null >= obs` comparison is *always* False against a NaN `obs` (numpy
+    # NaN comparisons are never True), so every resample "loses" and
+    # p = (0 + 1) / (resamples + 1) ~= 1e-4 -- reported as maximally
+    # significant for a comparison that is actually undefined. Drop patches
+    # where either side is NaN before computing anything; report how many
+    # survive via `n`.
+    valid = ~(np.isnan(a) | np.isnan(b))
+    a, b = a[valid], b[valid]
+
+    if a.size < 4:
+        # Matches the n<4 threshold verdict.py already applies before calling
+        # compare() on the unfiltered patch count -- reapplied here on the
+        # NaN-filtered count, since filtering can push a family member below
+        # that floor even when the raw pair looked large enough.
+        return PairedResult(
+            metric=metric, model_a=model_a, model_b=model_b, n=int(a.size),
+            mean_a=float("nan"), mean_b=float("nan"),
+            delta=float("nan"), ci_low=float("nan"), ci_high=float("nan"),
+            p_value=float("nan"), p_holm=None, cliffs_delta=float("nan"),
+            significant=False, meaningful=False,
+            verdict="undefined_insufficient_valid_pairs",
+        )
+
     delta, lo, hi = paired_bootstrap_ci(
         a, b, cfg.get("bootstrap_resamples", 10000), cfg.get("alpha", 0.05), seed)
     p = paired_permutation_test(a, b, cfg.get("permutation_resamples", 10000), seed)
@@ -184,12 +212,24 @@ def apply_holm(results: list[PairedResult], cfg: dict) -> list[PairedResult]:
     The family is every pairwise comparison of one metric within one dataset —
     that is the set of tests you would look across before making a claim, so
     that is the set the correction must cover.
+
+    Comparisons `compare()` already marked undefined (`p_value` is NaN — every
+    patch pair was NaN, e.g. CRIMS `sam_valid` at low `valid_pixel_frac`) are
+    excluded from that family rather than just left alone: `holm_correct`'s
+    step-down `running = max(running, val)` silently assigns a NaN p-value a
+    REAL adjusted value (numpy sorts NaN last, and `max(running, nan)` returns
+    `running` unchanged rather than propagating the NaN), which would then
+    overwrite `compare()`'s `"undefined_insufficient_valid_pairs"` verdict
+    with a bogus `"no_difference"`/`"significant_but_negligible"` below. They
+    are not real hypothesis tests and must not consume any of the family's
+    multiple-comparisons budget either.
     """
     if not results:
         return results
-    adj = holm_correct([r.p_value for r in results])
+    testable = [r for r in results if not np.isnan(r.p_value)]
+    adj = holm_correct([r.p_value for r in testable])
     alpha = cfg.get("alpha", 0.05)
-    for r, pa in zip(results, adj):
+    for r, pa in zip(testable, adj):
         r.p_holm = pa
         r.significant = pa < alpha
         if not r.significant:
