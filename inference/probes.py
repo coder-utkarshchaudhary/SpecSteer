@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -73,6 +74,47 @@ def load_prereg() -> dict:
     return yaml.safe_load(PREREG_PATH.read_text())
 
 
+def _gpu_processes() -> str:
+    """Compute processes currently on the GPU, via nvidia-smi. Best effort."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory",
+             "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return out.stdout.strip() or "(none reported)"
+    except Exception:
+        return "(nvidia-smi unavailable)"
+
+
+def preflight_vram(device: torch.device, min_free_gb: float = 2.0) -> None:
+    """
+    Warn (never abort) when the card is already occupied before probes starts.
+
+    Mirrors train/train.py:preflight_vram, at a lower threshold -- probes.py's
+    peak footprint per cell is now a few hundred MB to a couple GB (see the
+    chunked accumulators below), not a training batch's worth. This does not
+    explain the 2026-09-17 AVIRIS OOM (the card was idle at start; that crash
+    was probes.py's own unchunked peak inside a single cell -- see the module
+    docstring below -- now fixed). It exists for the other failure mode
+    training's preflight already guards against: a leaked/co-resident process
+    that a file lock alone cannot see.
+    """
+    if device.type != "cuda":
+        return
+    try:
+        free_b, total_b = torch.cuda.mem_get_info()
+    except Exception:
+        return
+    free_gb, total_gb = free_b / 1024 ** 3, total_b / 1024 ** 3
+    used_gb = total_gb - free_gb
+    if used_gb > 1.0:
+        print(f"WARNING: {used_gb:.1f} GB of {total_gb:.1f} GB GPU already in "
+              f"use before this run starts (free: {free_gb:.1f} GB free). "
+              f"If this OOMs, that is likely why.\n"
+              f"  compute apps: {_gpu_processes()}")
+
+
 # ---------------------------------------------------------------------------
 # Chunked model calls
 # ---------------------------------------------------------------------------
@@ -83,6 +125,22 @@ def load_prereg() -> dict:
 # and reassemble. Purely a memory-management concern: results are identical to
 # an unchunked call because none of these models mix information across the
 # batch dimension.
+#
+# 2026-09-17 AVIRIS OOM: chunking the MODEL CALL (below) was not enough by
+# itself. The old batched_decode/batched_forward helpers still `torch.cat`
+# their chunks back into one full (B,H,W,C) tensor before returning -- at
+# AVIRIS's 512 patches x 424 bands, that is 3.3 GiB PER TENSOR, and
+# p2_latent_budget/p3_collapse/p4_spatial_reliance each held several such
+# tensors live at once (a peak of ~20-26 GiB against a 23.4 GB card), even
+# though none of their final numbers need more than a scalar or a small
+# running accumulator. `ChunkedMetricAccumulator` below and the chunked
+# rewrites of P2/P3/P4 fix this by never materialising the full tensor --
+# every number they produce is mathematically identical to the old
+# full-tensor computation (see the class docstring for exactly why), not an
+# approximation, and the preregistered 512-patch sample stays unchanged.
+# batched_decode/batched_forward were removed once nothing called them any
+# more; batched_reconstruct/batched_encode are still used (run_cell's one
+# necessary full reconstruction, and P3's small latent encode).
 
 PROBE_BATCH = 8
 
@@ -100,24 +158,20 @@ def batched_encode(model, x: torch.Tensor) -> list[torch.Tensor]:
     return [torch.cat([p[j] for p in parts], dim=0) for j in range(len(parts[0]))]
 
 
-@torch.no_grad()
-def batched_decode(model, latents: list[torch.Tensor]) -> torch.Tensor:
-    n = latents[0].shape[0]
-    return torch.cat([model.decode_latents([t[i:i + PROBE_BATCH] for t in latents])
-                      for i in range(0, n, PROBE_BATCH)], dim=0)
-
-
-@torch.no_grad()
-def batched_forward(model, x: torch.Tensor) -> tuple:
-    """Full forward, chunked. Returns tensors concatenated along the batch axis."""
-    outs = [model(x[i:i + PROBE_BATCH]) for i in range(0, x.shape[0], PROBE_BATCH)]
-    return tuple(torch.cat([o[j] for o in outs], dim=0) if torch.is_tensor(outs[0][j])
-                 else outs[0][j] for j in range(len(outs[0])))
-
-
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+
+def _sam_per_pixel(x: torch.Tensor, recon: torch.Tensor) -> torch.Tensor:
+    """Per-pixel spectral angle, (B, H, W). Same formula as
+    modules/losses.spectral_angle_mapper_loss and sam_valid below, factored
+    out so the chunked accumulator and the whole-tensor path agree exactly."""
+    dot = (x * recon).sum(dim=-1)
+    nt = torch.sqrt((x ** 2).sum(dim=-1) + 1e-8)
+    np_ = torch.sqrt((recon ** 2).sum(dim=-1) + 1e-8)
+    cos = torch.clamp(dot / (nt * np_ + 1e-8), -1 + 1e-8, 1 - 1e-8)
+    return torch.acos(cos)
+
 
 def sam_valid(x: torch.Tensor, recon: torch.Tensor, min_energy: float) -> float:
     """
@@ -134,11 +188,8 @@ def sam_valid(x: torch.Tensor, recon: torch.Tensor, min_energy: float) -> float:
     mask = energy >= min_energy
     if mask.sum() == 0:
         return float("nan")
-    dot = (x * recon).sum(dim=-1)
-    nt = torch.sqrt((x ** 2).sum(dim=-1) + 1e-8)
-    np_ = torch.sqrt((recon ** 2).sum(dim=-1) + 1e-8)
-    cos = torch.clamp(dot / (nt * np_ + 1e-8), -1 + 1e-8, 1 - 1e-8)
-    return float(torch.acos(cos)[mask].mean())
+    angle = _sam_per_pixel(x, recon)
+    return float(angle[mask].mean())
 
 
 def metrics(x: torch.Tensor, recon: torch.Tensor, min_energy: float) -> dict:
@@ -149,6 +200,68 @@ def metrics(x: torch.Tensor, recon: torch.Tensor, min_energy: float) -> dict:
         "sam": float(spectral_angle_mapper_loss(x, recon)),
         "sam_valid": sam_valid(x, recon, min_energy),
     }
+
+
+class ChunkedMetricAccumulator:
+    """
+    Streaming equivalent of metrics(x, recon, min_energy): feed
+    (x_chunk, recon_chunk) pairs instead of holding a full (B,H,W,C) tensor.
+
+    Each running total below reproduces its single-tensor counterpart EXACTLY
+    (up to float summation order, ~1e-6 relative -- not an approximation):
+      mse / psnr : modules/metrics.py's psnr() calls F.mse_loss on the WHOLE
+                   tensor -- a global mean of squared error over every
+                   element. Accumulate sum-of-squared-error and element count,
+                   and take log10 only once at the end from the aggregate MSE.
+                   Averaging per-chunk PSNR values would be WRONG here (log is
+                   nonlinear, mean-of-logs != log-of-mean).
+      ssim       : modules/metrics.py's ssim() is ALREADY a sample-count-
+                   weighted mean over its own internal chunks
+                   (`total = total + m.mean() * a_c.shape[0]`) -- weighting
+                   our own chunk-level compute_ssim() calls by chunk size
+                   reproduces that identically.
+      sam        : spectral_angle_mapper_loss's reduction is torch.mean over
+                   every (B,H,W) pixel -- accumulate the angle sum and pixel
+                   count.
+      sam_valid  : same, restricted to the energy-valid mask.
+    """
+
+    def __init__(self, min_energy: float):
+        self.min_energy = min_energy
+        self.sse = 0.0
+        self.n_elem = 0
+        self.ssim_wsum = 0.0
+        self.n_samples = 0
+        self.sam_sum = 0.0
+        self.n_pixels = 0
+        self.sam_valid_sum = 0.0
+        self.n_valid_pixels = 0
+
+    def update(self, x_c: torch.Tensor, recon_c: torch.Tensor) -> None:
+        b = x_c.shape[0]
+        self.sse += float(((recon_c - x_c) ** 2).sum())
+        self.n_elem += x_c.numel()
+        self.ssim_wsum += compute_ssim(x_c, recon_c) * b
+        self.n_samples += b
+        angle = _sam_per_pixel(x_c, recon_c)
+        self.sam_sum += float(angle.sum())
+        self.n_pixels += angle.numel()
+        energy = (x_c ** 2).sum(dim=-1)
+        mask = energy >= self.min_energy
+        nvalid = int(mask.sum())
+        if nvalid:
+            self.sam_valid_sum += float(angle[mask].sum())
+            self.n_valid_pixels += nvalid
+
+    def result(self) -> dict:
+        mse = self.sse / max(self.n_elem, 1)
+        psnr_v = 10.0 * math.log10(1.0 / max(mse, 1e-12))
+        ssim_v = self.ssim_wsum / max(self.n_samples, 1)
+        sam_v = self.sam_sum / max(self.n_pixels, 1)
+        sam_valid_v = (self.sam_valid_sum / self.n_valid_pixels
+                       if self.n_valid_pixels else float("nan"))
+        return {"mse": mse, "psnr": psnr_v, "ssim": ssim_v,
+                "sam": sam_v, "sam_valid": sam_valid_v}
 
 
 def per_patch_metrics(x: torch.Tensor, recon: torch.Tensor, min_energy: float) -> dict:
@@ -244,11 +357,29 @@ def p2_latent_budget(model, x, model_name, cfg) -> dict:
         "rate_matched": abs(dev) <= p["match_tolerance_pct"],
     }
     if model_name in ("vae-our", "vae-our-nl") and p.get("report_per_branch_mse", True):
-        rf, rs, rp, *_ = batched_forward(model, x)
+        # Chunked, not batched_forward + F.mse_loss on the full tensor: the
+        # model's 7-tuple forward (3 full-size reconstructions + 4 latents)
+        # concatenated to (B,H,W,C) is 3.3 GiB per tensor at AVIRIS scale, and
+        # this call held three of them live at once (~20 GiB transient) --
+        # the single biggest contributor to the 2026-09-17 OOM. Only a scalar
+        # per branch is needed, so accumulate sum-of-squared-error per chunk
+        # instead; algebraically identical to F.mse_loss's global mean (see
+        # ChunkedMetricAccumulator's docstring above for the same argument).
+        sse_f = sse_s = sse_p = 0.0
+        n_elem = 0
+        with torch.no_grad():
+            for i in range(0, x.shape[0], PROBE_BATCH):
+                xb = x[i:i + PROBE_BATCH]
+                rf, rs, rp, *_ = model(xb)
+                sse_f += float(((rf - xb) ** 2).sum())
+                sse_s += float(((rs - xb) ** 2).sum())
+                sse_p += float(((rp - xb) ** 2).sum())
+                n_elem += xb.numel()
+                del rf, rs, rp
         out["per_branch_mse"] = {
-            "mse_final": float(F.mse_loss(rf, x)),
-            "mse_spatial": float(F.mse_loss(rs, x)),
-            "mse_spectral": float(F.mse_loss(rp, x)),
+            "mse_final": sse_f / max(n_elem, 1),
+            "mse_spatial": sse_s / max(n_elem, 1),
+            "mse_spectral": sse_p / max(n_elem, 1),
         }
         t = out["per_branch_mse"]
         # Mirror the ACTUAL training mix (modules/vae_our.py loss_terms):
@@ -283,7 +414,9 @@ def p3_collapse(model, x, cfg, min_energy) -> dict:
 
     # Per-dimension KL from the deterministic latents, treating the aggregate
     # posterior's spread as the signal: a dead unit has near-zero variance
-    # across the batch and contributes no information.
+    # across the batch and contributes no information. Latents are small
+    # (16k-29k elements here vs. a 3.3 GiB reconstruction), nowhere near the
+    # memory problem below -- left as a whole-tensor computation.
     kls = []
     for t in lat:
         flat = t.reshape(t.shape[0], -1).double()
@@ -297,17 +430,55 @@ def p3_collapse(model, x, cfg, min_energy) -> dict:
     out["active_unit_fraction"] = active
     out["mean_kl_per_dim"] = float(kl_all.mean())
 
-    # Latent swap: roll the batch so every patch is decoded from another's code.
-    base = batched_decode(model, lat)
-    swapped = batched_decode(model, [torch.roll(t, 1, dims=0) for t in lat])
-    sam_base = float(spectral_angle_mapper_loss(x, base))
-    sam_swap = float(spectral_angle_mapper_loss(x, swapped))
+    # Latent swap: roll the batch so every patch is decoded from another's
+    # code. The roll is an information-mixing op across the batch, so it must
+    # happen once on the (small) full latent tensors, before chunking --
+    # everything downstream of that only ever touches PROBE_BATCH-sized
+    # decoded chunks. batched_decode's un-chunked `torch.cat` result (base,
+    # swapped) used to hold two full 3.3 GiB reconstructions live at once at
+    # AVIRIS scale; only two scalar SAM values and a per-(H,W,C) running
+    # moment (for recon_std_across_batch) are needed, so accumulate those
+    # instead of materialising either full tensor.
+    B = x.shape[0]
+    lat_rolled = [torch.roll(t, 1, dims=0) for t in lat]
+    sam_base_sum = sam_swap_sum = 0.0
+    n_pixels = 0
+    sum_x = sum_x2 = None
+    with torch.no_grad():
+        for i in range(0, B, PROBE_BATCH):
+            x_c = x[i:i + PROBE_BATCH]
+            base_c = model.decode_latents([t[i:i + PROBE_BATCH] for t in lat])
+            swapped_c = model.decode_latents([t[i:i + PROBE_BATCH] for t in lat_rolled])
+
+            angle_base = _sam_per_pixel(x_c, base_c)
+            angle_swap = _sam_per_pixel(x_c, swapped_c)
+            sam_base_sum += float(angle_base.sum())
+            sam_swap_sum += float(angle_swap.sum())
+            n_pixels += angle_base.numel()
+
+            # recon_std_across_batch = base.std(dim=0).mean() over the FULL
+            # batch: keep a running sum/sum-of-squares per (H,W,C) location
+            # (~7 MB, not 3.3 GiB) instead of the full tensor, and reduce to
+            # torch.std's default unbiased (correction=1) variance at the end.
+            if sum_x is None:
+                sum_x = base_c.sum(dim=0)
+                sum_x2 = (base_c ** 2).sum(dim=0)
+            else:
+                sum_x += base_c.sum(dim=0)
+                sum_x2 += (base_c ** 2).sum(dim=0)
+            del base_c, swapped_c
+
+    sam_base = sam_base_sum / max(n_pixels, 1)
+    sam_swap = sam_swap_sum / max(n_pixels, 1)
     delta = abs(sam_swap - sam_base) / max(sam_base, 1e-12)
     out.update({"sam_own_latent": sam_base, "sam_swapped_latent": sam_swap,
                 "latent_swap_delta": delta})
 
     # Output constancy: a collapsed decoder emits near-identical patches.
-    out["recon_std_across_batch"] = float(base.std(dim=0).mean())
+    mean_b = sum_x / B
+    var_b = (sum_x2 - B * mean_b ** 2) / max(B - 1, 1)
+    std_b = torch.sqrt(torch.clamp(var_b, min=0))
+    out["recon_std_across_batch"] = float(std_b.mean())
 
     collapsed = (active < p["min_active_fraction"]
                  or delta < p["latent_swap_min_delta_sam"])
@@ -342,13 +513,28 @@ def p4_spatial_reliance(model, x, model_name, cfg, min_energy) -> dict:
     flat = x.reshape(B, H * W, C)
     x_sh = flat[:, perm, :].reshape(B, H, W, C).contiguous()
 
-    r_int = batched_reconstruct(model, x)
-    r_sh = batched_reconstruct(model, x_sh)
+    # Chunked reconstruct + streaming metrics instead of batched_reconstruct's
+    # full torch.cat: r_int and r_sh were two full 3.3 GiB tensors held live
+    # at once at AVIRIS scale (this alone was enough to OOM vae-standard,
+    # which has no other large allocation in this module). Only the five
+    # scalar metrics per variant are needed -- see ChunkedMetricAccumulator.
+    acc_int = ChunkedMetricAccumulator(min_energy)
+    acc_sh = ChunkedMetricAccumulator(min_energy)
+    with torch.no_grad():
+        for i in range(0, B, PROBE_BATCH):
+            xb = x[i:i + PROBE_BATCH]
+            rb = model.reconstruct(xb)
+            acc_int.update(xb, rb)
+            del rb
+            xb_sh = x_sh[i:i + PROBE_BATCH]
+            rb_sh = model.reconstruct(xb_sh)
+            acc_sh.update(xb_sh, rb_sh)
+            del rb_sh
 
     # Score each against ITS OWN input — the question is whether the model got
     # worse at the task, not whether the output moved.
-    m_int = metrics(x, r_int, min_energy)
-    m_sh = metrics(x_sh, r_sh, min_energy)
+    m_int = acc_int.result()
+    m_sh = acc_sh.result()
     sri = (m_sh["sam"] - m_int["sam"]) / max(m_int["sam"], 1e-12)
 
     out = {
@@ -411,6 +597,7 @@ def run_cell(model_name: str, dataset: str, loss: str, args, cfg,
 
     recon = batched_reconstruct(model, xd)
     recon_m = metrics(xd, recon, eps)
+    torch.cuda.empty_cache()
 
     res = {
         "model": model_name, "dataset": dataset, "loss": loss,
@@ -420,10 +607,17 @@ def run_cell(model_name: str, dataset: str, loss: str, args, cfg,
         "best_val_loss": ckpt_meta.get("loss"),
         "preregistration": cfg.get("registered_on"),
         "reconstruction": recon_m,
-        "P2_latent_budget": p2_latent_budget(model, xd, model_name, cfg),
-        "P3_collapse": p3_collapse(model, xd, cfg, eps),
-        "P4_spatial_reliance": p4_spatial_reliance(model, xd, model_name, cfg, eps),
     }
+    # empty_cache() between P2/P3/P4: each is already peak-bounded to a few
+    # hundred MB by the chunked accumulators (see their docstrings), but
+    # clearing the allocator's cache between them keeps fragmentation from
+    # compounding across the sequence of mid-size allocations in one cell.
+    res["P2_latent_budget"] = p2_latent_budget(model, xd, model_name, cfg)
+    torch.cuda.empty_cache()
+    res["P3_collapse"] = p3_collapse(model, xd, cfg, eps)
+    torch.cuda.empty_cache()
+    res["P4_spatial_reliance"] = p4_spatial_reliance(model, xd, model_name, cfg, eps)
+    torch.cuda.empty_cache()
     res["per_patch"] = {k: v.tolist() for k, v in
                         per_patch_metrics(xd, recon, eps).items()}
 
@@ -491,6 +685,7 @@ def main() -> int:
     if overrides:
         print(f"--set overrides active: {overrides}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    preflight_vram(device)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
