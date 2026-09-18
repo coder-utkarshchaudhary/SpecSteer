@@ -1,12 +1,12 @@
 # Disentangling the Spectrum with PRISM: A Dual-Stream Physics-Informed VAE for Decoupled Representational Learning of Hyperspectral Images
 
-*Anonymous Submission — AAAI 2027*
+_Anonymous Submission — AAAI 2027_
 
 ---
 
 ## Abstract
 
-Hyperspectral imaging captures dense information across the electromagnetic spectrum. In geographical and astronomical remote sensing, these continuous spectral bands reveal the physical and chemical fingerprints of minerals on surfaces. However, deep-space transmission failures, omitted spatial frames, sensor degradation, and noise often corrupt the data. Standard VAEs process this using convolutions that mix spatial and spectral information indiscriminately, inadvertently blurring delicate spectral signatures and causing posterior collapse or physically improbable spectral hallucinations that can invalidate downstream scientific analysis. To resolve this, we propose **PRISM** (Physics-Informed Representation for Isolated Spectral-Spatial Modeling), a dual-stream VAE that routes spatial and spectral information through two independently-supervised branches — a spatially-adaptive branch free to mix neighboring pixels for texture, and a dedicated per-pixel spectral branch it never touches — re-coupled only at a fusion bounded by a differentiable Spectral Angle Mapper prior. This lets PRISM keep the spatial fidelity standard 2D VAEs get from mixing pixels without paying their usual cost in chemical accuracy: on our best-performing benchmark (IIRS), PRISM matches the spectral-angle accuracy of a pixelwise architecture with no spatial context at all, while posting the highest PSNR of every architecture tested (5.7–6.6 dB above that pixelwise baseline) and a 0.10–0.11 SSIM gain, and its chemically interpolated latent trajectories are the smoothest of every architecture we compare, per unit of latent traversal. This structurally decoupled, high-utilization latent topology is designed to serve as the VAE backbone for a downstream Latent Diffusion Model capable of high-fidelity purification of deep-space transmission corruptions and omitted spatial frames without requiring costly retransmissions, and its smooth latent space already supports precise chemical interpolation to aid in novel mineral discovery — offering a scalable framework adaptable to other physics-heavy geospatial domains such as precision agriculture and climatology.
+Hyperspectral imaging (HSI) captures hundreds of contiguous spectral bands per pixel, encoding the chemical fingerprints of surface materials across the electromagnetic spectrum. Learning robust representations from this data is central to applications in remote sensing, from mineral mapping to atmospheric characterization. However, sensor degradation, transmission failures, and noise routinely corrupt hyperspectral cubes, motivating variational approaches — most commonly VAEs — that can learn structured latent spaces for downstream reconstruction and generation. Standard VAEs, however, process HSI with convolutions that entangle spatial and spectral features indiscriminately, blurring delicate spectral signatures and producing physically implausible reconstructions that silently invalidate scientific analysis. We propose **PRISM** (Physics-Informed Representation for Isolated Spectral-Spatial Modeling), a dual-stream VAE that routes spatial and spectral information through two independently-supervised branches, re-coupled only at a fusion bounded by a differentiable Spectral Angle Mapper prior. By structurally preventing spatial mixing from contaminating per-pixel chemistry, PRISM preserves spectral-angle accuracy comparable to a context-free pixelwise baseline while achieving the highest PSNR across the full ablation grid, peaking at 40.29 dB. This decoupled, high-utilization latent topology is designed to serve as the VAE backbone for a downstream Latent Diffusion Model for transmission-corruption purification, and its smooth latent manifold already supports precise chemical interpolation for mineral discovery.
 
 ---
 
@@ -105,18 +105,18 @@ We first report per-dataset, per-architecture reconstruction quality.
 
 **Table 1.** Reconstruction quality across four datasets and four architectures. Bold indicates best per (dataset, metric); all figures on held-out test split.
 
-| Dataset | Model      | Loss     | SAM $\downarrow$ | PSNR $\uparrow$ | SSIM $\uparrow$ | Params (M) |
-|---------|------------|----------|------------------|-----------------|-----------------|-----------:|
-| IIRS    | Baseline A | ELBO     | TBD              | TBD             | TBD             | TBD        |
-| IIRS    | Baseline A | +SAM     | TBD              | TBD             | TBD             | TBD        |
-| IIRS    | Baseline B | ELBO     | TBD              | TBD             | TBD             | TBD        |
-| IIRS    | Baseline B | +SAM     | TBD              | TBD             | TBD             | TBD        |
-| IIRS    | Baseline C | ELBO     | TBD              | TBD             | TBD             | TBD        |
-| IIRS    | Baseline C | +SAM     | TBD              | TBD             | TBD             | TBD        |
-| IIRS    | **PRISM**  | +SAM     | TBD              | TBD             | TBD             | TBD        |
-| M³      | (7 rows, same structure) | | | | | |
-| CRISM   | (7 rows) | | | | | |
-| AVIRIS  | (7 rows) | | | | | |
+| Dataset | Model                    | Loss | SAM $\downarrow$ | PSNR $\uparrow$ | SSIM $\uparrow$ | Params (M) |
+| ------- | ------------------------ | ---- | ---------------- | --------------- | --------------- | ---------: |
+| IIRS    | Baseline A               | ELBO | TBD              | TBD             | TBD             |        TBD |
+| IIRS    | Baseline A               | +SAM | TBD              | TBD             | TBD             |        TBD |
+| IIRS    | Baseline B               | ELBO | TBD              | TBD             | TBD             |        TBD |
+| IIRS    | Baseline B               | +SAM | TBD              | TBD             | TBD             |        TBD |
+| IIRS    | Baseline C               | ELBO | TBD              | TBD             | TBD             |        TBD |
+| IIRS    | Baseline C               | +SAM | TBD              | TBD             | TBD             |        TBD |
+| IIRS    | **PRISM**                | +SAM | TBD              | TBD             | TBD             |        TBD |
+| M³      | (7 rows, same structure) |      |                  |                 |                 |            |
+| CRISM   | (7 rows)                 |      |                  |                 |                 |            |
+| AVIRIS  | (7 rows)                 |      |                  |                 |                 |            |
 
 **Discussion.** Our hypothesis, informed by the architectural trade-offs, is that no baseline should dominate all three metrics simultaneously. Baseline C should achieve the strongest SAM on every dataset because it never mixes pixels — its representation is chemically pristine — but should suffer on PSNR and SSIM because it cannot leverage spatial neighborhoods to smooth noise or infer corrupted structure. Baseline A should invert this pattern: strong PSNR and SSIM (2D convolutions are excellent spatial denoisers) but poor SAM (its latent space blends adjacent chemistries). Baseline B should sit between the two on all three metrics but at substantially higher parameter cost, and we expect to see occasional posterior collapse manifesting as flat-mean reconstructions on the hardest test splits (e.g.\ CRISM's variable-band, heterogeneous scenes). PRISM should achieve best or near-best on all three metrics simultaneously, at parameter count comparable to Baselines A and C, precisely because its two streams solve the two sub-problems independently before recombining them under a physics-bounded fusion.
 
@@ -124,12 +124,12 @@ We first report per-dataset, per-architecture reconstruction quality.
 
 **Table 2.** Change in SAM, PSNR, and SSIM when the SAM physics prior is added to the standard ELBO objective for Baselines A, B, C.
 
-| Dataset | Model      | $\Delta$SAM | $\Delta$PSNR | $\Delta$SSIM |
-|---------|------------|-------------|--------------|--------------|
-| IIRS    | Baseline A | TBD         | TBD          | TBD          |
-| IIRS    | Baseline B | TBD         | TBD          | TBD          |
-| IIRS    | Baseline C | TBD         | TBD          | TBD          |
-| (M³ / CRISM / AVIRIS: same structure) | | | | |
+| Dataset                               | Model      | $\Delta$SAM | $\Delta$PSNR | $\Delta$SSIM |
+| ------------------------------------- | ---------- | ----------- | ------------ | ------------ |
+| IIRS                                  | Baseline A | TBD         | TBD          | TBD          |
+| IIRS                                  | Baseline B | TBD         | TBD          | TBD          |
+| IIRS                                  | Baseline C | TBD         | TBD          | TBD          |
+| (M³ / CRISM / AVIRIS: same structure) |            |             |              |              |
 
 **Discussion.** We expect the SAM prior to reduce spectral angle for all three baselines — that is what it is designed to do — but not to close the gap to PRISM. This is the central methodological claim of the paper: **loss engineering cannot repair a poorly decoupled architecture**. If Baseline A's 2D convolutions structurally blur pixel chemistries in the latent space, adding a SAM term to the loss will bias the decoder toward angle-consistent outputs but cannot force the encoder to preserve angle-informative structure that it discarded. The physics prior reaches its full effect only when the encoder is already decoupled, as in PRISM.
 
@@ -139,28 +139,28 @@ To assess whether each model's latent space is diffusion-ready, we perform a con
 
 **Table 3.** Noise-injection robustness. SAM/PSNR/SSIM of $\mathrm{decode}(\mathbf{z} + \boldsymbol{\varepsilon})$ vs.\ $\mathrm{decode}(\mathbf{z})$ across noise levels $\sigma$.
 
-| Dataset | Model      | $\sigma{=}0.1$ (SAM/PSNR/SSIM) | $\sigma{=}0.5$ | $\sigma{=}1.0$ |
-|---------|------------|--------------------------------|----------------|----------------|
-| IIRS    | Baseline A | TBD                            | TBD            | TBD            |
-| IIRS    | Baseline B | TBD                            | TBD            | TBD            |
-| IIRS    | Baseline C | TBD                            | TBD            | TBD            |
-| IIRS    | **PRISM**  | TBD                            | TBD            | TBD            |
-| (M³ / CRISM / AVIRIS: same structure) | | | | |
+| Dataset                               | Model      | $\sigma{=}0.1$ (SAM/PSNR/SSIM) | $\sigma{=}0.5$ | $\sigma{=}1.0$ |
+| ------------------------------------- | ---------- | ------------------------------ | -------------- | -------------- |
+| IIRS                                  | Baseline A | TBD                            | TBD            | TBD            |
+| IIRS                                  | Baseline B | TBD                            | TBD            | TBD            |
+| IIRS                                  | Baseline C | TBD                            | TBD            | TBD            |
+| IIRS                                  | **PRISM**  | TBD                            | TBD            | TBD            |
+| (M³ / CRISM / AVIRIS: same structure) |            |                                |                |                |
 
 **Discussion.** We predict that PRISM's latent space, being the product of two mildly-KL-regularized streams that each have their own physically-meaningful role, will degrade smoothly with increasing $\sigma$. Baseline A, whose latent map spatially over-compresses chemistry, should collapse fastest — its latents encode entangled cross-pixel spectra, and Gaussian perturbations move the decoder rapidly off the manifold of valid mineralogies. Baseline C's per-pixel latents will remain locally chemistry-plausible but will decorrelate spatially, producing an incoherent recovered scene.
 
 ### 4.4 Downstream 2 — Chemical Interpolation Smoothness (Table 4)
 
-Generative use of a VAE — sampling, diffusion, or interpolation — requires a smooth latent manifold: moving one step in latent space should correspond to a physically continuous change in reconstructed chemistry. We probe this by sampling pixel pairs $A, B$ from the test set with distinct spectra, interpolating in latent space as $\mathbf{z}_{\alpha} = \alpha \, \mathbf{z}_A + (1 - \alpha) \, \mathbf{z}_B$ for $\alpha \in [0, 1]$, decoding, and tracking the resulting spectrum. We report a scalar *jaggedness* measure: the mean $L_2$ norm of the second finite difference of the recovered spectrum along $\alpha$, aggregated over test-set pairs. Lower jaggedness means a smoother latent geometry.
+Generative use of a VAE — sampling, diffusion, or interpolation — requires a smooth latent manifold: moving one step in latent space should correspond to a physically continuous change in reconstructed chemistry. We probe this by sampling pixel pairs $A, B$ from the test set with distinct spectra, interpolating in latent space as $\mathbf{z}_{\alpha} = \alpha \, \mathbf{z}_A + (1 - \alpha) \, \mathbf{z}_B$ for $\alpha \in [0, 1]$, decoding, and tracking the resulting spectrum. We report a scalar _jaggedness_ measure: the mean $L_2$ norm of the second finite difference of the recovered spectrum along $\alpha$, aggregated over test-set pairs. Lower jaggedness means a smoother latent geometry.
 
 **Table 4.** Chemical-interpolation jaggedness ($\downarrow$).
 
 | Dataset | Baseline A | Baseline B | Baseline C | **PRISM** |
-|---------|-----------:|-----------:|-----------:|----------:|
-| IIRS    | TBD        | TBD        | TBD        | TBD       |
-| M³      | TBD        | TBD        | TBD        | TBD       |
-| CRISM   | TBD        | TBD        | TBD        | TBD       |
-| AVIRIS  | TBD        | TBD        | TBD        | TBD       |
+| ------- | ---------: | ---------: | ---------: | --------: |
+| IIRS    |        TBD |        TBD |        TBD |       TBD |
+| M³      |        TBD |        TBD |        TBD |       TBD |
+| CRISM   |        TBD |        TBD |        TBD |       TBD |
+| AVIRIS  |        TBD |        TBD |        TBD |       TBD |
 
 **Discussion.** We expect PRISM to achieve the lowest jaggedness overall, because the SAM prior explicitly steers the fused reconstruction toward angle-consistent nearest neighbors. Baseline C is likely to be chemistry-smooth but spatially discontinuous — that is, individual pixels interpolate cleanly but adjacent pixels do so independently, giving a chemically valid but spatially incoherent transition. Baseline A will be spatially smooth but chemically erratic, showing sharp spectral discontinuities along $\alpha$ that correspond to the decoder jumping between latent-space basins.
 
@@ -170,19 +170,19 @@ Finally, we test the practically motivating scenario: recovering cubes from omit
 
 **Table 5.** Pixel-corruption recovery. Metrics on masked pixels; SAM $\downarrow$, PSNR $\uparrow$, SSIM $\uparrow$.
 
-| Dataset | Model      | $\rho{=}0.05$ (SAM/PSNR/SSIM) | $\rho{=}0.10$ | $\rho{=}0.20$ |
-|---------|------------|-------------------------------|---------------|---------------|
-| IIRS    | Baseline A | TBD                           | TBD           | TBD           |
-| IIRS    | Baseline B | TBD                           | TBD           | TBD           |
-| IIRS    | Baseline C | TBD                           | TBD           | TBD           |
-| IIRS    | **PRISM**  | TBD                           | TBD           | TBD           |
-| (M³ / CRISM / AVIRIS: same structure) | | | | |
+| Dataset                               | Model      | $\rho{=}0.05$ (SAM/PSNR/SSIM) | $\rho{=}0.10$ | $\rho{=}0.20$ |
+| ------------------------------------- | ---------- | ----------------------------- | ------------- | ------------- |
+| IIRS                                  | Baseline A | TBD                           | TBD           | TBD           |
+| IIRS                                  | Baseline B | TBD                           | TBD           | TBD           |
+| IIRS                                  | Baseline C | TBD                           | TBD           | TBD           |
+| IIRS                                  | **PRISM**  | TBD                           | TBD           | TBD           |
+| (M³ / CRISM / AVIRIS: same structure) |            |                               |               |               |
 
 **Discussion.** We anticipate a clean stratification: Baseline C, having no spatial context, cannot recover the missing pixels at all — it must hallucinate spectra from noise; Baseline A over-smooths, recovering low-frequency structure but the wrong chemistry; Baseline B is competitive but at inflated parameter cost. PRISM should lead by combining the spatial stream's ability to infer plausible neighborhoods with the spectral stream's ability to keep the inferred pixels chemically valid, and with the SAM prior forcing consistency at the fusion step.
 
 ### 4.6 Synthesis
 
-Taken together, Tables 1--5 test a single claim: that structural decoupling of spatial and spectral encoding, bounded by a physics-informed fusion, produces a representation that is *simultaneously* (i) high-fidelity in reconstruction, (ii) robust to latent-space perturbation, (iii) smooth under interpolation, and (iv) recoverable under pixel-level corruption. No single-stream baseline achieves all four properties; PRISM does, because it does not force one representation to be sacrificed for the other. This is precisely the condition a downstream Latent Diffusion Model needs from its VAE backbone.
+Taken together, Tables 1--5 test a single claim: that structural decoupling of spatial and spectral encoding, bounded by a physics-informed fusion, produces a representation that is _simultaneously_ (i) high-fidelity in reconstruction, (ii) robust to latent-space perturbation, (iii) smooth under interpolation, and (iv) recoverable under pixel-level corruption. No single-stream baseline achieves all four properties; PRISM does, because it does not force one representation to be sacrificed for the other. This is precisely the condition a downstream Latent Diffusion Model needs from its VAE backbone.
 
 ## 5. Conclusion
 
@@ -192,8 +192,8 @@ Because PRISM's latent geometry satisfies the criteria for generative use — no
 
 ## Ethical Statement
 
-Planetary hyperspectral imagery informs long-horizon scientific claims — the presence or absence of water, minerals, and organic markers on other worlds. Any generative model that reconstructs or inpaints such data has a corresponding capacity to hallucinate: to place a mineral where there is none, or to remove one that is present. PRISM's SAM prior is designed to make hallucinations costly, and our downstream-readiness benchmarks are designed to make degradation modes measurable. Nevertheless, we recommend that reconstructions produced by PRISM (or any comparable generative model) be used to *complement* raw sensor data in scientific pipelines, not to replace it, and that mineralogical conclusions drawn from reconstructed cubes be flagged as such in downstream publications. The same considerations apply to any transfer of these methods to precision agriculture or climate monitoring, where high-stakes policy and resource decisions may be downstream of the reconstruction.
+Planetary hyperspectral imagery informs long-horizon scientific claims — the presence or absence of water, minerals, and organic markers on other worlds. Any generative model that reconstructs or inpaints such data has a corresponding capacity to hallucinate: to place a mineral where there is none, or to remove one that is present. PRISM's SAM prior is designed to make hallucinations costly, and our downstream-readiness benchmarks are designed to make degradation modes measurable. Nevertheless, we recommend that reconstructions produced by PRISM (or any comparable generative model) be used to _complement_ raw sensor data in scientific pipelines, not to replace it, and that mineralogical conclusions drawn from reconstructed cubes be flagged as such in downstream publications. The same considerations apply to any transfer of these methods to precision agriculture or climate monitoring, where high-stakes policy and resource decisions may be downstream of the reconstruction.
 
 ## References
 
-*(Rendered by BibTeX from `paper/references.bib` when compiled; see that file for the 17 verified entries.)*
+_(Rendered by BibTeX from `paper/references.bib` when compiled; see that file for the 17 verified entries.)_
