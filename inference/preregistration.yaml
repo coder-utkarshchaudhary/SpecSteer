@@ -132,6 +132,42 @@ p7_linear_probe:
   controls: [raw_pixels_upper_bound, shuffled_latent_chance_floor]
 
 # ------------------------------------------------------------------------------
+# Reconstruction metric extension (2026-09-18): SID, SCC, Q2^n
+# Added to inference/inference.py's per-cell headline table (ablation_table.csv)
+# only -- NOT wired into probes.py's diagnostics or stats.py's pairwise
+# significance testing (a deliberate scope boundary, not an oversight).
+# ------------------------------------------------------------------------------
+recon_metrics_ext:
+  registered_on: "2026-09-18"
+  # SID (Chang 2000) normalises each pixel's spectrum to a probability
+  # distribution and takes a log -- undefined for non-positive reflectance.
+  # This data is NOT clipped to [0,1] (AVIRIS is ~12% negative at the element
+  # level; see modules/metrics.py's data_range docstring). Negative bands are
+  # clamped to this epsilon before normalising (clamp, never branch -- same
+  # convention as sam_valid_min_energy above and psnr's clamp_min), so SID is
+  # always defined and comparable across all four datasets.
+  # sid_clamped_frac (reported alongside sid in ablation_table.csv) is the
+  # fraction of pixels that needed clamping, so the value's trustworthiness
+  # stays auditable rather than silently assumed.
+  sid_clamp_epsilon: 1.0e-8
+  # SCC (Zhou/Civco/Silander 1998): 3x3 zero-sum Laplacian high-pass,
+  # VALID padding (no border pad -- a zero-padded high-pass kernel would
+  # manufacture a fake edge on ~6% of a 64x64 patch's pixels), Pearson
+  # correlation per band, averaged over bands. Not a tunable knob here (no
+  # alternative kernel/padding is implemented), documented for the record.
+  scc_kernel: laplacian_3x3
+  scc_padding: valid
+  # Q2^n (Garzelli & Nencini 2009): bands zero-padded to the next power of 2
+  # (IIRS 256->256 / M3 84->128 / AVIRIS 424->512 / CRIMS 456->512), computed
+  # over non-overlapping blocks of this size (the literature-standard
+  # default; 64/32 divides exactly, so 4 blocks per patch, no remainder).
+  # CAVEAT THAT MUST TRAVEL WITH THE NUMBER: the padding fraction differs per
+  # dataset, so Q2^n values are comparable WITHIN a dataset (across models)
+  # only, never ACROSS datasets.
+  q2n_block_size: 32
+  q2n_band_padding: zero_pad_to_pow2
+
+# ------------------------------------------------------------------------------
 # P8 — Statistics
 # With 3,084 test patches almost any difference is "significant", so the
 # minimum effect size is doing the real work here, not the p-value.

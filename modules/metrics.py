@@ -1,7 +1,9 @@
 """
 modules/metrics.py
 ------------------
-The single implementation of PSNR and SSIM for the whole repo.
+The single implementation of PSNR, SSIM, SID and SCC for the whole repo.
+(Q2^n lives separately in modules/metrics_q2n.py -- see that module's
+docstring for why.)
 
 WHY THIS EXISTS
 ===============
@@ -107,6 +109,102 @@ def ssim(x: torch.Tensor, recon: torch.Tensor, data_range: float = 1.0,
     return total / max(n, 1)
 
 
+def sid(x: torch.Tensor, recon: torch.Tensor, epsilon: float = 1e-8) -> torch.Tensor:
+    """
+    Spectral Information Divergence (Chang, IEEE T-IT 2000), mean over pixels.
+
+    Treats each pixel's spectrum as a probability distribution and takes the
+    symmetric KL divergence Sum_l (p_l - q_l) * log(p_l / q_l) between the
+    reference and reconstructed spectra. Undefined for non-positive values
+    (the log) -- and this data is NOT clipped to [0, 1]; real cubes carry
+    negative reflectance (AVIRIS is ~12% negative at the element level, see
+    data_range's docstring above). Negative bands are clamped to `epsilon`
+    before normalising (clamp, never branch -- the same convention as
+    psnr()'s clamp_min), so this is always defined and comparable across
+    datasets. The caller is responsible for also reporting what fraction of
+    pixels needed clamping (inference/inference.py's sid_clamped_frac) so
+    the number's trustworthiness stays auditable rather than silently
+    assumed.
+
+    Channels-last (B, H, W, C), matching modules/losses.py's SAM (which this
+    mirrors structurally -- both are a per-pixel reduction over the band
+    axis, no windowing, so no internal chunking is needed here any more than
+    SAM needs it: the caller's own batch/chunk size already bounds memory).
+    Always fp32. Returns a 0-dim tensor on the input device.
+    """
+    a = x.float().clamp_min(epsilon)
+    b = recon.float().clamp_min(epsilon)
+    p = a / a.sum(dim=-1, keepdim=True).clamp_min(epsilon)
+    q = b / b.sum(dim=-1, keepdim=True).clamp_min(epsilon)
+    return ((p - q) * torch.log(p / q)).sum(dim=-1).mean()
+
+
+def sid_clamped_fraction(x: torch.Tensor, epsilon: float = 1e-8) -> torch.Tensor:
+    """Fraction of pixels in `x` containing at least one band <= epsilon --
+    i.e. a pixel whose sid() contribution came from clamped, not real, data.
+    Diagnostic companion to sid(), same spirit as probes.py's sam_valid mask.
+    Returns a 0-dim tensor (fraction, in [0, 1])."""
+    return (x <= epsilon).any(dim=-1).float().mean()
+
+
+_SCC_LAPLACIAN_CACHE: dict = {}
+_SCC_CHUNK = 8
+
+
+def _scc_laplacian(channels: int, device, dtype) -> torch.Tensor:
+    key = (channels, str(device), dtype)
+    k = _SCC_LAPLACIAN_CACHE.get(key)
+    if k is None:
+        base = torch.tensor([[-1., -1., -1.],
+                             [-1., 8., -1.],
+                             [-1., -1., -1.]], device=device, dtype=dtype)
+        k = base[None, None].expand(channels, 1, 3, 3).contiguous()
+        _SCC_LAPLACIAN_CACHE[key] = k
+    return k
+
+
+def scc(x: torch.Tensor, recon: torch.Tensor,
+        channels_last: bool = True) -> torch.Tensor:
+    """
+    Spatial Correlation Coefficient (Zhou, Civco & Silander, IJRS 1998).
+
+    High-pass both images with a 3x3 zero-sum Laplacian ([[-1,-1,-1],
+    [-1,8,-1],[-1,-1,-1]]), VALID padding -- no border pad, which would
+    otherwise manufacture a fake edge on ~6% of a 64x64 patch's pixels --
+    then Pearson-correlate the filtered maps per band, averaged over bands
+    (matching this file's per-band-then-averaged SSIM convention above), and
+    chunked over the batch axis the same way ssim() is: a sample-count-
+    weighted mean over chunks reproduces the whole-tensor result exactly
+    (see ssim()'s docstring for the argument -- identical here, since every
+    chunk contributes the same per-sample element count).
+
+    A patch whose filtered band has zero variance (a dead/constant band)
+    would divide by zero; clamped rather than branched (matching psnr()'s
+    clamp_min precedent), so a degenerate band contributes a well-defined
+    ~0 rather than NaN/inf poisoning the running sum. Always fp32. Returns
+    a 0-dim tensor on the input device.
+    """
+    a = _to_nchw(x, channels_last).float()
+    b = _to_nchw(recon, channels_last).float()
+    channels = a.shape[1]
+    k = _scc_laplacian(channels, a.device, a.dtype)
+
+    total = torch.zeros((), device=a.device, dtype=a.dtype)
+    n = 0
+    for i in range(0, a.shape[0], _SCC_CHUNK):
+        a_c, b_c = a[i:i + _SCC_CHUNK], b[i:i + _SCC_CHUNK]
+        fa = F.conv2d(a_c, k, groups=channels)          # VALID: no padding
+        fb = F.conv2d(b_c, k, groups=channels)
+        fa = fa - fa.mean(dim=(2, 3), keepdim=True)
+        fb = fb - fb.mean(dim=(2, 3), keepdim=True)
+        num = (fa * fb).sum(dim=(2, 3))
+        den = torch.sqrt((fa ** 2).sum(dim=(2, 3)) * (fb ** 2).sum(dim=(2, 3)))
+        per_band = num / den.clamp_min(1e-12)            # (chunk, C)
+        total = total + per_band.mean() * a_c.shape[0]
+        n += a_c.shape[0]
+    return total / max(n, 1)
+
+
 # ---------------------------------------------------------------------------
 # Float-returning shims for the existing inference/ call sites.
 # ---------------------------------------------------------------------------
@@ -120,3 +218,15 @@ def compute_psnr(x, recon, max_val: float = 1.0) -> float:
 
 def compute_ssim(x, recon, max_val: float = 1.0) -> float:
     return ssim(x, recon, data_range=max_val).item()
+
+
+def compute_sid(x, recon, epsilon: float = 1e-8) -> float:
+    return sid(x, recon, epsilon=epsilon).item()
+
+
+def compute_sid_clamped_frac(x, epsilon: float = 1e-8) -> float:
+    return sid_clamped_fraction(x, epsilon=epsilon).item()
+
+
+def compute_scc(x, recon) -> float:
+    return scc(x, recon).item()

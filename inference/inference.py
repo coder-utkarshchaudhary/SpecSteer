@@ -5,7 +5,8 @@ Model-agnostic inference / evaluation for the HSI VAE ablation study.
 
 Given --model, --dataset, and --loss, this loads the matching checkpoint from
 <ckpt-dir>/<DATASET>/<name>.pt, runs the model's ``reconstruct`` over the test
-split, and reports reconstruction quality: MSE, SAM (radians), PSNR, SSIM.
+split, and reports reconstruction quality: MSE, SAM (radians), PSNR, SSIM,
+SID, SCC, Q2^n.
 
 Run from the repo root with PYTHONPATH set:
     PYTHONPATH=. python inference/inference.py --model vae-our --dataset IIRS --loss physics
@@ -45,7 +46,13 @@ from modules.metrics import (  # noqa: E402,F401
     compute_mse,
     compute_psnr,
     compute_ssim,
+    compute_sid,
+    compute_sid_clamped_frac,
+    compute_scc,
 )
+# Q2^n lives separately (modules/metrics_q2n.py) -- eval-only, hypercomplex,
+# band-padding policy specific to itself. See that module's docstring for why.
+from modules.metrics_q2n import compute_q2n
 
 
 def compute_psnr_from_mse(mse: float, data_range: float = 1.0) -> float:
@@ -67,6 +74,29 @@ def _sam_valid_min_energy(default: float = 1.0e-8) -> float:
         return float(cfg["p1_trivial_floors"]["sam_valid_min_energy"])
     except Exception:
         return default
+
+
+def _recon_metrics_ext_cfg() -> dict:
+    """
+    SID's clamp epsilon and Q2^n's block size, from inference/preregistration.yaml's
+    recon_metrics_ext section (registered 2026-09-19 alongside adding these
+    metrics). Same graceful-fallback-to-default pattern as
+    _sam_valid_min_energy() above -- this file doesn't hard-require the prereg
+    YAML the way probes.py does, but reads the SAME registered values when
+    present so the two stay consistent.
+    """
+    defaults = {"sid_clamp_epsilon": 1e-8, "q2n_block_size": 32}
+    try:
+        import yaml
+        cfg = yaml.safe_load(
+            (Path(__file__).parent / "preregistration.yaml").read_text())
+        ext = cfg.get("recon_metrics_ext", {})
+        return {
+            "sid_clamp_epsilon": float(ext.get("sid_clamp_epsilon", defaults["sid_clamp_epsilon"])),
+            "q2n_block_size": int(ext.get("q2n_block_size", defaults["q2n_block_size"])),
+        }
+    except Exception:
+        return defaults
 
 
 def sam_valid_sums(x: torch.Tensor, recon: torch.Tensor,
@@ -216,11 +246,15 @@ def main():
     # Sample-weighted, not batch-count-weighted: the test split runs with
     # drop_last=False, so a short final batch (CRIMS: 369 patches at batch 16 ->
     # a last batch of 1) would otherwise carry the same weight as a full one.
-    # MSE/SAM are means over elements/pixels, so weighting each batch mean by its
-    # sample count and dividing by the total recovers the split-wide mean; PSNR
-    # is derived once from the pooled MSE rather than averaged in dB.
+    # MSE/SAM/SID/SCC/Q2^n are means over elements/pixels/patches, so weighting
+    # each batch mean by its sample count and dividing by the total recovers
+    # the split-wide mean; PSNR is derived once from the pooled MSE rather than
+    # averaged in dB (log is nonlinear -- mean-of-logs != log-of-mean).
+    ext_cfg = _recon_metrics_ext_cfg()
     mse_wsum = sam_wsum = ssim_wsum = 0.0
+    sid_wsum = scc_wsum = q2n_wsum = 0.0
     sam_valid_sum, n_valid_px, n_total_px = 0.0, 0, 0
+    sid_clamped_sum, n_sid_px = 0.0, 0
     min_energy = _sam_valid_min_energy()
     n_samples = 0
     n_batches = 0
@@ -236,6 +270,12 @@ def main():
             sam_valid_sum += sv_sum
             n_valid_px += sv_n
             n_total_px += sv_total
+            sid_wsum += compute_sid(x, recon, epsilon=ext_cfg["sid_clamp_epsilon"]) * b
+            sid_clamped_sum += compute_sid_clamped_frac(
+                x, epsilon=ext_cfg["sid_clamp_epsilon"]) * x[..., 0].numel()
+            n_sid_px += x[..., 0].numel()
+            scc_wsum += compute_scc(x, recon) * b
+            q2n_wsum += compute_q2n(x, recon, block_size=ext_cfg["q2n_block_size"]) * b
             n_samples += b
             n_batches += 1
 
@@ -260,6 +300,19 @@ def main():
         "valid_pixel_frac": (n_valid_px / n_total_px) if n_total_px else float("nan"),
         "psnr": float(compute_psnr_from_mse(mse)),
         "ssim": ssim_wsum / n_samples,
+        # Spectral Information Divergence (Chang 2000). Negative reflectance
+        # bands are clamped to sid_clamp_epsilon before normalising (see
+        # modules/metrics.py:sid docstring); sid_clamped_frac reports what
+        # fraction of pixels needed that clamp, so the number's
+        # trustworthiness is auditable rather than silently assumed.
+        "sid": sid_wsum / n_samples,
+        "sid_clamped_frac": (sid_clamped_sum / n_sid_px) if n_sid_px else float("nan"),
+        # Spatial Correlation Coefficient (Zhou/Civco/Silander 1998).
+        "scc": scc_wsum / n_samples,
+        # Q2^n (Garzelli & Nencini 2009). Bands zero-padded to the next power
+        # of 2 (see modules/metrics_q2n.py) -- comparable across models WITHIN
+        # this dataset, NOT across datasets (padding fraction differs).
+        "q2n": q2n_wsum / n_samples,
         "trained_epochs": ckpt_meta.get("epoch"),
         "batch_size_trained": ckpt_meta.get("batch_size"),
         "platform_trained": ckpt_meta.get("platform"),
@@ -273,6 +326,10 @@ def main():
                 f"(pi/2-excluded; {100 * metrics['valid_pixel_frac']:.1f}% pixels valid)")
     logger.info(f"  PSNR : {metrics['psnr']:.4f} dB")
     logger.info(f"  SSIM : {metrics['ssim']:.4f}")
+    logger.info(f"  SID  : {metrics['sid']:.6f} nats "
+                f"({100 * metrics['sid_clamped_frac']:.1f}% pixels clamped)")
+    logger.info(f"  SCC  : {metrics['scc']:.4f}")
+    logger.info(f"  Q2^n : {metrics['q2n']:.4f}")
 
     if args.out_json:
         out_path = Path(args.out_json)
