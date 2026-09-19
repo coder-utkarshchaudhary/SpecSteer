@@ -236,6 +236,13 @@ if (( DO_RECON )); then
 for ds in "${DATASETS[@]}"; do
   for seed in "${SEEDS[@]}"; do
     run_inference vae-our "${ds}" physics vae-our "${seed}"
+    # vae-our-nl (PRISM) is PHYSICS_ONLY like vae-our, and its checkpoint stem
+    # is likewise just its own model name (modules/registry.py:checkpoint_name).
+    # Omitted here until 2026-09-19 -- this script's reconstruction sweep never
+    # evaluated it at all, so every ablation_table.csv row for it was stale
+    # (frozen at whatever inference.py last wrote before this line existed,
+    # missing any metric added after that point -- e.g. sid/scc/q2n).
+    run_inference vae-our-nl "${ds}" physics vae-our-nl "${seed}"
     for m in "${STANDARD_MODELS[@]}"; do
         run_inference "${m}" "${ds}" physics "${m}_physics" "${seed}"
         if [[ "${seed}" == "${GRID_SEEDS[0]}" ]]; then
