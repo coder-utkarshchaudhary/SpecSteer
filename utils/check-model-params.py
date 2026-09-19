@@ -121,7 +121,7 @@ def solve_width(model_name: str, dataset: str, target: int,
     return best
 
 
-def audit() -> None:
+def audit(json_path: str | None = None) -> None:
     dataset_names = sorted(DATASETS)
     print(f"{'model':<24} " + "  ".join(f"{d:>14}" for d in dataset_names) + "   vs vae-our")
     print("-" * (24 + 16 * len(dataset_names) + 20))
@@ -134,6 +134,7 @@ def audit() -> None:
     reference: dict[str, int] = {ds: build_and_count("vae-our", ds)
                                  for ds in dataset_names}
 
+    out: dict[str, dict[str, int]] = {ds: {} for ds in dataset_names}
     for name in MODEL_NAMES:
         counts = {ds: build_and_count(name, ds) for ds in dataset_names}
         cells = "  ".join(f"{counts[ds]:>14,}" for ds in dataset_names)
@@ -142,6 +143,13 @@ def audit() -> None:
             for ds in dataset_names
         )
         print(f"{name:<24} {cells}   {ratios}")
+        for ds in dataset_names:
+            out[ds][name] = counts[ds]
+
+    if json_path:
+        import json as _json
+        Path(json_path).write_text(_json.dumps(out, indent=1))
+        print(f"\nwrote {json_path}")
 
 
 def solve_capacity(tolerance: float, datasets: list[str] | None = None) -> None:
@@ -187,11 +195,15 @@ def main() -> None:
                          "(default: all; the protocol needs IIRS AVIRIS).")
     ap.add_argument("--tolerance", type=float, default=3.0,
                     help="Percent deviation considered acceptable (default 3).")
+    ap.add_argument("--json", default=None,
+                    help="Also write the audit as JSON, {dataset: {model: params}} "
+                         "— consumed by paper/iclr/v2-claude/make_tables.py for the "
+                         "Params (M) column. No effect with --solve-capacity.")
     args = ap.parse_args()
     if args.solve_capacity:
         solve_capacity(args.tolerance, args.datasets)
     else:
-        audit()
+        audit(args.json)
 
 
 if __name__ == "__main__":

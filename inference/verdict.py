@@ -66,8 +66,24 @@ def load_cells(d: Path) -> list[dict]:
     return [c for c in out if not c.get("error")]
 
 
+NAN = float("nan")
+
+
+def _g(d, *path, default=NAN):
+    """Safe nested lookup: returns `default` on a missing key, a non-dict node,
+    or an explicit None — used for P1/P5, which may be absent (--skip-p1/-p5),
+    skipped, or carry an isolated `error` instead of their normal fields."""
+    for k in path:
+        if not isinstance(d, dict):
+            return default
+        d = d.get(k, default)
+    return default if d is None else d
+
+
 def flatten(c: dict) -> dict:
     p2, p3, p4 = c["P2_latent_budget"], c["P3_collapse"], c["P4_spatial_reliance"]
+    p1 = c.get("P1_trivial_floors", {}) or {}
+    p5 = c.get("P5_spectral_inpainting", {}) or {}
     r = c["reconstruction"]
     row = {
         "dataset": c["dataset"], "model": c["model"], "loss": c["loss"],
@@ -83,6 +99,41 @@ def flatten(c: dict) -> dict:
         "collapsed": c.get("collapsed", p3["collapsed"]),
         # P4 — spatial reliance
         "sri": p4["sri"], "sri_note": p4.get("note", ""),
+        # P1 — trivial-predictor floors (reinstated 2026-09-19, diagnostic
+        # only — no pass/fail column here by design; see the module docstring
+        # and inference/preregistration.yaml's p1_trivial_floors block).
+        "p1_floor_psnr": _g(p1, "best_zero_rate_floor", "psnr"),
+        "p1_floor_ssim": _g(p1, "best_zero_rate_floor", "ssim"),
+        "p1_floor_sam_valid": _g(p1, "best_zero_rate_floor", "sam_valid"),
+        "p1_lift_psnr_db": _g(p1, "lift_over_zero_rate", "psnr_db"),
+        "p1_lift_ssim": _g(p1, "lift_over_zero_rate", "ssim_absolute"),
+        "p1_lift_sam_rel": _g(p1, "lift_over_zero_rate", "sam_relative"),
+        "p1_lift_sam_valid_rel": _g(p1, "lift_over_zero_rate", "sam_valid_relative"),
+        "p1_meanpatch_psnr": _g(p1, "mean_patch", "psnr"),
+        "p1_meanpatch_sam_valid": _g(p1, "mean_patch", "sam_valid"),
+        "p1_lift_vs_meanpatch_psnr_db": _g(p1, "lift_over_mean_patch", "psnr_db"),
+        "p1_lift_vs_meanpatch_sam_valid_rel": _g(p1, "lift_over_mean_patch", "sam_valid_relative"),
+        "p1_headroom_psnr": _g(p1, "headroom_captured_psnr"),
+        "p1_rand_pct_sam_valid": _g(p1, "random_percentile", "sam_valid_vs_uniform"),
+        "p1_error": p1.get("error", "") if isinstance(p1, dict) else "",
+        # P5 — spectral band-masking inpainting (reinstated 2026-09-19,
+        # diagnostic only — contiguous band-block masking, NOT pixel masking;
+        # see the module docstring in inference/probes.py).
+        "p5_mask_bands": _g(p5, "mask_bands"),
+        "p5_n_positions": _g(p5, "n_positions"),
+        "p5_masked_psnr": _g(p5, "masked_psnr_model"),
+        "p5_masked_psnr_meanfill": _g(p5, "masked_psnr_meanfill"),
+        "p5_masked_psnr_zerofill": _g(p5, "masked_psnr_zerofill"),
+        "p5_masked_sam": _g(p5, "masked_sam_model"),
+        "p5_masked_sam_meanfill": _g(p5, "masked_sam_meanfill"),
+        "p5_masked_sam_valid": _g(p5, "masked_sam_valid_model"),
+        "p5_masked_sam_valid_meanfill": _g(p5, "masked_sam_valid_meanfill"),
+        "p5_masked_mse": _g(p5, "masked_mse_model"),
+        "p5_masked_mse_meanfill": _g(p5, "masked_mse_meanfill"),
+        "p5_relative_gain": _g(p5, "relative_gain"),
+        "p5_psnr_gain_db": _g(p5, "psnr_gain_db"),
+        "p5_passthrough_index": _g(p5, "passthrough_index"),
+        "p5_error": p5.get("error", "") if isinstance(p5, dict) else "",
     }
     if "per_branch_mse" in p2:
         row.update({f"our_{k}": v for k, v in p2["per_branch_mse"].items()})
@@ -212,6 +263,45 @@ def render_diagnostics(rows: list[dict], stats_rows: list[dict], cfg: dict) -> s
         A("      active   fraction of latent dims with non-trivial KL")
         A("      swapDSAM relative SAM change when decoding another patch's latent")
         A("               (~0 => the decoder ignores the latent)")
+
+        A("")
+        A("  Trivial-predictor floors (P1 — DIAGNOSTIC, no pass/fail):")
+        A(f"    {'model|loss|seed':<36}{'floorPSNR':>10}{'liftdB':>9}"
+          f"{'liftSAMv':>10}{'vsMeanPatch':>13}{'headroom':>10}")
+        for r in sorted(rs, key=sort_key):
+            if r.get("p1_error"):
+                A(f"    {lbl(r):<36} (P1 failed: {r['p1_error']})")
+                continue
+            A(f"    {lbl(r):<36}{r['p1_floor_psnr']:>10.2f}{r['p1_lift_psnr_db']:>9.2f}"
+              f"{r['p1_lift_sam_valid_rel']:>10.3f}{r['p1_lift_vs_meanpatch_psnr_db']:>13.2f}"
+              f"{r['p1_headroom_psnr']:>10.3f}")
+        A("      floorPSNR   best ZERO-RATE floor (train mean / fold / region); no per-patch info")
+        A("      liftdB      model PSNR minus that floor")
+        A("      liftSAMv    relative SAM-valid improvement over that floor")
+        A("      vsMeanPatch model PSNR minus the patch's OWN spatial-mean spectrum —")
+        A("                  a C-float-per-patch predictor. Negative here is EXPECTED at")
+        A("                  a tight latent budget and is not a failure; it is why the")
+        A("                  2026-08-21 gate was miscalibrated and why P1 no longer")
+        A("                  gates anything.")
+        A("      headroom    fraction of (identity oracle - floor) PSNR gap captured")
+
+        A("")
+        A("  Spectral band-masking (P5 — DIAGNOSTIC, no pass/fail; contiguous band-block,")
+        A("  NOT pixel masking — every model, including vae-1d, can be scored on it):")
+        A(f"    {'model|loss|seed':<36}{'kbands':>8}{'PSNRm':>9}{'PSNRmean':>10}"
+          f"{'relgain':>9}{'passthru':>10}")
+        for r in sorted(rs, key=sort_key):
+            if r.get("p5_error"):
+                A(f"    {lbl(r):<36} (P5 failed: {r['p5_error']})")
+                continue
+            A(f"    {lbl(r):<36}{r['p5_mask_bands']:>8.0f}{r['p5_masked_psnr']:>9.2f}"
+              f"{r['p5_masked_psnr_meanfill']:>10.2f}{r['p5_relative_gain']:>9.3f}"
+              f"{r['p5_passthrough_index']:>10.3f}")
+        A("      PSNRm/PSNRmean  model vs bandwise-train-mean fill, scored ON THE MASKED")
+        A("                      BANDS ONLY")
+        A("      relgain         (mse_meanfill - mse_model) / mse_meanfill")
+        A("      passthru        mse_model / mse_zerofill; ~1.0 => the model copied the")
+        A("                      zeros through rather than using a spectral prior")
 
         ours = sorted((r for r in rs if r["model"] == "vae-our" and "our_mse_final" in r),
                       key=sort_key)
