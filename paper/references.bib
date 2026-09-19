@@ -1,0 +1,201 @@
+% ---------------------------------------------------------------------------
+% PRISM (AAAI 2027) — verified bibliography.
+%
+% All entries were verified via Crossref / arXiv / dblp during literature
+% review. Copy this file into AuthorKit27/aaai2027.bib (or \bibliography{...}
+% both) when moving the draft into LaTeX.
+%
+% Flagged: lin2026hapke — Crossref-visible but a 2026 date on an MDPI journal
+% is close enough to press-time that we should manually re-verify on
+% https://www.mdpi.com/2072-4292/18/8/1123 before final submission.
+% ---------------------------------------------------------------------------
+
+% -- Foundational VAE / Latent Diffusion --
+
+@misc{kingma2014vae,
+  author        = "Kingma, Diederik P. and Welling, Max",
+  title         = "Auto-Encoding Variational Bayes",
+  year          = 2014,
+  eprint        = "1312.6114",
+  archivePrefix = "arXiv",
+  primaryClass  = "stat.ML",
+  url           = "https://arxiv.org/abs/1312.6114"
+}
+
+@inproceedings{rombach2022ldm,
+  author    = "Rombach, Robin and Blattmann, Andreas and Lorenz, Dominik and Esser, Patrick and Ommer, Bj{\"o}rn",
+  title     = "High-Resolution Image Synthesis with Latent Diffusion Models",
+  booktitle = "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+  pages     = "10684--10695",
+  year      = 2022
+}
+
+@inproceedings{higgins2017betavae,
+  author    = "Higgins, Irina and Matthey, Lo{\"i}c and Pal, Arka and Burgess, Christopher and Glorot, Xavier and Botvinick, Matthew and Mohamed, Shakir and Lerchner, Alexander",
+  title     = "$\beta$-{VAE}: Learning Basic Visual Concepts with a Constrained Variational Framework",
+  booktitle = "Proceedings of the International Conference on Learning Representations (ICLR)",
+  year      = 2017
+}
+
+% -- Hyperspectral unmixing with autoencoders --
+
+@article{su2019daen,
+  author  = "Su, Yuanchao and Li, Jun and Plaza, Antonio and Marinoni, Andrea and Gamba, Paolo and Chakravortty, Somdatta",
+  title   = "{DAEN}: Deep Autoencoder Networks for Hyperspectral Unmixing",
+  journal = "IEEE Transactions on Geoscience and Remote Sensing",
+  volume  = 57,
+  number  = 7,
+  pages   = "4309--4321",
+  year    = 2019,
+  doi     = "10.1109/TGRS.2018.2890633"
+}
+
+@article{palsson2018unmixing,
+  author  = "Palsson, Burkni and Sigurdsson, Jakob and Sveinsson, Johannes R. and Ulfarsson, Magnus O.",
+  title   = "Hyperspectral Unmixing Using a Neural Network Autoencoder",
+  journal = "IEEE Access",
+  volume  = 6,
+  pages   = "25646--25656",
+  year    = 2018,
+  doi     = "10.1109/ACCESS.2018.2818280"
+}
+
+% -- 3D-CNN for hyperspectral --
+
+@article{chen2016deep,
+  author  = "Chen, Yushi and Jiang, Hanlu and Li, Chunyang and Jia, Xiuping and Ghamisi, Pedram",
+  title   = "Deep Feature Extraction and Classification of Hyperspectral Images Based on Convolutional Neural Networks",
+  journal = "IEEE Transactions on Geoscience and Remote Sensing",
+  volume  = 54,
+  number  = 10,
+  pages   = "6232--6251",
+  year    = 2016,
+  doi     = "10.1109/TGRS.2016.2584107"
+}
+
+@article{roy2020hybridsn,
+  author  = "Roy, Swalpa Kumar and Krishna, Gopal and Dubey, Shiv Ram and Chaudhuri, Bidyut B.",
+  title   = "{HybridSN}: Exploring 3-D--2-D {CNN} Feature Hierarchy for Hyperspectral Image Classification",
+  journal = "IEEE Geoscience and Remote Sensing Letters",
+  volume  = 17,
+  number  = 2,
+  pages   = "277--281",
+  year    = 2020,
+  doi     = "10.1109/LGRS.2019.2918719"
+}
+
+% -- Physics-informed neural networks --
+
+@article{raissi2019pinn,
+  author  = "Raissi, M. and Perdikaris, P. and Karniadakis, G. E.",
+  title   = "Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations",
+  journal = "Journal of Computational Physics",
+  volume  = 378,
+  pages   = "686--707",
+  year    = 2019,
+  doi     = "10.1016/j.jcp.2018.10.045"
+}
+
+% VERIFY ON MDPI BEFORE FINAL SUBMISSION
+@article{lin2026hapke,
+  author  = "Lin, Qian and Liu, Chengbao and Han, Dongxu and Liu, Wanyue and Bo, Zheng and Zhang, Peng",
+  title   = "A {Hapke} Physics-Guided Deep Autoencoder for Lunar Hyperspectral Unmixing",
+  journal = "Remote Sensing",
+  volume  = 18,
+  number  = 8,
+  pages   = "1123",
+  year    = 2026,
+  doi     = "10.3390/rs18081123"
+}
+
+% -- Spectral Angle Mapper (foundational) --
+
+@article{kruse1993sips,
+  author  = "Kruse, F. A. and Lefkoff, A. B. and Boardman, J. W. and Heidebrecht, K. B. and Shapiro, A. T. and Barloon, P. J. and Goetz, A. F. H.",
+  title   = "The Spectral Image Processing System ({SIPS})---Interactive Visualization and Analysis of Imaging Spectrometer Data",
+  journal = "Remote Sensing of Environment",
+  volume  = 44,
+  number  = "2--3",
+  pages   = "145--163",
+  year    = 1993,
+  doi     = "10.1016/0034-4257(93)90013-N"
+}
+
+% -- Recent HSI transformers / denoisers --
+
+@article{hong2022spectralformer,
+  author  = "Hong, Danfeng and Han, Zhu and Yao, Jing and Gao, Lianru and Zhang, Bing and Plaza, Antonio and Chanussot, Jocelyn",
+  title   = "{SpectralFormer}: Rethinking Hyperspectral Image Classification with Transformers",
+  journal = "IEEE Transactions on Geoscience and Remote Sensing",
+  volume  = 60,
+  pages   = "1--15",
+  year    = 2022,
+  doi     = "10.1109/TGRS.2021.3130716"
+}
+
+@article{fu2024sst,
+  author  = "Fu, Guanyiman and Xiong, Fengchao and Lu, Jianfeng and Zhou, Jun and Zhou, Jiantao and Qian, Yuntao",
+  title   = "Hyperspectral Image Denoising via Spatial--Spectral Recurrent Transformer",
+  journal = "IEEE Transactions on Geoscience and Remote Sensing",
+  volume  = 62,
+  pages   = "1--14",
+  year    = 2024,
+  doi     = "10.1109/TGRS.2024.3374953"
+}
+
+@article{chang2019hsidenet,
+  author  = "Chang, Yi and Yan, Luxin and Fang, Houzhang and Zhong, Sheng and Liao, Wenshan",
+  title   = "{HSI-DeNet}: Hyperspectral Image Restoration via Convolutional Neural Network",
+  journal = "IEEE Transactions on Geoscience and Remote Sensing",
+  volume  = 57,
+  number  = 2,
+  pages   = "667--682",
+  year    = 2019,
+  doi     = "10.1109/TGRS.2018.2859203"
+}
+
+% -- Datasets --
+
+@article{chowdhury2020iirs,
+  author  = "Chowdhury, Arup Roy and Banerjee, Arup and Joshi, S. R. and Dutta, Moumita and Kumar, Ankush and Bhattacharya, Satadru and Amitabh and Rehman, Sami Ur and Bhati, Sunil and Karelia, J. C. and others",
+  title   = "Imaging Infrared Spectrometer onboard {Chandrayaan-2} Orbiter",
+  journal = "Current Science",
+  volume  = 118,
+  number  = 3,
+  pages   = "368--375",
+  year    = 2020,
+  doi     = "10.18520/cs/v118/i3/368-375"
+}
+
+@article{pieters2009m3,
+  author  = "Pieters, C. M. and Goswami, J. N. and Clark, R. N. and Annadurai, M. and Boardman, J. and Buratti, B. and Combe, J.-P. and Dyar, M. D. and Green, R. and Head, J. W. and others",
+  title   = "Character and Spatial Distribution of {OH}/{H$_2$O} on the Surface of the Moon Seen by {M$^3$} on {Chandrayaan-1}",
+  journal = "Science",
+  volume  = 326,
+  number  = 5952,
+  pages   = "568--572",
+  year    = 2009,
+  doi     = "10.1126/science.1178658"
+}
+
+@article{murchie2007crism,
+  author  = "Murchie, S. and Arvidson, R. and Bedini, P. and Beisser, K. and Bibring, J.-P. and Bishop, J. and Boldt, J. and Cavender, P. and Choo, T. and Clancy, R. T. and others",
+  title   = "Compact Reconnaissance Imaging Spectrometer for {Mars} ({CRISM}) on {Mars} Reconnaissance Orbiter ({MRO})",
+  journal = "Journal of Geophysical Research: Planets",
+  volume  = 112,
+  number  = "E5",
+  pages   = "E05S03",
+  year    = 2007,
+  doi     = "10.1029/2006JE002682"
+}
+
+@article{green1998aviris,
+  author  = "Green, Robert O. and Eastwood, Michael L. and Sarture, Charles M. and Chrien, Thomas G. and Aronsson, Mikael and Chippendale, Bruce J. and Faust, Jessica A. and Pavri, Betina E. and Chovit, Christopher J. and Solis, Manuel and Olah, Martin R. and Williams, Orlesa",
+  title   = "Imaging Spectroscopy and the Airborne Visible/Infrared Imaging Spectrometer ({AVIRIS})",
+  journal = "Remote Sensing of Environment",
+  volume  = 65,
+  number  = 3,
+  pages   = "227--248",
+  year    = 1998,
+  doi     = "10.1016/S0034-4257(98)00064-9"
+}

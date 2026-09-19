@@ -1,0 +1,1281 @@
+# Pipeline Status — Dual-Stream Physics-Informed VAE for HSI
+
+> **Last updated:** 2026-09-14
+> **Status:** All 4 ablation models + downstream experiments + falsification
+> suite implemented. IITD HPC (PBS Pro) launcher + reverse-tunnel Telegram relay.
+>
+> **2026-09-14 — clean-slate protocol, 5 models, M3 back in, one entry point.**
+> `vae-our-nl` (PRISM-NL, `modules/vae_our_variants.py`) joined the ablation and
+> is now registered directly in `modules/registry.py` alongside the other four
+> — `--model vae-our-nl` works from `train/train.py` and `inference/*.py`
+> directly, no separate `*_variants.py` entry point needed (those still work;
+> their `import modules.vae_our_variants` is now a no-op for registration).
+> M3 is back in the dataset fold (`utils/match_latent_rate.py --exact --check`
+> passes with it included, worst deviation 6.2% on `vae-our`). The grid is now
+> **5 models × 4 datasets (IIRS, AVIRIS, M3, CRIMS) × 2 seeds (67, 69) = 64
+> cells** at **60 epochs, early-stopping patience 3** (all four hyperparam
+> YAMLs), superseding the 45-slot/3-dataset/seed-69 grid described below.
+> Single entry point: **`scripts/run_clean_grid.sh`** — trains and evaluates
+> (inference + probes + downstream) each cell in sequence, in a fixed order
+> (per dataset: `vae-our-nl` → `vae-standard` [physics, standard] →
+> `vae-1d-pixelwise` [physics, standard] → `vae-3d-spatio-spectral` [physics,
+> standard] → `vae-our`, seeds innermost), runs `verdict.py` + `aggregate.py`
+> once per dataset and sends the resulting CSVs to Telegram as **file
+> attachments** (`TelegramNotifier.send_document`, `utils/notify.py`) rather
+> than chunked text tables. Resumable by marker file
+> (`results/.done/<DS>__<stem>_seed<N>`, written only once training AND all
+> three eval steps for that cell have succeeded); a training failure skips
+> that cell's eval steps and moves on; a VRAM-preflight abort (another process
+> already on the GPU) stops the whole grid immediately instead of repeating
+> across all 64 cells. `scripts/grid_manifest.sh` / `scripts/inference.sh` /
+> `run_remote_sweep.sh` / `run_entire_grid.sh` / `run_variant_study.sh` are
+> untouched and still describe the older grid shapes — not the current one.
+>
+> **2026-08-30 grid — M3 dropped, 45 slots, ran to completion on the lab box.**
+> `scripts/grid_manifest.sh` is now `GRID_DATASETS=(IIRS AVIRIS CRIMS)`. 44/45
+> `[OK]`/`[STOP]`; the log export was taken with the last cell
+> (`vae-3d|CRIMS|standard`) mid-run. `vae-standard|IIRS|standard` and
+> `vae-3d|IIRS|standard` reproduced the π/2 decoder collapse (§10.5) at 50
+> epochs — P3 marks those INVALID, as intended. `vae-our` vs `vae-1d` on IIRS is
+> ~0.0005–0.0008 rad SAM, at the nondeterminism floor; the seed axis + effect
+> floor adjudicate it.
+>
+> **`scripts/inference.sh` now runs end to end.** It was broken in three steps:
+> `inference.py`/`downstream.py` never called `apply_hyperparams`, so every
+> model rebuilt at the `Settings` defaults and `load_state_dict` failed on a
+> size mismatch; `downstream.py` also crashed on import (sibling `inference.py`
+> shadowed the package) and defined `--seed` twice (RNG seed is now
+> `--rng-seed`). Also: a hard packed-shard preflight (no more silent legacy
+> fallback — eval runs on `test.npy`), sample-weighted metric accumulation in
+> `inference.py` (the short final test batch was over-weighted), seed/select
+> columns through `probes.csv`/`stats.csv`/`ablation_table.csv` (the Holm family
+> was comparing `vae-our` against itself across seeds), and P1's 1000-draw
+> random null hoisted to once per (dataset, seed) — ~3× faster, identical
+> numbers. `scripts/inference_smoke.sh` drives the whole thing on synthetic
+> fixtures (CPU, ~15 min) — run it before the real ~2–3 h sweep.
+>
+> **v3 grid post-mortem — the OOMs were a DOUBLE LAUNCH, not a memory
+> regression.** All 47 OOM messages name a second multi-GiB process on the card;
+> every grid cell has 2–4 `[START]` messages; two log files sit four minutes
+> apart. See [§10.5](#105-the-v3-double-launch). Fixed by `scripts/grid_lock.sh`,
+> **not** by lowering batch sizes (single-run peaks were 14.4–14.6 GB of a 20 GB
+> budget).
+>
+> **Three measurement asymmetries removed** — see [§14 Comparability](#14-metric-comparability).
+> `vae-our` was training at **half the baselines' effective λ and β**, its
+> checkpoints were selected by a different objective than theirs, and its
+> reported `mse` was never the same quantity as theirs.
+>
+> **Latent matched to a common budget T** (not a common ratio) — see
+> [§11 Controls](#11-experimental-controls--rate-and-parameters). Worst deviation
+> across all four datasets: **23.8 % → 6.2 %**.
+>
+> **Seed axis added**: the grid is now **60 slots**, not 28 — see [§8 HPC](#8--hpc--iitd-pbs-pro).
+> Measured same-seed nondeterminism is 0.0005–0.0036 rad SAM, the size of several
+> differences the ablation reports.
+>
+> **PSNR + SSIM now computed on val in `train/train.py`** and reported to
+> Telegram; SSIM unified across scripts and notebooks (`modules/metrics.py`).
+>
+> ⚠️ Compile-pass ≠ verified-run. See [Caveats](#7-caveats) before running.
+> ⚠️ **Nothing from the v3 grid should be quoted** — 12 of 28 cells produced any
+> result and `vae-3d` completed one epoch in total.
+---
+
+## 1. Architecture Overview
+
+```
+data/original/<folder>/
+  *_rfl_d18_srd.qub   ← raw reflectance cube (BSQ, float32, 256×H×250)
+  *_rfl_d18_srd.hdr   ← ENVI header (bands/lines/samples/interleave)
+
+        ↓  utils/dataset/preprocess.py
+        ↓  select bands 7:115, normalise by 1500 nm, Savitzky-Golay smooth
+
+        ↓  utils/dataset/slice.py
+        ↓  region-disjoint 70/15/15 split → 64×64 patches at stride 48
+
+data/processed/<folder>/
+  train/  patch_00000.npy … (64, 64, 108) float32
+  valid/  patch_00000.npy …
+  test/   patch_00000.npy …
+
+        ↓  utils/training/dataloader.py   → torch.utils.data.DataLoader
+
+        ↓  train/train.py
+               ┌─────────────────────────────────────────┐
+               │      HSI_DualStream_PI_VAE              │
+               │                                         │
+               │  Spatial Branch          Spectral Branch│
+               │  ─────────────          ───────────────│
+               │  Conv1D (spectral→dim)   Conv1D × 2    │
+               │  Conv2D × 4 (spatial↓)  1→32→64 ch     │
+               │  flatten → z_s          flatten → z_p  │
+               │                                         │
+               │  reparameterize (shared)                │
+               │   chunk(2, dim=1) → mu, logvar → z     │
+               │                                         │
+               │  Decoder spatial ↑  Decoder spectral ↑ │
+               │        recon_s          recon_p         │
+               │                 ↓                       │
+               │         Late Fusion (Linear)            │
+               │              recon_final                │
+               └─────────────────────────────────────────┘
+               Loss = MSE(final+0.5*s+0.5*p) + β·KLD + λ·SAM
+
+        ↓  wandb  (metrics + checkpoint)
+```
+
+---
+
+## 2. File Map
+
+| File | Role | Status |
+|------|------|--------|
+| `utils/config.py` | All hyper-parameters + derived dims | ✅ Rewritten |
+| `utils/dataset/preprocess.py` | load → select bands → normalise → smooth | ✅ New |
+| `utils/dataset/slice.py` | preprocess → region-split → patch → save | ✅ New |
+| `utils/dataset/pack.py` | patches → **capped fp16 memmap shards** (`data/packed/`) | ✅ New |
+| `utils/dataset/inspect_channels.py` | verify on-disk band counts vs config | ✅ New |
+| `utils/training/dataloader.py` | Packed + legacy backends, DataLoader factory | ✅ Rewritten |
+| `utils/find_max_batch.py` | per-dataset batch size for a VRAM budget (`--fit` extrapolates) | ✅ |
+| `utils/match_latent_rate.py` | solve each model's bottleneck to a common latent budget (`--exact`) | ✅ |
+| `utils/check_notebook_parity.py` | notebooks parse, match the YAMLs, and **run** (`--execute`) | ✅ New |
+| `scripts/grid_lock.sh` | `flock` that refuses a second concurrent grid | ✅ New |
+| `utils/dataset/audit_pack.py` | prove packing introduced no artifact; report backend | ✅ New |
+| `utils/check-model-params.py` | param audit **+ `--solve` for baseline widths** | ✅ Fixed |
+| `modules/SpatialBranch.py` | Spatial encoder-decoder | ✅ Fixed |
+| `modules/SpectralBranch.py` | Spectral encoder-decoder | ✅ Fixed |
+| `modules/vae_our.py` | vae-our dual-stream PI-VAE (+ encode/decode_latents) | ✅ |
+| `modules/vae_standard.py` | Baseline A: 2D spatial VAE (AutoencoderKL-style) | ✅ New |
+| `modules/vae_3d.py` | Baseline B: 3D spatio-spectral VAE | ✅ New |
+| `modules/vae_1d.py` | Baseline C: 1D pixelwise VAE | ✅ New |
+| `modules/losses.py` | Shared SAM + KL loss primitives | ✅ |
+| `modules/metrics.py` | **Single** PSNR/SSIM implementation (windowed SSIM) | ✅ New |
+| `modules/registry.py` | CLI name → model class; model contract | ✅ |
+| `train/train.py` | Training loop, wandb, CLI, checkpointing | ✅ Rewritten |
+| `inference/inference.py` | Reconstruction eval (MSE/SAM/PSNR/SSIM); applies the per-dataset YAML, sample-weighted | ✅ Fixed |
+| `inference/downstream.py` | Latent noise-injection + interpolation experiments (RNG seed is `--rng-seed`) | ✅ Fixed |
+| `inference/probes.py` | **Falsification suite — 7 probes on frozen models** | ✅ New |
+| `inference/preregistration.yaml` | Thresholds, fixed before any run | ✅ New |
+| `inference/stats.py` | Paired bootstrap / permutation / Holm / effect sizes | ✅ New |
+| `inference/verdict.py` | probes.csv, stats.csv, VERDICT.txt | ✅ New |
+| `docs/preregistration.md` | Why each threshold is what it is | ✅ New |
+| `notebooks/*.ipynb` | Per-model self-contained training notebooks | ✅ |
+| `inference/notebooks/*.ipynb` | Per-model self-contained eval notebooks | ✅ |
+| `scripts/preprocess.sh` | One-command preprocessing runner | ✅ New |
+| `scripts/train.sh` | Training runner (single run or full 28-run grid, `--overwrite`) | ✅ |
+| `scripts/train_fixed.sh` | **pack → zip → smoke → full grid, one command** | ✅ New |
+| `scripts/inference.sh` | recon + probes + downstream + verdict + aggregate; packed-shard preflight, dataset list from the manifest | ✅ Fixed |
+| `scripts/inference_smoke.sh` | drive `inference.sh` end to end on synthetic fixtures (CPU) before the real sweep | ✅ New |
+| `scripts/_smoke_fixtures.py` | build the synthetic shards + checkpoints for `inference_smoke.sh` (not a general utility) | ✅ New |
+| `scripts/run_clean_grid.sh` | **2026-09-14 clean-slate entry point** — self-contained 64-cell grid (5 models × 4 datasets × 2 seeds), train→infer→probes→downstream per cell, verdict+aggregate per dataset, CSVs to Telegram as file attachments, marker-file resume | ✅ New |
+| `docs/file_processing.py` | Reference script (do not modify) | — |
+
+### Ablation models & the model contract
+
+All five grid models implement one model-agnostic contract (see
+`modules/registry.py`; `train.py`/`inference.py` never branch on model type):
+
+```
+forward(x)                                               # x: (B, H, W, C)
+loss_terms(x, beta, lambda_physics, use_physics) -> dict(loss, mse, kld, sam)
+reconstruct(x) -> (B, H, W, C)
+encode_latents(x) -> list[Tensor]                        # deterministic (mu) latents
+decode_latents(list[Tensor]) -> (B, H, W, C)
+```
+
+| Model | Registry name | Latent (IIRS) | Hypothesis |
+|-------|---------------|--------|------------|
+| A: 2D Spatial | `vae-standard` | `(B, 256, 8, 8)` map | 2D convs blur pixel spectra → good PSNR, poor SAM |
+| B: 3D Spatio-Spectral | `vae-3d-spatio-spectral` | `(B, 8, C/8, 8, 8)` volume | averages bands+pixels, param-heavy, collapse-prone |
+| C: 1D Pixelwise | `vae-1d-pixelwise` | `(B, H, W, 4)` per-pixel | great chemistry (SAM), no spatial denoise → poor PSNR/SSIM |
+| Proposed: PRISM | `vae-our` | `[(B,256), (B,4,H,W)]` | spatial+spectral isolation → high PSNR *and* low SAM |
+| PRISM ablation: PRISM-NL | `vae-our-nl` | same shape as `vae-our` | `vae-our` with a 2D (not 1D) spatial-branch projection (`modules/vae_our_variants.py`) — isolates whether the linear pixelwise projection or the dual-stream split itself drives the result |
+
+`vae-our-nl` is registered in `modules/registry.py` itself (imported from
+`modules/vae_our_variants.py`, which also defines two further variants —
+`vae-our-specvit`, `vae-our-nl-specvit` — not part of this grid but reachable
+the same way). Of the five grid models, `vae-our-nl` and `vae-our` are
+`PHYSICS_ONLY` (SAM intrinsic to the loss, no `standard` variant); the three
+baselines run both loss regimes.
+
+Latent **shapes** differ by design — that geometry *is* what the ablation tests.
+Latent **budgets** are matched to 64:1 (§11), and parameter counts to within
+1.9 % (below). Both controls hold simultaneously.
+
+Baselines A/B preserve the spatial grid at 8×8 (H,W ÷ 8) and reconstruct
+exactly for any band count C. B now strides the spectral depth as well and pads
+it up to a multiple of `2**n_down` before the encoder, cropping back after the
+decoder (only M3 actually pads, 84 → 88); A/C are C-agnostic by construction.
+All three run unchanged on IIRS/M3/AVIRIS/CRIMS.
+
+All four models are matched to `vae-our`'s parameter count **per dataset**
+(within 1.7%), via the width knobs in the hyperparam YAMLs. Regenerate those
+widths after ANY architecture change with:
+
+```bash
+PYTHONPATH=. python utils/check-model-params.py --solve   # prints paste-ready YAML
+PYTHONPATH=. python utils/check-model-params.py           # audit the result
+```
+
+| Dataset | vae-our target | `vae_standard_base_ch` | `vae_3d_base_ch` | `vae_1d_hidden_dims` |
+|---|---|---|---|---|
+| IIRS (C=256)   | 10.87 M | 86 | 45 | (2748, 1374, 687) |
+| M3 (C=84)      | 10.70 M | 88 | 45 | (2856, 1428, 714) |
+| AVIRIS (C=424) | 11.21 M | 85 | 46 | (2668, 1334, 667) |
+| CRIMS (C=456)  | 11.28 M | 85 | 46 | (2656, 1328, 664) |
+
+**Order matters when regenerating: rate first, then parameters.** Shrinking
+`vae-our`'s spectral latent shrinks its `LazyLinear` (4096→256 becomes 4096→8),
+so the parameter *target* moves. Solving parameters first and rate second
+produces a stale match.
+
+### Downstream experiments (`inference/downstream.py`)
+
+Model-agnostic latent-space probes proving diffusion-readiness without training an LDM:
+
+```bash
+# All 4 models on IIRS test split, with figures:
+PYTHONPATH=. python inference/downstream.py --dataset IIRS --save-plots
+```
+
+1. **Noise-injection robustness** — encode → add `N(0, σ²)` to latents at
+   `σ ∈ {0, 0.1, 0.5, 1.0}` → decode → SAM/PSNR/SSIM vs clean. Robust manifolds
+   degrade gracefully; fragile ones collapse by σ=0.5.
+2. **Chemical interpolation smoothness** — `z_mix = α·z_A + (1−α)·z_B` for
+   `α ∈ [0,1]`, decode, track a pixel's spectrum. Reports *jaggedness* (mean L2
+   of the 2nd difference along α); lower = smoother = more generative-ready.
+
+---
+
+## 3. Configuration (`utils/config.py`)
+
+All settings live in the `Settings` dataclass. Defaults are set for 64×64 patches
+with 108-band IIRS cubes. Change values in the dataclass; derived fields
+(`conv_output_*`, `spectral_*`) are recomputed automatically in `__post_init__`.
+
+### Key config values
+
+| Parameter | Value | Meaning |
+|-----------|-------|---------|
+| `input_height/width` | 64 | patch spatial size |
+| `input_channels` | 256 / 84 / 424 / 456 | per dataset (IIRS / M3 / AVIRIS / CRIMS) |
+| `norm_target_nm` | 1500.0 | reference band resolved per-cube from its wavelengths |
+| `savgol_window` | 7 | Savitzky-Golay window length |
+| `patch_size / patch_stride` | 64 / 48 | 25% overlap |
+| `split_ratios` | (0.70, 0.15, 0.15) | train/valid/test |
+| **`train_patch_cap`** | **7000** | max training patches per dataset (applied by `pack.py`) |
+| **`patch_cap_seed`** | **1234** | seed for the cap's scene-stratified subsample |
+| `batch_size` | 32 / 32 / 16 / 16 | **per dataset** (IIRS / M3 / AVIRIS / CRIMS) — see §5 |
+| `vae_standard_latent_ch` | 256 / 84 / 424 / 456 | latent-rate knob, per dataset |
+| `vae_3d_latent_ch` | 8 | already exactly 64:1 — unchanged by the rate match |
+| `vae_1d_latent_dim` | 4 / 1 / 7 / 7 | latent-rate knob, per dataset |
+| `num_workers` | 8 | dataloader workers |
+| `reduced_dims` | 32 | spatial Conv1D output channels |
+| `latent_dim` | 256 | spatial latent (post-reparameterize) |
+| `n_2D_conv_blocks` | 4 | spatial bottleneck: 64→4 px |
+| `spectral_n_1D_conv_blocks` | 2 | spectral bottleneck |
+| `spectral_latent_dim` | 4 / 1 / 7 / 7 | per-pixel spectral latent — **per dataset**, see §11 |
+| **`spectral_base_ch`** | **32** | spectral Conv1D width — **decoupled from C**, see §10 |
+| `spectral_transpose_c/l` | 64 / C÷4 | decoder reshape target |
+| `spectral_linear_expansion_dim` | 16·C | 64 × (C÷4) |
+
+**Band counts are verified against the data, not trusted.** `apply_dataset(verify=True)`
+(used by `train.py`, `inference.py`, `downstream.py`) probes a real patch and
+raises with both numbers on a mismatch. Run the standalone check any time:
+
+```bash
+PYTHONPATH=. python utils/dataset/inspect_channels.py
+```
+
+### Spectral dimension arithmetic
+
+With `spectral_conv1D_kernel_size=4`, `stride=2`, `padding=1`:
+```
+Conv1d:          L_out = L_in // 2
+ConvTranspose1d: L_out = 2 * L_in
+
+IIRS (C=256, spectral_base_ch=32):
+Encoder:  256 → 128 → 64  (L);  channels  1 → 32 → 64
+Decoder:   64 → 128 → 256 (L);  channels 64 → 32 → 1
+```
+
+Sequence length `L` still tracks the band count, so the latent stays
+sensor-aware. Only the **channel width** is now a free hyper-parameter
+(`spectral_base_ch`) instead of being pinned to `input_channels`. That one
+change is worth 35–97× in FLOPs — see §10.
+
+---
+
+## 4. Data Pipeline
+
+### Step 1 — Preprocess & Slice
+
+```bash
+# Full pipeline (all 10 folders):
+bash scripts/preprocess.sh
+
+# With overwrite (redo existing output):
+bash scripts/preprocess.sh --overwrite
+
+# Custom paths:
+DATA_ROOT=data/original OUT_ROOT=data/processed bash scripts/preprocess.sh
+```
+
+This will:
+1. For each folder in `data/original/`: load the `*_rfl_d18_srd.qub` file.
+2. Select bands `[7:115]` (108 bands).
+3. Normalise each pixel spectrum by the ≈1500 nm reference band.
+4. Smooth with Savitzky-Golay (window=7, poly=2) along the spectral axis.
+5. Carve the cube height-wise into 70/15/15 contiguous regions.
+6. Extract 64×64 patches at stride 48; drop partial edge patches.
+7. Save each patch as `data/processed/<folder>/<split>/patch_NNNNN.npy`.
+
+**Expected patch counts** (for H≈14k cubes, W=250):
+- Per folder (train): ~1,015 patches  
+- Per folder (valid/test): ~215 patches each  
+- Total (10 folders): ~15,000 patches
+
+### Step 2 — Pack (REQUIRED before training)
+
+```bash
+# all datasets, honouring settings.train_patch_cap (7000)
+PYTHONPATH=. python utils/dataset/pack.py --verify
+
+# one dataset, from scratch
+PYTHONPATH=. python utils/dataset/pack.py --dataset CRIMS --overwrite --verify
+
+# uncapped
+PYTHONPATH=. python utils/dataset/pack.py --cap 0
+```
+
+Produces:
+
+```
+data/packed/<DATASET>/
+  train.npy    (N, 64, 64, C) float16, per-patch max-normalised, band-cropped
+  train.json   metadata + provenance (source file list, per-patch maxima)
+  valid.npy / valid.json
+  test.npy  / test.json
+```
+
+Four things happen here, and each fixes a distinct problem (§10):
+
+1. **float16** halves the bytes. Values top out at 1.0 and fp16's ~5e-4 relative
+   precision is *finer* than the bfloat16 autocast training already uses.
+   Measured worst-case round-trip error: 2.4e-4.
+2. **One file replaces ~15,000.** Per-file open overhead disappears and the OS
+   page cache starts working across epochs.
+3. **Normalisation moves here**, which permanently removes the full-dataset
+   rescan the dataloader used to do at the start of *every* run.
+4. **The band crop is applied here.** `crop_bands` is otherwise only honoured by
+   `slice.py`, which never runs for CRIMS (it ships pre-processed) — so CRIMS's
+   457 → 456 crop happens at pack time or not at all.
+
+The training split is capped at `train_patch_cap` (7000), subsampled
+proportionally across scenes with a fixed seed so every model sees the identical
+subset. `valid`/`test` are never capped.
+
+| | M3 | IIRS | AVIRIS | CRIMS |
+|---|---|---|---|---|
+| available | 19,746 | 14,624 | 11,027 | 2,561 |
+| **trained on** | **7,000** | **7,000** | **7,000** | **2,561** |
+
+Besides the 1.6–2.8× speedup, this equalises the training budget across sensors —
+an improvement on the previous 8× imbalance, not a shortcut.
+
+> **Where `data/packed/` lives is load-bearing.** fp16 + single-file alone buys
+> ~2–3×. The projections in §10 assume it sits on **local NVMe** (or is held in
+> RAM via `--cache-ram`), not back on the external drive the raw patches live on.
+> Capped, all four train splits total ~53 GB; RAM caching peaks at ~25 GB since
+> only one dataset is loaded at a time.
+
+### Step 3 — Zip for Kaggle
+
+`scripts/train_fixed.sh` does this automatically, or:
+
+```bash
+zip -0 -r -q dataset.zip data/packed     # -0 = store; fp16 sensor noise does not deflate
+```
+
+---
+
+## 5. Training
+
+### Prerequisites
+
+```bash
+# Install dependencies (already in .venv):
+pip install torch torchvision scipy wandb
+
+# One-time W&B login (run once; stores credentials in ~/.netrc):
+wandb login
+```
+
+### Quick start — the whole thing, one command
+
+```bash
+bash scripts/train_fixed.sh
+```
+
+Runs: verify band counts → pack the capped fp16 dataset → zip it to
+`dataset.zip` for Kaggle → 2-epoch smoke across all 28 slots → 30-epoch full
+grid. Both training passes use `--overwrite`, so a leftover checkpoint can never
+silently consume a slot. The smoke pass writes to `model_smoke/` so it cannot be
+mistaken for a real result, and the full grid is **not** launched if the smoke
+pass reports any failure.
+
+```bash
+bash scripts/train_fixed.sh --dry-run          # print the plan, run nothing
+bash scripts/train_fixed.sh --pack-only        # build + zip the dataset only
+bash scripts/train_fixed.sh --skip-pack        # data/packed/ already built
+bash scripts/train_fixed.sh --datasets IIRS,M3
+```
+
+Once `data/packed/` exists, `scripts/train.sh` does steps 4/5 on its own:
+
+```bash
+bash scripts/train.sh --all --overwrite --epochs 30
+```
+
+### `--overwrite`
+
+Without it, `train.sh` and `hpc_pbs_job.pbs` **skip** any slot whose checkpoint
+already exists — and that skip prints to stdout only, never to Telegram. A
+Telegram transcript therefore cannot distinguish "skipped" from "crashed", which
+is how a previous grid appeared to lose slots that had merely been skipped. The
+summary block now always lists the skipped runs explicitly.
+
+```bash
+bash scripts/train.sh --all --overwrite       # or: OVERWRITE=1 bash scripts/train.sh --all
+bash scripts/hpc_launch.sh --overwrite        # threads OVERWRITE=1 through qsub -v
+```
+
+### Batch size — one number **per dataset**
+
+Batch size is held constant across all 4 models × 2 loss regimes **within** a
+dataset. That is the axis the ablation compares on, so nothing about a row's
+result can be attributed to it.
+
+It is deliberately **not** constant across datasets. There is no controlled
+comparison between sensors to protect — they differ in band count, scene count,
+spatial sampling and SNR — and these YAMLs already vary `vae_3d_base_ch` and
+friends per dataset for parameter matching. Memory per sample varies ~2× between
+sensors, so one global value would idle most of the card on the light ones.
+
+It *does* have to hold across **platforms** for a given dataset, or within-dataset
+fairness breaks the moment one slot runs on Kaggle and another on the lab. Each
+number is therefore derived against the tightest budget any slot for that dataset
+will see (the lab's 24 GB) and reused unchanged everywhere.
+
+| Dataset | `batch_size` | Binding model | GB/sample | Predicted peak |
+|---|---|---|---|---|
+| IIRS   | **32** | `vae-3d-spatio-spectral` | 0.500 | 16.2 GB |
+| M3     | **32** | `vae-1d-pixelwise` | 0.496 | 16.1 GB |
+| AVIRIS | **16** | `vae-3d-spatio-spectral` | 0.880 | 14.3 GB |
+| CRIMS  | **16** | `vae-3d-spatio-spectral` | 0.961 | 15.6 GB |
+
+against 20.4 GB usable (24 GB less 15 % headroom), rounded down to a power of two
+so the `nn.DataParallel` split stays even.
+
+> **M3's binding model is `vae-1d-pixelwise`, not `vae-3d`.** Its MLP hidden dims
+> are ~2,900–3,000 at *every* sensor, so its memory is essentially independent of
+> band count (~0.50 GB/sample throughout) and it caps M3 long before the 3D model
+> does. Scaling M3's batch from `base_ch × C` — which would have suggested 128 —
+> is wrong for exactly that reason. Measure, don't extrapolate.
+
+All four clear the other platforms: HPC's 40 GB has headroom, and Kaggle's 2 × T4
+sees `batch_size/2` per 15 GB device (worst case CRIMS: 8 × 0.961 + 0.22 ≈ 7.9 GB).
+
+```bash
+# natively on the target GPU
+PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --time
+
+# or from a smaller card: measures B=1,2,4 and fits peak = fixed + B*marginal
+PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --fit
+
+# one global number across all sensors, if you ever want that instead
+PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --global
+```
+
+### Full options
+
+```bash
+python train/train.py --help
+```
+
+```
+--data-root        Legacy per-patch tree; forces the legacy backend
+--packed-root      Override the packed-shard dir (default: data/packed/<DS>)
+--cache-ram        Load the whole split into RAM (removes disk from the loop)
+--limit-train      Further cap training patches without re-packing
+--num-workers      DataLoader workers   (default: 8)
+--epochs           Training epochs      (default: 100)
+--batch-size       Batch size           (default: 32)
+--lr               Learning rate        (default: 1e-4)
+--beta             KL weight            (default: 0.001)
+--lambda-physics   SAM weight           (default: 0.5)
+--log-recon-every  W&B recon log freq   (default: 10 epochs)
+--ckpt-dir         Checkpoint directory (default: checkpoints/)
+--wandb-project    W&B project name     (default: hsi-pi-vae)
+--wandb-entity     W&B entity / team    (default: account from login)
+--no-wandb         Disable W&B logging
+```
+
+### W&B metrics logged
+
+| Metric | Description |
+|--------|-------------|
+| `train/loss` | Total loss per epoch |
+| `train/mse` | Combined MSE (final + 0.5·spatial + 0.5·spectral) |
+| `train/sam` | SAM physics prior loss |
+| `train/kld` | Combined KL divergence |
+| `train/lr` | Learning rate (cosine annealed) |
+| `val/*` | Same metrics on the validation set |
+| `val/mse_final` | Reconstruction MSE — **the cross-model comparable one** (§14.3) |
+| `val/psnr` | PSNR of the reconstruction, dB |
+| `val/ssim` | 11×11 windowed SSIM (`modules/metrics.py`) |
+| `reconstructions` | Original vs reconstructed patch pairs (1500 nm band) |
+
+### Checkpoints — TWO per cell
+
+```
+model/<DS>/<name>_seed<N>_bestsam.pt    <- min val SAM
+model/<DS>/<name>_seed<N>_bestmse.pt    <- min val reconstruction MSE (mse_final)
+```
+
+Why two, and why the seed is in the name: §14.2 and §8. Early stopping fires only
+when **neither** criterion has improved for `patience` epochs.
+
+Each checkpoint contains `epoch`, `model_state_dict`, `optimizer_state_dict`,
+`loss`, `select`, `val_sam`, `val_mse_final`, `val_psnr`, `val_ssim`, plus
+`ckpt_meta`: `model`, `dataset`, `loss_type`, `seed`, **`batch_size`**,
+**`platform`**, `lambda_physics`, `beta`.
+
+`batch_size` and `platform` are recorded because batch size is deliberately NOT
+constant across platforms (notebooks are sized for Kaggle's 2×15 GB, scripts for
+the lab's 20 GB). Any dataset trained on both therefore carries a batch confound,
+and it must be auditable from the artifact rather than remembered. **Operating
+rule: give a whole dataset to one platform**, so no dataset is ever split.
+
+### Concurrency — one grid per machine
+
+`scripts/grid_lock.sh` takes a non-blocking `flock` on `logs/.grid.lock`. A
+second launch exits 9 and names the holder. This is the fix for the v3 failure
+(§10.5); `ALLOW_CONCURRENT=1` escapes it when two runs genuinely fit.
+
+---
+
+## 6. Model Fix Notes
+
+The original model had a **latent-dim mismatch** that prevented any forward pass:
+
+| Branch | Problem | Fix applied |
+|--------|---------|-------------|
+| Spatial | `Encoder.linear → latent_dim`; `reparameterize` chunks → `latent_dim/2`; `Decoder.linear` expects `latent_dim` → shape mismatch | Encoder now emits `2*latent_dim`; Decoder `in_features=latent_dim` |
+| Spectral | Same pattern along `dim=1` of the `(B, spectral_latent_dim, H, W)` map | Encoder emits `2*spectral_latent_dim` channels; Decoder `in_features=spectral_latent_dim` |
+
+The `SpatialEncoderDecoder.forward` and `SpectralEncoderDecoder.forward` methods were also
+updated to include reparameterization (they now return `z, mu, logvar, reconstruction`).
+
+---
+
+## 7. Caveats
+
+> **compile-pass ≠ verified-run**
+
+All `.py` files have been byte-compiled with `python -m py_compile` and all
+bash scripts checked with `bash -n`. The dimension arithmetic has been verified
+analytically. However, the pipeline has **not been end-to-end executed** (per
+project instructions). Before your first full training run:
+
+1. **Shape dry-run** — run a one-batch forward pass with dummy data to confirm
+   all tensor shapes chain correctly:
+   ```python
+   import torch
+   from train.train import HSI_DualStream_PI_VAE
+   from utils.config import settings
+   
+   model = HSI_DualStream_PI_VAE(
+       conv_output_c=settings.conv_output_c,
+       conv_output_h=settings.conv_output_h,
+       conv_output_w=settings.conv_output_w,
+   )
+   x = torch.randn(4, 64, 64, 108)
+   out = model(x)
+   print([o.shape for o in out])
+   ```
+
+2. **`wandb login`** — run once to store credentials; subsequent runs are silent.
+
+3. **PYTHONPATH** — always run from the repo root with `PYTHONPATH=.` set
+   (the bash scripts do this automatically). Running `python train/train.py`
+   directly puts `train/` on `sys.path` and breaks all `from modules.*` /
+   `from utils.*` imports.
+
+4. **Memory** — each raw cube is ~3.6 GB. The preprocessing pipeline loads one
+   cube at a time. Ensure ≥8 GB free RAM before running `scripts/preprocess.sh`.
+
+5. **Pack before training.** The dataloader falls back to the legacy per-patch
+   path when no shard exists and logs a WARNING; it works, but it is the slow
+   path that made the previous grid disk-bound.
+
+6. **Notebook config duplication.** `notebooks/*.ipynb` cell 2 inlines
+   `utils/config.py` + `utils/hyperparams.py` + all four YAMLs so the notebooks
+   run standalone on Kaggle. Any change to band counts, model widths, latent
+   knobs, or batch sizes must be mirrored into **all four** notebooks. This
+   duplication is exactly how `CRIMS: 544` survived in five places at once.
+
+7. **Notebook parity is checked, not eyeballed.** Run before committing:
+
+   ```bash
+   PYTHONPATH=. python utils/check_notebook_parity.py --execute
+   ```
+
+   It parses every code cell, asserts the config and training cells are
+   byte-identical across all four notebooks, checks every inlined value against
+   the YAMLs (whitelisting `num_workers` and `batch_size`), and with `--execute`
+   *runs* each notebook on synthetic data. Syntax checking alone would not catch
+   a tuple that gained a field in three notebooks out of four.
+
+8. **`verify_channels` is packed-aware, and must stay that way.** A packed shard
+   has already had `crop_bands` applied, so its band count is the *effective*
+   count; a processed patch still carries the *raw* one. `probe_channels`
+   returns `(count, source, location)` and callers must honour `source`.
+   Conflating the two is what made all seven CRIMS slots fail with
+   `on-disk patches have 456 bands but raw_channels says 457` — the data and the
+   packing were both fine. `inspect_channels.py` and `verify_channels` now share
+   the helper so they cannot disagree again (previously the inspector passed
+   while every training slot failed).
+
+---
+
+## 8. HPC / IITD (PBS Pro)
+
+The 28-run ablation grid targets IITD's Padum HPC (PBS Pro, A100 80GB
+compute nodes). **Two separate hosts, two separate filesystems**:
+
+- **login node** (`${HPC_USER}@${HPC_HOST}`) — reachable directly from the
+  lab. No `qsub` here; it's a staging/jump host only.
+- **compute node** (`${HPC_INNER_HOST}`, default alias `hpc`) — reached by
+  `ssh`-ing into the login node and, from there, `ssh hpc`. `qsub`/`qstat`/
+  `qdel` and the running jobs live here. Compute nodes have **no outbound
+  internet**.
+
+`scripts/hpc_common.sh` provides the two-hop primitives every other HPC
+script builds on: `login_ssh "<cmd>"` (one hop), `compute_ssh "<cmd>"` (two
+hops — base64-encodes the payload before the first hop so nested quoting in
+`<cmd>` never has to survive two shell re-parses), `compute_rsync_push`, and
+`resolve_hpc_roots` (fills `HPC_LOGIN_REPO_ROOT` / `HPC_COMPUTE_REPO_ROOT`
+with back-compat fallback from `HPC_PROJECT_DIR`).
+
+Consequences of the split filesystem:
+
+- **Python env** — this repo ships a prebuilt `.venv/` (`USE_SHIPPED_VENV=1`,
+  the default) that gets pushed lab→login→compute and used **as-is**;
+  `scripts/hpc_bootstrap.sh` verifies it imports `torch`+`wandb` on the
+  compute node rather than reinstalling anything. The old `pip download` /
+  offline-wheels path (`USE_SHIPPED_VENV=0`) still exists as a fallback.
+  **Invariant: never `source .venv/bin/activate`** anywhere in the HPC
+  path — a venv rsynced from another machine has a dead `VIRTUAL_ENV` path
+  baked into `bin/activate`, so activation silently no-ops and `python`
+  resolves to the wrong interpreter. Always invoke `.venv/bin/python` by
+  absolute path (it *is* relocatable — it derives its prefix from the
+  adjacent `pyvenv.cfg`).
+- **Rsync excludes must be anchored** (`/logs/`, `/model/`, `/data/`, …,
+  with a leading `/`). An unanchored `--exclude='wandb/'` matches rsync's
+  "final path component at any depth" rule and silently drops
+  `.venv/lib/.../site-packages/wandb/` along with the repo's `wandb/` —
+  `.venv/` gets its own rsync pass with only `__pycache__/`/`*.pyc` excluded.
+- **wandb** — `WANDB_MODE=offline` on the compute node. The lab machine runs
+  `wandb sync wandb/offline-run-*` after `hpc_pull_results.sh` completes.
+- **Telegram** — `hpc_preflight.sh` probe 5 checks whether the compute node
+  has direct outbound internet; if so, `utils/notify.py`'s tier-2 direct
+  `sendMessage` handles everything with no tunnel. Otherwise, chained
+  reverse tunnels: lab→login (`autossh`, background process) and
+  login→compute (`autossh`, tmux session `prism_inner_tunnel` on the login
+  node). The message forwarder (`scripts/notify_forwarder.py`) now runs
+  **on the compute node** in tmux session `prism_forwarder` — that's where
+  `logs/notify_queue.jsonl` actually gets written (CWD-relative in
+  `utils/notify.py`, and jobs `cd` to the compute root) — and drains it
+  through the chained tunnel to the lab's `utils/notify_relay.py`.
+- **Result return** (compute→login→lab) — each PBS array element ends by
+  calling `scripts/hpc_push_results.sh`, which **unconditionally** writes a
+  `logs/pending_push/<idx>` marker on the compute node *before* attempting
+  anything (so a fallback path always has ground truth), then — only if
+  `PUSH_RESULTS_FROM_JOB=1` (set only when preflight probe 6 confirms
+  compute→login connectivity) — tries to rsync its checkpoint/logs/wandb
+  straight to the login node and clears the marker on success. Whether or
+  not that push runs, `scripts/hpc_collector.sh` (tmux session
+  `prism_collector` on the login node, started by `hpc_launch.sh`) polls
+  the compute node for `pending_push/` markers on `COLLECTOR_INTERVAL`
+  seconds and **pulls** anything still marked — pull, not push, because
+  login→compute is the direction already proven to work. The lab-side
+  `hpc_grid_watcher.sh` then pulls login→lab as before, now also fast-pathed
+  by checking `logs/grid_done/<idx>` markers before falling back to qstat.
+
+### Entry point
+
+The junior runs two scripts on the lab machine — preflight first, always:
+
+```bash
+bash scripts/hpc_preflight.sh   # read-only: both hops, tools, shipped-venv sanity
+bash scripts/hpc_launch.sh      # does the actual work
+bash scripts/hpc_launch.sh --overwrite   # retrain slots that already have a ckpt
+```
+
+`--overwrite` (or `OVERWRITE=1`) is threaded through `qsub -v` into
+`hpc_pbs_job.pbs`, which otherwise skips any slot whose checkpoint already
+exists on the compute node.
+
+**Staging the packed data.** `hpc_launch.sh` no longer rsyncs `data/` at all
+(`--exclude='/data/'` covers `data/packed/` too) — the dataset is staged onto the
+compute node manually, once. Copy `data/packed/` there by whatever route is
+convenient; note that `hpc_common.sh:count_npy_remote` counts `*.npy` files and
+the packed layout is 3 files per dataset rather than ~15,000, so do not use that
+count as a completeness check for packed data.
+
+`hpc_launch.sh` sanity-checks the WiFi (`mlr lab 5g`) and both SSH hops,
+skips the wheel build (shipped-venv default), independently rsyncs repo /
+`.venv/` / `data/processed/` lab→login then login→compute (each of the
+three skipped if already present+intact on the target), runs
+`hpc_bootstrap.sh` **on the compute node** via `compute_ssh`, brings up the
+Telegram chain (§ above), and `qsub`'s the smoke + full array jobs via
+`compute_ssh`. `scripts/hpc_train.sh` is now a thin wrapper —
+`exec bash scripts/hpc_launch.sh --resume "$@"` — kept for anyone with the
+old command memorized; the "skip what's already staged" behaviour it used
+to duplicate is now native to `hpc_launch.sh` itself.
+
+Config lives in `scripts/hpc_config.env` (copied from
+`.example`) — every runtime-fill value is marked `FILL_ME` with an
+"how to obtain" hint in `docs/hpc_wiki.md`. Full walkthrough for the
+junior: **`docs/hpc_wiki.md`**.
+
+### Grid manifest
+
+The grid is defined **once** in `scripts/grid_manifest.sh` and sourced by both
+`scripts/train.sh --all` and `scripts/hpc_pbs_job.pbs`. **It is now 60 slots, not
+28**, because of the seed axis, and `grid_lookup` returns a **five**-field tuple:
+
+```
+<model>|<dataset>|<loss>|<ckpt_stem>|<seed>
+```
+
+Seeds are not applied uniformly. The claim is "vae-our beats each baseline in the
+physics regime", so:
+
+| cells | seeds | count |
+|---|---|---|
+| **claim** — vae-our + 3 baselines at `--loss physics` | `GRID_SEEDS` (42, 7, 1234) | 4 ds × 4 × 3 = **48** |
+| **other** — 3 baselines at `--loss standard` | first seed only | 4 ds × 3 × 1 = **12** |
+
+Override with `GRID_SEEDS="42 7"` to split work across machines.
+
+**The seed reaches the checkpoint filename.** It did not, and `--seed 1` and
+`--seed 2` silently overwrote each other — which would have made the whole
+seed-robustness exercise measure nothing. Names are now
+`<stem>_seed<N>_best{sam,mse}.pt`.
+
+`HPC_ARRAY_RANGE` / `FULL_ARRAY_RANGE` are `1-60`. The PBS script picks its slot
+from `${PBS_ARRAY_INDEX}` via `grid_lookup`.
+
+### Notification format (`utils/notify.py`)
+
+`RunNotifier` emits three message types:
+
+- **[START]** — once at run start, with resolved hyper-params in a `<pre>` block.
+- **[HB]** — every `log_every` epochs (default 10), with current-epoch
+  train/val loss/MSE/SAM/KLD, wall time, ETA, and best-so-far pointer.
+- **[OK] / [FAIL] / [STOP]** — once at run end, with a stride-10 table and
+  (on failure) the last ~60 log lines + exception traceback.
+
+### Perf changes (math-preserving)
+
+`train/train.py` now:
+
+- Auto-picks BF16 autocast on Ampere+ (SM8.0+), FP16 + `GradScaler` elsewhere.
+- Applies `channels_last` (2D models) / `channels_last_3d` (`vae-3d-spatio-spectral`).
+- Accumulates loss/MSE/SAM/KLD on-GPU each step; one `.item()` per epoch.
+- Updates the tqdm postfix every 20 steps, not every step.
+- Enables TF32 for FP32 matmul paths + `cudnn.benchmark = True`.
+- Wraps in `nn.DataParallel` only when `--allow-multi-gpu` is passed AND >1 GPU
+  is visible (default single-GPU on HPC).
+- Optional `torch.compile(model, mode="reduce-overhead")` via `--compile`,
+  auto-skipped for `vae-3d-spatio-spectral` where Dynamo trips.
+- DEBUG log level for the first `--debug-epochs` (default 3) epochs, then INFO.
+- Shape-only tensor logging via `utils.logging_setup.log_tensor` — never
+  dumps values.
+
+`utils/training/dataloader.py`:
+
+- `persistent_workers=True` (drops the spawn-context re-fork cost).
+- `prefetch_factor=4`.
+- Per-patch max cached in `__init__` from the sidecar `manifest.json`
+  (written by `utils/dataset/slice.py`) — no per-item `.max()` scan.
+
+### Compile-pass caveat for new bash / .pbs
+
+All bash scripts (`hpc_common.sh`, `hpc_preflight.sh`, `hpc_launch.sh`,
+`hpc_bootstrap.sh`, `hpc_pbs_job.pbs`, `hpc_push_results.sh`,
+`hpc_collector.sh`, `hpc_smoke_watcher.sh`, `hpc_grid_watcher.sh`,
+`hpc_pull_results.sh`, `hpc_train.sh`, `grid_manifest.sh`) and Python files
+(`notify_relay.py`, `notify_forwarder.py`, updated `train.py` / `notify.py` /
+`logging_setup.py` / `dataloader.py` / `slice.py`) have been passed through
+`python -m py_compile` and `bash -n`. The two-hop `login_ssh`/`compute_ssh`
+plumbing in `hpc_common.sh` was additionally exercised against a local mock
+SSH chain (verifying the base64 payload round-trips correctly through the
+login→compute hop) and `hpc_launch.sh --dry-run` / `hpc_preflight.sh` were
+run end-to-end against that mock without a crash. **None of this has been
+executed against the real IITD cluster.** The wiki's smoke-test flow
+(`HPC_ARRAY_RANGE=1-1`, i.e. what `hpc_launch.sh` submits first) is the
+recommended first real run — and `bash scripts/hpc_preflight.sh` should be
+run before it every time, since it's the one check that can only be
+answered against the real cluster (whether the shipped `.venv`'s
+interpreter actually exists on the compute node, whether the two SSH hops
+are passwordless, etc).
+
+## 10. Performance — why the grid was slow
+
+Measured from the 5-epoch smoke run (2026-08-19) and analytic MAC counts. Kept
+here so nobody has to re-derive it.
+
+### The numbers that started this
+
+| Model | IIRS wall (5 ep) | GMAC/sample |
+|---|---|---|
+| vae-3d-spatio-spectral | 2h31m | 2,301 |
+| vae-our | 1h14m | 467 |
+| vae-1d-pixelwise | 39m | 101 |
+| vae-standard | 40m | **11** |
+
+`vae-standard` needs **40× fewer FLOPs** than `vae-our` and took the same 40
+minutes. That single comparison says most of it: the grid was not
+compute-bound.
+
+### Three independent bottlenecks
+
+**(a) Disk I/O — the real ceiling for 3 of 4 models.** One IIRS epoch opened
+14,624 + 3,084 separate `.npy` files totalling ~74 GB, off the external drive at
+`/media/yashdeep/New Volume 21/…`. 74 GB ÷ 8.1 min ≈ 152 MB/s — exactly
+external-drive speed, and a hard floor of ~8 min/epoch *whatever model runs*.
+(Local NVMe measures 726 MB/s on the same patches.)
+→ Fixed by `utils/dataset/pack.py` (§4 Step 2) + the patch cap.
+
+**(b) A full dataset re-read before every run.** `dataloader.py` fell back to
+`np.load(p).max()` over every patch when `manifest.json` was absent — and it was
+absent for every dataset. Another ~74 GB read, in the main process, at the start
+of each of the 28 runs, *before* `RunNotifier` existed, so it never appeared in
+any log. ≈10 min × 28 runs ≈ 4.5 h of pure waste.
+→ Fixed: normalisation is applied once at pack time.
+
+**(c) Two architectural FLOP sinks.**
+
+*`vae-our`'s spectral branch was 99.7% of its own cost.* `SpectralBranch.Encoder`
+set `out_c = settings.input_channels`, making the Conv1d blocks `1 → C → 2C`
+channels — applied to **4,096 independent pixel spectra per patch**. At AVIRIS
+that is a 424→848-channel convolution. Width was pinned to band count for no
+principled reason, which also swung `vae-our`'s parameter count 3× across
+sensors (24.5 M at IIRS vs 73 M at CRIMS) and quietly undermined the cross-sensor
+comparison. Decoupling it (`spectral_base_ch = 32`) is a three-line change and
+leaves the structure — per-pixel 1D convs, stride-2 halving, channel doubling,
+linear → spectral latent, symmetric decoder, late fusion, MSE+βKLD+λSAM —
+completely intact.
+
+*`vae-3d` kept full spectral depth through every block.* `_DOWN_S = (1, 2, 2)`,
+so the decoder's final `ConvTranspose3d` ran at `C × 64 × 64` (~500 G of the
+AVIRIS total on its own). Now `(2, 2, 2)` with `_DOWN_K = (4, 4, 4)`.
+
+> The kernel change is **required**, not cosmetic. With depth `k=3, s=2, p=1`
+> the forward gives `ceil(L/2)` but the transpose gives `2L − 1`, compounding
+> over three blocks to `53 → 105 → 209 → 417` at AVIRIS — short of 424, so no
+> crop can recover it. `k=4, s=2, p=1` halves and doubles exactly.
+
+CLAUDE.md previously described stride-1 depth as a *"design choice for
+robustness"* — i.e. arithmetic convenience for arbitrary `C`. The baseline's
+actual stated hypothesis is that 3D kernels inevitably average neighbouring
+bands together with neighbouring pixels; striding the depth axis strengthens
+that, and the pad/crop keeps the round-trip exact for every sensor.
+
+### Result
+
+| | IIRS | M3 | AVIRIS | CRIMS |
+|---|---|---|---|---|
+| vae-our GMAC/sample **before** | 467 | 21 | 2,021 | 2,512 |
+| vae-our GMAC/sample **after** | **14.3** | **5.0** | **23.9** | **25.8** |
+| vae-3d GMAC/sample **before** | 2,301 | 362 | 7,576 | 12,114 |
+| vae-3d GMAC/sample **after** (param-matched) | ~459 | ~130 | ~825 | ~923 |
+| vae-our params **before** | 24.5 M | 12.2 M | 48.5 M | 73.0 M |
+| vae-our params **after** | 12.4 M | 11.2 M | 13.7 M | 13.9 M |
+
+`vae-our` drops out of the critical path entirely and becomes I/O-bound like the
+baselines. `vae-3d` remains the long pole.
+
+**Estimated** at the lab GPU's back-derived throughput (~111 TFLOPS effective,
+from dividing the analytic MAC count for the old `vae-3d` by its observed smoke
+wall time) and 7,000 patches/epoch, `vae-3d` lands around 3 min/epoch at IIRS and
+5 min at AVIRIS — 1.5–3 h for 30 epochs, inside the target with margin.
+
+Treat that as an estimate, not a measurement. The analytic 3D MAC count was ~2.4×
+higher than the observed wall time implied (predicted ~6 h, observed 2h31m), and
+the 111 TFLOPS figure absorbs that error, so the projection inherits it. The
+error direction is safe — if the analytic count was high, the real runs are
+*faster* than stated. **The smoke pass gives the true number two epochs in:**
+`grep 'wall ' logs/train_*.log`.
+
+### Why CRIMS produced nothing at all
+
+Two config bugs, plus one reason you never saw them:
+
+- `processed_root` was `data/processed/crims` (lowercase); the lab directory is
+  `CRIMS`. Linux is case-sensitive → `FileNotFoundError`.
+- `input_channels` said **544**; the patches are **457** (verified across all 15
+  scenes). 457 is prime, so the spectral round-trip can never be exact
+  (`457 // 4 = 114 → 456 ≠ 457`). Now cropped to 456, exactly as M3 is cropped
+  85 → 84.
+- **The silence was its own bug.** `RunNotifier` was constructed *after* the
+  dataloaders and model were built, and the `try/except` that emits `[FAIL]`
+  opened later still. Anything throwing during setup sent zero Telegram output.
+  `RunNotifier` + `send_start()` now run **before** any disk access, and the
+  `try` covers dataloader and model construction, so setup failures report with
+  a traceback instead of vanishing.
+
+### 10.5 The v3 double launch
+
+The 2026-08-21 grid failed with 47 OOMs, on `vae-3d` and `vae-1d`. It was not a
+memory regression. Three independent pieces of evidence:
+
+1. **All 47 OOM messages name a second multi-GiB process** holding 6–18 GB.
+   Not one shows an OOM on an otherwise-idle card.
+2. **Every grid cell has 2–4 `[START]` messages** — two grids, each retrying
+   once.
+3. **Two log files, `retrain_2026-08-21_1021.log` and `..._1025.log`**, four
+   minutes apart.
+
+The same fact explains the "Telegram kept sending after the log said ALL DONE"
+report: the 10:25 run was still going. There were no ghost messages.
+
+It surfaced *then* because that commit raised batch size **4 → 32** (IIRS/M3)
+and **1 → 16** (AVIRIS). At batch 4 two grids coexisted; at 32 they need ~29 GB
+of a 23.4 GB card. **Single-run peaks were 14.4–14.6 GB against a 20 GB budget,
+so the fix is a lock, not smaller batches.**
+
+Fixed by:
+
+- `scripts/grid_lock.sh` — non-blocking `flock` on `logs/.grid.lock`, sourced by
+  `train_fixed.sh` and `train.sh --all`. A second launch exits 9 and prints the
+  holder's PID, start time and command. `ALLOW_CONCURRENT=1` escapes it.
+- `train/train.py:preflight_vram` — aborts if the card is already occupied,
+  catching what a file lock cannot see (another user, a stale kernel).
+- `RunNotifier` now stamps a **run id and the seed** into every message, so two
+  interleaved runs are visible rather than looking like a misbehaving bot.
+- `train.sh` **no longer retries an OOM**. Retrying re-burns the same VRAM and
+  turns one dead cell into four log entries — which is how 12 slots produced 47
+  messages. OOM is now a distinct status that dumps the co-resident process list.
+
+**Free replication.** The accident ran several cells twice at the *same seed*.
+The differences are the pipeline's nondeterminism floor:
+
+| cell | run 1 | run 2 | Δ |
+|---|---|---|---|
+| vae-our \| M3 \| physics | 0.0444 | 0.0439 | 0.0005 |
+| vae-standard \| M3 \| physics | 0.0382 | 0.0390 | 0.0008 |
+| vae-standard \| M3 \| standard | 0.0490 | 0.0499 | 0.0009 |
+| vae-standard \| IIRS \| physics | 0.2268 | 0.2232 | 0.0036 |
+
+**0.0005–0.0036 rad.** Quote it next to every effect size; a gap below it is not
+a result. It is also why the grid now has a seed axis.
+
+### Still open — not addressed here
+
+`sam = 1.5708` (**exactly π/2**, i.e. reconstruction orthogonal to input —
+decoder collapsed toward a constant) appears in three smoke runs:
+`vae-standard|IIRS|standard`, `vae-3d|IIRS|standard`, `vae-3d|AVIRIS|standard`.
+Only on `standard` runs — no SAM term to prevent it — with
+`mse ≈ 0.0030 ≈ mean(x²)`, which is consistent with collapse. Five epochs is too
+few to call it, but if it persists at 30 those baselines produce nothing usable
+however fast they run, and the ~4× batch-size increase interacts with it. Worth
+checking after the first full grid.
+
+---
+
+## 11. Experimental controls — rate and parameters
+
+The ablation controls **two independent resources**. Conflating them was the
+single biggest methodological hole in the earlier grid.
+
+| Resource | What it bounds | Knob | Tool |
+|---|---|---|---|
+| **Parameters** | how complex a mapping can be learned | `*_base_ch`, `vae_1d_hidden_dims` | `utils/check-model-params.py --solve` |
+| **Latent rate** | how much information can pass the bottleneck | `spectral_latent_dim`, `vae_*_latent_ch/dim` | `utils/match_latent_rate.py --exact` |
+
+**History, so the same mistake is not re-made.** Originally only parameters were
+matched and rate floated **512×** within a dataset:
+
+| dataset | input | vae-standard | vae-3d | vae-1d | vae-our |
+|---|---|---|---|---|---|
+| IIRS | 1,048,576 | 1,024 (1024:1) | 16,384 (64:1) | 131,072 (8:1) | 524,544 (**2:1**) |
+| M3 | 344,064 | 1,024 (336:1) | 5,632 (61:1) | 131,072 (3:1) | 524,544 (**1.52× the input**) |
+| AVIRIS | 1,736,704 | 1,024 (1696:1) | 27,136 (64:1) | 131,072 (13:1) | 524,544 (**3:1**) |
+| CRIMS | 1,867,776 | 1,024 (1824:1) | 29,184 (64:1) | 131,072 (14:1) | 524,544 (**4:1**) |
+
+For an autoencoder, reconstruction quality is bounded by rate almost by
+definition — a 2:1 bottleneck beats a 1024:1 one regardless of what is inside
+it. So rate was the *more* important of the two controls to have been missing.
+And on M3 the "latent" was 1.52× larger than the cube it encoded: an
+over-complete code that can copy the input outright, and unusable as an LDM
+backbone (Stable Diffusion's AutoencoderKL is 48:1).
+
+That was fixed by solving for a common 64:1 **ratio**, which got the worst case
+to 23.8 % — still too loose on M3, and for a structural reason: a ratio target is
+not generally reachable by models whose latents quantise differently. The current
+scheme solves for a common reachable **budget** instead, below.
+
+### The common budget T
+
+The knob is **which target to solve for**, not the models. Each model's latent
+quantises in steps of its own grain:
+
+| model | grain (elements per unit of its rate knob) |
+|---|---|
+| `vae-standard` | 64 (an 8×8 spatial grid) |
+| `vae-1d-pixelwise` | 4,096 (one channel per 64×64 pixel) |
+| `vae-3d-spatio-spectral` | `(C_pad/8)·64` — odd factors 11, 53, 57 |
+| `vae-our` | 4,096, offset by its `latent_dim`-sized global vector |
+
+Solving for a fixed **64:1 ratio** is what left M3's `vae-1d` 23.8 % short: a
+target of 5,376 is not a multiple of 4,096, so the model nearest it could only
+reach 4,096. Solving instead for **T = the nearest multiple of H·W = 4,096 to the
+64:1 point** inverts that — 4,096 is `vae-1d`'s grain *and* divisible by
+`vae-standard`'s 64, so both land on T exactly.
+
+| ds | **T** | ratio | `vae_standard_latent_ch` | `vae_3d_latent_ch` | `vae_1d_latent_dim` | `spectral_latent_dim` |
+|---|---|---|---|---|---|---|
+| IIRS | **16,384** | 64.0:1 | 256 → **exact** | 8 → **exact** | 4 → **exact** | 4 → +1.6 % |
+| M3 | **4,096** | 84.0:1 | 64 → **exact** | 6 → +3.1 % | 1 → **exact** | 1 → +6.2 % |
+| AVIRIS | **28,672** | 60.6:1 | 448 → **exact** | 8 → −5.4 % | 7 → **exact** | 7 → +0.9 % |
+| CRIMS | **28,672** | 65.1:1 | 448 → **exact** | 8 → +1.8 % | 7 → **exact** | 7 → +0.9 % |
+
+**Worst deviation 6.2 %, against 23.8 % before.** `vae_3d_latent_ch` stays at 8
+on three of four datasets, so that baseline keeps the property that it cannot be
+accused of being re-tuned for the comparison. `modules/vae_3d.py` is not touched
+at all; only the four YAMLs change.
+
+**Two routes to an exact 4-way match were considered and rejected.**
+
+*Pad `vae-3d`'s spectral depth to a power of two.* It works arithmetically — every
+grain becomes a power of two and the LCM collapses to 4,096 — but the match would
+be **fake**. `_to_volume` pads with `mode="replicate"`, so M3's 84 → 128 means 44
+replicated bands and **only 65.6 % of that model's latent depth would encode real
+data** (AVIRIS 82.8 %, CRIMS 89.1 %). It matches the nominal number while
+mismatching the effective rate the number is supposed to measure, and handicaps
+the 3D baseline for a reason unrelated to its hypothesis. At the current padding
+only M3 pads at all, by 4 bands (95.5 % real), so nominal ≈ effective everywhere.
+
+*Grow `vae-our`'s `latent_dim` to 4,096.* Its count is `latent_dim + k·4096` and
+T is a multiple of 4,096, so exactness forces exactly that. Measured:
+**vae-our 10.9 M → 105.3 M parameters** (the two `SpatialBranch` `Linear`s, sized
+against the 8192-wide flatten, go 6.3 M → 100.7 M), which under parameter
+matching forces `vae_3d_base_ch` 45 → 140 — **3.1× activation memory**, batch
+32 → ~8, a ~100 h grid. It would also leave the spatial stream compressing only
+8192 → 4096, no longer a bottleneck at all. Not worth closing a 1.6 % gap.
+
+Every cell records **nominal and padding-adjusted effective** latent elements, so
+the M3 `vae-3d` row is auditable rather than asserted.
+
+```bash
+python utils/match_latent_rate.py --exact           # solve + paste-ready YAML
+python utils/match_latent_rate.py --exact --check   # verify, non-zero on failure
+python utils/match_latent_rate.py --report          # what the config encodes to
+```
+
+`match_latent_rate.py` cross-checks its closed forms against the real models on
+every run, so drift between it and `modules/` is caught rather than shipped.
+
+**Parameter matching is no longer the primary capacity control.** It is brittle —
+it moves every time the latent moves — and it forces four architectures onto one
+number they have no reason to share. It is kept (all four within 1.9 %) because a
+rough match costs nothing, but the real control is post-hoc: see §12's D1–D4.
+
+---
+
+## 12. Falsification suite
+
+`inference/probes.py` — seven probes on **frozen** checkpoints, each answering a
+specific way the headline result could be fake. Thresholds live in
+`inference/preregistration.yaml`, are fixed **before** any run, and the module
+refuses to start without that file. Reasoning for every number:
+`docs/preregistration.md`.
+
+| Probe | Question | Fails when |
+|---|---|---|
+| **P1** trivial floors | better than predicting the mean? | below global/region/fold/patch mean or 1000 random draws |
+| **P2** latent rate | capacity or architecture? | rate outside ±25 % of 64:1 |
+| **P3** collapse | is the latent used? | <1 % active units, or latent-swap moves SAM <2 % |
+| **P4** spatial shuffle | uses spatial context? | SRI < 0.02 (i.e. pixelwise in disguise) |
+| **P5** band inpainting | has a spectral prior? | <10 % gain over mean-fill on masked bands |
+| **P6** purification | does it actually denoise? | NPR ≥ 0.9 (passes input noise through) |
+| **P7** linear probe | latent = chemistry or nuisance? | physics R² < 0.5 |
+
+Plus `inference/stats.py`: paired bootstrap CIs, paired permutation tests,
+Holm–Bonferroni within each dataset's model-pair family, and Cliff's delta.
+
+### Three things the suite corrects for
+
+1. **SAM has a non-zero floor.** A *perfect copy* scores 0.0223 on IIRS, not 0
+   (the epsilon in its norm). The identity oracle is the real ceiling, so the
+   suite reports *headroom captured*, not raw scores.
+2. **SAM has a π/2 contamination.** A pixel with spectral energy below that
+   epsilon contributes **exactly π/2 whatever the model predicted**. CRIMS has
+   ~24 % such pixels → a hard raw-SAM floor near 0.377 rad unrelated to model
+   quality. Use `sam_valid`, which excludes them.
+3. **Significance is not evidence.** At n = 3,084 a 0.05 dB gap gives p = 0.0005.
+   Every comparison carries a preregistered minimum effect (0.5 dB / 0.005 rad /
+   0.01 SSIM); anything below is labelled `significant_but_negligible` and is
+   **not** a win.
+
+### Probe self-test
+
+`vae-1d-pixelwise` is *exactly* permutation-equivariant, so in P4 its shuffled
+and intact scores must match to 1e-6. A larger deviation is reported as
+`PROBE_BUG` — the probe is wrong, not the model. Check this before believing any
+P4 result.
+
+### Post-hoc capacity controls (replacing parameter matching)
+
+Matching parameter counts is brittle and constrains four architectures to one
+number they have no reason to share. These are the primary defence instead, and
+none require the widths to match:
+
+| | control | what it answers |
+|---|---|---|
+| **D1** | capacity scaling curves — train a baseline at ~0.5×/1×/2× its params, fit `metric vs log2(params)`, compare vae-our against the fitted *curve* | *would this baseline beat vae-our if you simply gave it more capacity?* |
+| **D2** | covariate regression on `log2(achieved latent)` and `log2(params)`; report R² and vae-our's residual | is the win attributable to resources? |
+| **D3** | Pareto frontier of SAM against params and against latent elements | is the model better per unit resource? |
+| **D4** | params, latent count (nominal *and* padding-adjusted), GMACs and wall time per cell in `results/probes.csv` | lets any claim be read at matched *or* unmatched capacity |
+
+**D1 is cheap where it matters and expensive elsewhere.** `vae-standard|M3` runs
+in 4 minutes, so its three-point curve costs ~12 minutes and settles the one cell
+where a baseline genuinely beats vae-our. The full 3 baselines × 4 datasets
+version is *not* 12 minutes — `vae-1d|IIRS` is 2h08m and `vae-3d` has never
+produced a wall time at all. Run the M3 curve first; price the rest afterwards.
+
+### Running it
+
+```bash
+bash scripts/inference_smoke.sh               # FIRST — synthetic end-to-end check (~15 min CPU)
+bash scripts/inference.sh                      # recon + probes + downstream + verdict (~2–3 h GPU)
+bash scripts/inference.sh --select mse         # read the best-recon-MSE ckpts instead
+bash scripts/inference.sh --seeds 42,7,1234    # default: every seed found on disk
+bash scripts/inference.sh --probes-only        # just the suite
+bash scripts/inference.sh --datasets CRIMS
+bash scripts/inference.sh --max-patches 0      # whole split instead of 512
+```
+
+Outputs:
+
+```
+results/VERDICT.txt   <- read this one: why each model wins or loses, per dataset
+results/probes.csv       per-cell probe metrics + PASS/FAIL/INVALID
+results/stats.csv        pairwise deltas, CIs, p, Holm, effect sizes
+results/probes/*.json    raw per-cell output
+```
+
+A claimed win requires: cell `VALID` **and** rate matched **and** the pairwise
+difference significant after Holm **and** above the effect floor.
+
+---
+
+## 14. Metric comparability
+
+Three things were being compared across models that were not the same quantity.
+All three are **corrections**, not tuning: they stand regardless of which model
+wins afterwards.
+
+### 14.1 `vae-our` trained at half the baselines' physics weight
+
+`modules/vae_our.py` used to compute
+
+```
+total_mse = mse_final + 0.5*mse_spatial + 0.5*mse_spectral   # weights sum to 2
+total_kld = kld_spatial + kld_spectral                        # a sum, not a mean
+```
+
+while every baseline uses a single `mse` and a single `kld`. With the branches at
+similar error that makes `vae-our`'s reconstruction term **~2× the magnitude** of
+any baseline's — so at the shared `lambda_physics = 0.3` it effectively trained
+at **λ ≈ 0.15 against their 0.30**, on SAM, the metric the paper's claim is
+about. `beta` was penalised identically.
+
+Now a weighted **mean** (weights sum to 1):
+
+```python
+total_mse = 0.5*mse_final + 0.25*mse_spatial + 0.25*mse_spectral
+total_kld = 0.5*(kl(mu_s, logvar_s) + kl(mu_p, logvar_p))
+```
+
+Verified against the real M3 logs (the reconstruction of `val_loss` from its
+parts reproduces the logged 0.0300 exactly):
+
+| | SAM's share of val_loss |
+|---|---|
+| vae-our, old weighting | **43.9 %** |
+| vae-our, new weighting | **61.0 %** |
+| vae-standard \| physics | 59.8 % |
+
+Architecture, branches, fusion and reparameterisation are untouched. Only the
+weighting changed.
+
+### 14.2 Checkpoints were selected by a different objective in every cell
+
+`monitor = val_loss` picked the saved epoch, and `val_loss` has a different form
+per cell: `vae-our` carried the 3-branch MSE and double KL, `physics` cells carry
+a SAM term, `standard` cells do not.
+
+Selecting everything on SAM instead would break the other way — `standard` cells
+never train a SAM term, so their SAM is an incidental by-product of an MSE
+trajectory (they are the cells that collapse to `sam = π/2`).
+
+**Every cell now writes two checkpoints:**
+
+```
+model/<DS>/<name>_seed<N>_bestsam.pt    <- min val SAM
+model/<DS>/<name>_seed<N>_bestmse.pt    <- min val reconstruction MSE
+```
+
+Every SAM comparison reads `_bestsam` for **all** cells; every fidelity
+comparison reads `_bestmse` for **all** cells. Early stopping fires only when
+*neither* has improved for `patience` epochs. `inference/*` take `--select
+{sam,mse}` (default `sam`) and record which checkpoint each row came from.
+
+### 14.3 `mse` was never the same number across models
+
+`loss_terms()` now returns, for every model:
+
+| key | meaning |
+|---|---|
+| `mse` | that model's own training term — **not** cross-model comparable |
+| `mse_final` | MSE of the final/fused reconstruction — **the** comparable one |
+| `recon` | the reconstruction, so PSNR/SSIM cost no second forward pass |
+
+`recon` must **not** be unsqueezed by the DataParallel adapter (it is already
+batched along dim 0); only 0-dim entries are.
+
+### 14.4 SSIM meant two different things
+
+`inference/inference.py` used a *global* single-scale SSIM (one mean/variance per
+sample over the whole flattened cube); the notebooks used an 11×11 Gaussian
+*windowed* per-band SSIM. The numbers were never comparable. `modules/metrics.py`
+is now the single implementation (windowed, verified bit-identical to the
+notebook version), imported by `train.py`, `inference/*` and the notebooks.
+**SSIM values reported before this change cannot be compared with values after.**
+
+---
+
+## 15. Phase 2 (Future)
+
+The VAE encoder (`SpatialEncoderDecoder`, `SpectralEncoderDecoder`) will serve as
+the backbone for a Latent Diffusion Model (LDM) that performs diffusion-based
+purification of the compressed latent representations from satellite imagery.
+The `standalone forward` methods on both encoder-decoder classes expose the
+full `(z, mu, logvar, reconstruction)` return for easy LDM integration.

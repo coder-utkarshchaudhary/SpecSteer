@@ -1,0 +1,410 @@
+[START] vae-our | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-our | IIRS | physics
+epochs 5/5  ·  wall 1h14m07s  ·  peak GPU 9.3 GB
+best @ epoch 5: 0.014254 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0143     0.0143     0.0015     0.0017    0.0378     0.0371 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-our.pt
+
+[START] vae-standard | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-standard | IIRS | standard
+epochs 5/5  ·  wall 40m32s  ·  peak GPU 0.6 GB
+best @ epoch 4: 0.003161 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708  
+ckpt: model/IIRS/vae-standard_standard.pt
+
+[START] vae-3d-spatio-spectral | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-3d-spatio-spectral | IIRS | standard
+epochs 5/5  ·  wall 2h31m13s  ·  peak GPU 5.8 GB
+best @ epoch 2: 0.003161 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0030     0.0032     0.0030     0.0032    1.5708     1.5708  
+ckpt: model/IIRS/vae-3d-spatio-spectral_standard.pt
+
+[START] vae-3d-spatio-spectral | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-3d-spatio-spectral | IIRS | physics
+epochs 5/5  ·  wall 2h31m05s  ·  peak GPU 5.8 GB
+best @ epoch 5: 0.049856 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0477     0.0499     0.0001     0.0001    0.1555     0.1624 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-3d-spatio-spectral_physics.pt
+
+[START] vae-1d-pixelwise | IIRS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-1d-pixelwise | IIRS | standard
+epochs 5/5  ·  wall 39m34s  ·  peak GPU 3.1 GB
+best @ epoch 5: 0.000221 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0002     0.0002     0.0001     0.0001    0.2127     0.2202 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-1d-pixelwise_standard.pt
+
+[START] vae-1d-pixelwise | IIRS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-1d-pixelwise | IIRS | physics
+epochs 5/5  ·  wall 39m35s  ·  peak GPU 3.1 GB
+best @ epoch 5: 0.030981 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0300     0.0310     0.0003     0.0004    0.0964     0.0991 *
+(*) new best val checkpoint
+ckpt: model/IIRS/vae-1d-pixelwise_physics.pt
+
+[START] vae-3d-spatio-spectral | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-3d-spatio-spectral | M3 | standard
+epochs 5/5  ·  wall 38m29s  ·  peak GPU 1.1 GB
+best @ epoch 5: 0.010718 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.9006     0.0107     0.6113     0.0074    0.0897     0.0634 *
+(*) new best val checkpoint
+ckpt: model/M3/vae-3d-spatio-spectral_standard.pt
+
+[START] vae-3d-spatio-spectral | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-3d-spatio-spectral | M3 | physics
+epochs 5/5  ·  wall 38m32s  ·  peak GPU 1.1 GB
+best @ epoch 5: 0.018112 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.6786     0.0181     0.6112     0.0073    0.0419     0.0336 *
+(*) new best val checkpoint
+ckpt: model/M3/vae-3d-spatio-spectral_physics.pt
+
+[START] vae-1d-pixelwise | M3 | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-1d-pixelwise | M3 | standard
+epochs 5/5  ·  wall 17m57s  ·  peak GPU 2.1 GB
+best @ epoch 5: 0.007438 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.6113     0.0074     0.6112     0.0073    0.0683     0.0482 *
+(*) new best val checkpoint
+ckpt: model/M3/vae-1d-pixelwise_standard.pt
+
+[START] vae-1d-pixelwise | M3 | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 4
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-1d-pixelwise | M3 | physics
+epochs 5/5  ·  wall 17m58s  ·  peak GPU 2.1 GB
+best @ epoch 5: 0.017308 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.6230     0.0173     0.6113     0.0073    0.0378     0.0320 *
+(*) new best val checkpoint
+ckpt: model/M3/vae-1d-pixelwise_physics.pt
+
+[START] vae-our | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 1
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-our | AVIRIS | physics
+epochs 5/5  ·  wall 3h14m58s  ·  peak GPU 12.4 GB
+best @ epoch 5: 0.027120 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0270     0.0271     0.0177     0.0174    0.0296     0.0310 *
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-our.pt
+
+[START] vae-standard | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 1
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-standard | AVIRIS | standard
+epochs 5/5  ·  wall 45m42s  ·  peak GPU 1.0 GB
+best @ epoch 2: 0.033999 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0346     0.0341     0.0346     0.0341    0.0903     0.0954  
+ckpt: model/AVIRIS/vae-standard_standard.pt
+
+[START] vae-3d-spatio-spectral | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 1
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-3d-spatio-spectral | AVIRIS | standard
+epochs 5/5  ·  wall 4h58m14s  ·  peak GPU 13.1 GB
+best @ epoch 3: 0.275527 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.2667     0.2755     0.2667     0.2755    1.5705     1.5708  
+ckpt: model/AVIRIS/vae-3d-spatio-spectral_standard.pt
+
+[START] vae-3d-spatio-spectral | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 1
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-3d-spatio-spectral | AVIRIS | physics
+epochs 5/5  ·  wall 4h51m37s  ·  peak GPU 13.1 GB
+best @ epoch 5: 0.011565 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0118     0.0116     0.0005     0.0005    0.0357     0.0351 *
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-3d-spatio-spectral_physics.pt
+
+[START] vae-1d-pixelwise | AVIRIS | standard
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 1
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-1d-pixelwise | AVIRIS | standard
+epochs 5/5  ·  wall 45m36s  ·  peak GPU 1.6 GB
+best @ epoch 5: 0.001299 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0019     0.0013     0.0015     0.0009    0.0640     0.0556 *
+(*) new best val checkpoint
+ckpt: model/AVIRIS/vae-1d-pixelwise_standard.pt
+
+[START] vae-1d-pixelwise | AVIRIS | physics
+host: yashdeep-Dell-Pro-Max-Tower-T2-FCT2250
+planned: 5 epochs
+   allow_multi_gpu: False
+         amp_dtype: bfloat16
+        batch_size: 1
+              beta: 0.001
+           compile: False
+            epochs: 5
+               gpu: NVIDIA RTX PRO 4000 Blackwell
+    lambda_physics: 0.3
+                lr: 0.001
+       num_workers: 4
+          patience: 7
+              seed: 42
+      weight_decay: 1e-05
+
+[OK] vae-1d-pixelwise | AVIRIS | physics
+epochs 5/5  ·  wall 45m31s  ·  peak GPU 1.6 GB
+best @ epoch 1: 0.062537 (checkpoint saved)
+  ep    tr_loss   val_loss     tr_mse    val_mse    tr_sam   val_sam
+--------------------------------------------------------------------
+   5     0.0615     0.0626     0.0347     0.0341    0.0895     0.0950  
+ckpt: model/AVIRIS/vae-1d-pixelwise_physics.pt

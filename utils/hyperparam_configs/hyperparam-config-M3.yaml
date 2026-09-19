@@ -1,0 +1,109 @@
+# M3 (84 bands) — BACK in the grid as of the 2026-09-14 clean-slate protocol
+# (scripts/run_clean_grid.sh). `utils/match_latent_rate.py --exact --check`
+# passes with M3 included (worst deviation 6.2%, vae-our) — no latent-knob
+# change was needed to re-add it.
+#
+# Controls (protocol 2026-09-04 — see docs/new_plan.md):
+#   * LATENT RATE  — the information bottleneck, matched across models
+#                    (the hard fairness control; see the latent section below)
+#   * PARAMETERS   — NOT matched. Baselines run at citable reference widths;
+#                    the size objection is answered by a params column +
+#                    capacity points (check-model-params.py --solve-capacity).
+# Regenerate / audit:
+#   python utils/match_latent_rate.py --exact --check
+#   python utils/check-model-params.py            (params table, informational)
+#   python utils/find_max_batch.py --budget-gb 24 --fit
+
+# --- Optimization ---
+# 60, patience 3 is the 2026-09-14 clean-slate grid value (scripts/run_clean_grid.sh),
+# fixed by hand across all four datasets to end the earlier per-dataset drift
+# (IIRS/AVIRIS 30, CRIMS 50/60/80 all appeared at different points). CLI
+# --epochs/--patience still override this when passed explicitly.
+epochs: 60
+lr: 1.0e-3
+
+# Batch size is held constant across all 4 models x 2 loss regimes WITHIN this
+# dataset — that is the axis the ablation compares on, so nothing about a row's
+# result can be attributed to it. It is NOT held constant across datasets:
+# there is no controlled comparison between sensors to protect (they differ in
+# band count, scene count, spatial sampling and SNR), and this file already
+# varies vae_3d_base_ch and friends per dataset for parameter matching. Forcing
+# one global value would just idle the GPU on the lighter sensors.
+#
+# It DOES have to hold across platforms for this dataset, or within-dataset
+# fairness breaks the moment one slot runs on Kaggle and another on the lab.
+# Derived against the tightest budget any slot here will see — the lab's 24 GB:
+#
+#   binding model : vae-1d-pixelwise
+#   memory        : ~0.483 GB/sample marginal, ~0.18 GB fixed
+#   at B=32       : ~15.6 GB of the 20.4 GB usable (24 GB less 15% headroom)
+#   HPC 40 GB     : headroom
+#   Kaggle 2xT4   : nn.DataParallel puts 16 per 15 GB device — clears
+#
+# Rounded DOWN to a power of two, which keeps the DataParallel split even and
+# leaves margin for fragmentation. Re-derive natively on the target GPU with:
+#     PYTHONPATH=. python utils/find_max_batch.py --budget-gb 24 --time
+# or, from a smaller card, add --fit to extrapolate from B=1,2,4.
+# RE-DERIVED after the latent-rate change; the value did not move.
+batch_size: 32
+num_workers: 8
+
+beta: 1.0e-3
+lambda_physics: 0.3
+seed: 42
+weight_decay: 1.0e-5
+# 2026-09-16: raised 3 -> 10, M3-ONLY (IIRS/AVIRIS/CRIMS stay at 3). Evidence
+# from the 2026-09-15 clean-slate grid (ChatExport_2026-09-16): vae-our|M3
+# seed67 stopped at epoch 9 (val SAM 0.1141, 4th of 5 physics cells) while the
+# same model|dataset at seed69 ran the full 60 epochs without ever plateauing
+# for 3 straight and produced the BEST SAM_valid in the entire 64-cell grid
+# (0.0945) -- with correspondingly healthier probes.py diagnostics too
+# (latent_swap_delta 0.549 vs 0.242, sri 0.188 vs 0.061). M3's epochs-trained
+# distribution grid-wide was the most compressed of the three datasets with
+# usable probe data (only 1/16 cells reached 60, vs 5/16 on IIRS, 2/16 on
+# CRIMS) -- patience=3 was very likely firing before convergence here
+# specifically, plausibly because M3 also carries the tightest latent budget
+# of the four datasets (84.0:1, see below) so validation metrics plateau
+# noisily. 10 is a judgment call, not something this data pins exactly:
+# CRIMS previously ran at patience=12 for being the smallest split (2,561
+# patches); M3 trains on more (capped at 7,000) so needs less slack than
+# CRIMS did, but the seed67-vs-69 gap says 3 is clearly too tight.
+early_stopping_patience: 10
+
+# --- Latent budget: every model on the common target T = 4,096 (84.0:1) ---
+#
+# NOTE: M3 was dropped from the 2026-08 grid and is not in the ICLR paper's
+# experiment set. This file is kept coherent with the 2026-09-04 protocol so
+# the audit scripts still pass on all four datasets, nothing more.
+#
+# The latent RATE is the ablation's hard fairness control: every model encodes
+# to the same scalar budget T (the nearest multiple of H*W = 4,096 to the 64:1
+# point). Latent SHAPE is deliberately not equalised.
+#
+# vae-our (post-Iteration-1) splits T between an 8x8 spatial grid and the
+# per-pixel spectral map: 64*d_s + 4,096*d_p. M3's T = 4,096 is consumed by
+# d_p = 1 alone, so the spatial grid takes the smallest sensible width and
+# vae-our sits +6.2% above T here (within the +/-10% tolerance) — the same
+# deviation the old global vector produced.
+#
+# Regenerate with:  python utils/match_latent_rate.py --exact
+# Verify with:      python utils/match_latent_rate.py --exact --check
+spectral_latent_dim: 1           # vae-our d_p:   4,096 of T per-pixel spectral
+vae_our_spatial_latent_ch: 4     # vae-our d_s: +   256 spatial grid = 4,352 (+6.2%)
+vae_standard_latent_ch: 64      # vae-std  :   4,096 elements (EXACT)
+vae_3d_latent_ch: 6            # vae-3d   :   4,224 elements (+3.1%)  # 4,032 effective: M3 is the only dataset whose depth pads (84 -> 88)
+vae_1d_latent_dim: 1            # vae-1d   :   4,096 elements (EXACT)
+# worst deviation from T: 6.2% (tolerance +/-10%)
+
+# --- Capacity: REFERENCE WIDTHS, not parameter matching (protocol 2026-09-04) --
+#
+# Same reference configs as the other datasets (see hyperparam-config-IIRS.yaml
+# for the citations): AutoencoderKL base 128 (Rombach et al. 2022), 3D-CAE
+# base 24 (Mei et al. 2019, representative), FC spectral AE [512, 256, 128]
+# (Palsson et al. 2018 / Liu et al. 2022). Capacity is reported, not matched.
+vae_standard_base_ch: 128               # Rombach et al. 2022 (AutoencoderKL)
+vae_3d_base_ch: 24                      # Mei et al. 2019 (3D-CAE, representative)
+vae_1d_hidden_dims: [512, 256, 128]     # Palsson 2018 / Liu 2022 (FC spectral AE)
+
+# vae-our capacity: natural width of the Iteration-1 spatial stream.
+reduced_dims: 64

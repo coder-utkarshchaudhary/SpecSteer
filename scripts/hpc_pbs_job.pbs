@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+#PBS -N specsteer
+#PBS -o logs/pbs.out
+#PBS -e logs/pbs.err
+#PBS -j oe
+#PBS -m n
+#
+# scripts/hpc_pbs_job.pbs
+# -----------------------
+# PBS Pro array job for the 28-run ablation grid. One array element per grid
+# slot. Slot -> (model, dataset, loss) resolved via scripts/grid_manifest.sh.
+#
+# NOTE: -q, -l select=, -l walltime=, and -J are injected by scripts/hpc_launch.sh
+# so the same .pbs file works for the full 28-run grid and a smoke-test 1-1
+# submission. Do NOT hard-code them here.
+#
+# Requires the following env from qsub -v:
+#   HPC_PROJECT_DIR         absolute path to the project ON THE COMPUTE NODE
+#                           (kept for back-compat; same as HPC_COMPUTE_REPO_ROOT)
+#   HPC_COMPUTE_REPO_ROOT   same path, preferred name
+#   HPC_LOGIN_REPO_ROOT     absolute path to the project on the LOGIN node —
+#                           where this job's results get pushed back to
+#   HPC_USER / HPC_HOST     login node ssh target (for the results push)
+#   PUSH_RESULTS_FROM_JOB   "1" to push results at slot end; default "0"
+#   EPOCHS                  number of epochs to train (100 for full grid)
+#
+# Per-array-element files:
+#   logs/pbs_${PBS_ARRAY_ID}_${PBS_ARRAY_INDEX}.out      combined stdout+err
+#   logs/train_<model>_<loss>_<dataset>_<ts>.log         RunLogger file
+#   model/<DATASET>/<name>.pt (or model_smoke/... in smoke mode)  best-val checkpoint
+
+set -uo pipefail
+
+# ---- resolve env ---------------------------------------------------------
+: "${HPC_PROJECT_DIR:?HPC_PROJECT_DIR must be passed via qsub -v}"
+: "${HPC_COMPUTE_REPO_ROOT:=${HPC_PROJECT_DIR}}"
+: "${EPOCHS:=100}"
+: "${SMOKE_MODE:=0}"     # 1 -> writes to model_smoke/, uses SMOKE_EPOCHS
+: "${SMOKE_EPOCHS:=5}"
+: "${OVERWRITE:=0}"      # 1 -> retrain even when a checkpoint already exists
+
+cd "${HPC_COMPUTE_REPO_ROOT}"
+
+ARRAY_IDX="${PBS_ARRAY_INDEX:-1}"
+JOB_ID="${PBS_JOBID:-standalone}"
+HOST="$(hostname)"
+TS="$(date +%Y%m%d-%H%M%S)"
+
+PBS_LOG="logs/pbs_${JOB_ID//./_}_${ARRAY_IDX}.out"
+mkdir -p logs checkpoints wandb model
+exec > "${PBS_LOG}" 2>&1
+
+echo "=========================================="
+echo " PBS array job"
+echo "  job_id     : ${JOB_ID}"
+echo "  array_idx  : ${ARRAY_IDX}"
+echo "  host       : ${HOST}"
+echo "  cwd        : $(pwd)"
+echo "  ts         : ${TS}"
+echo "=========================================="
+
+# ---- resolve slot -> (model, dataset, loss, ckpt_name, seed) --------------
+# grid_lookup gained a trailing <seed> field when the seed axis landed, and
+# GRID_TOTAL went 28 -> 60. Set HPC_ARRAY_RANGE / FULL_ARRAY_RANGE accordingly.
+# shellcheck source=/dev/null
+source scripts/grid_manifest.sh
+CFG="$(grid_lookup "${ARRAY_IDX}")"
+MODEL="${CFG%%|*}"; REST="${CFG#*|}"
+DATASET="${REST%%|*}"; REST="${REST#*|}"
+LOSS="${REST%%|*}"; REST="${REST#*|}"
+CKPT_NAME="${REST%%|*}"
+SEED="${REST#*|}"
+
+# In smoke mode we (a) point the checkpoint at a scratch dir so it does not
+# collide with a real run, and (b) reduce epochs so the smoke completes fast.
+if [[ "${SMOKE_MODE}" == "1" ]]; then
+    CKPT_ROOT="model_smoke"
+    RUN_EPOCHS="${SMOKE_EPOCHS}"
+    RUN_TAG="SMOKE"
+else
+    CKPT_ROOT="model"
+    RUN_EPOCHS="${EPOCHS}"
+    RUN_TAG="FULL"
+fi
+# Two checkpoints per cell (best-SAM and best-recon-MSE), seed in the filename.
+CKPT_PATH="${CKPT_ROOT}/${DATASET}/${CKPT_NAME}_seed${SEED}_bestsam.pt"
+CKPT_PATH_MSE="${CKPT_ROOT}/${DATASET}/${CKPT_NAME}_seed${SEED}_bestmse.pt"
+
+echo "  mode       : ${RUN_TAG}"
+echo "  model      : ${MODEL}"
+echo "  dataset    : ${DATASET}"
+echo "  loss       : ${LOSS}"
+echo "  ckpt_name  : ${CKPT_NAME}"
+echo "  seed       : ${SEED}"
+echo "  ckpt_path  : ${CKPT_PATH}"
+echo "  ckpt_mse   : ${CKPT_PATH_MSE}"
+echo "  epochs     : ${RUN_EPOCHS}"
+echo "  overwrite  : ${OVERWRITE}"
+
+# ---- skip if a ckpt is already present -----------------------------------
+# Pass OVERWRITE=1 through `qsub -v` to force a retrain. Without it a leftover
+# checkpoint from an earlier partial grid silently consumes the slot — the skip
+# is only visible in this PBS log, never in the Telegram stream.
+if [[ -s "${CKPT_PATH}" && "${OVERWRITE}" == "1" ]]; then
+    echo ">>> [overwrite] ${CKPT_PATH} exists; retraining (OVERWRITE=1)."
+fi
+if [[ -s "${CKPT_PATH}" && -s "${CKPT_PATH_MSE}" && "${OVERWRITE}" != "1" ]]; then
+    echo ">>> [skip] both checkpoints for this cell exist; nothing to do."
+    echo ">>>        re-submit with -v OVERWRITE=1 to retrain this slot."
+    # Still worth a push attempt: this slot's ckpt could exist locally on the
+    # compute node from an earlier partial run that never made it back to the
+    # login node (e.g. a prior push/collector failure). Cheap and idempotent.
+    export HPC_COMPUTE_REPO_ROOT
+    bash scripts/hpc_push_results.sh "${ARRAY_IDX}" "0" "${CKPT_ROOT}" "${DATASET}" "${CKPT_NAME}" || true
+    exit 0
+fi
+
+# ---- resolve env (never `source .venv/bin/activate` — see hpc_bootstrap.sh
+# header for why: a rsynced venv's activate script has a dead VIRTUAL_ENV
+# path baked in and silently no-ops, leaving `python` pointing at the wrong
+# interpreter. .venv/bin/python IS relocatable — always invoke it by
+# absolute path instead.) --------------------------------------------------
+VENV_PY="$(pwd)/.venv/bin/python"
+if [[ ! -x "${VENV_PY}" ]]; then
+    echo "!!! ${VENV_PY} missing/not executable. Run scripts/hpc_bootstrap.sh first."
+    exit 4
+fi
+
+# Load .env produced by bootstrap (for WANDB_MODE etc.). Never fail on missing.
+if [[ -f .env ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source .env
+    set +a
+fi
+
+export PYTHONPATH="${PBS_O_WORKDIR:-$(pwd)}:${PYTHONPATH:-}"
+export WANDB_MODE="${WANDB_MODE:-offline}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export PATH="$(pwd)/.venv/bin:${PATH}"   # convenience only — never depended on
+
+echo ">>> python: ${VENV_PY}"
+"${VENV_PY}" -c "import torch; print(f'torch {torch.__version__}  cuda={torch.cuda.is_available()}  ndev={torch.cuda.device_count()}')"
+
+# ---- launch training -----------------------------------------------------
+# --compile is OFF by default: torch.compile occasionally trips on model
+# variants that haven't been verified on this specific HPC's CUDA/PyTorch
+# combination. Once one full run has completed cleanly, opt-in via:
+#   qsub -v HPC_PROJECT_DIR=...,EPOCHS=100,EXTRA_TRAIN_ARGS='--compile' ...
+NUM_WORKERS="${PBS_NCPUS_PER_JOB:-8}"
+
+# Split EXTRA_TRAIN_ARGS on whitespace when qsub passes it in.
+IFS=' ' read -r -a EXTRA_TRAIN_ARR <<< "${EXTRA_TRAIN_ARGS:-}"
+
+set +e
+"${VENV_PY}" train/train.py \
+    --model "${MODEL}" \
+    --dataset "${DATASET}" \
+    --loss "${LOSS}" \
+    --seed "${SEED}" \
+    --epochs "${RUN_EPOCHS}" \
+    --num-workers "${NUM_WORKERS}" \
+    --ckpt-dir "${CKPT_ROOT}" \
+    --wandb-project "${WANDB_PROJECT:-hsi-pi-vae}" \
+    ${WANDB_ENTITY:+--wandb-entity "${WANDB_ENTITY}"} \
+    "${EXTRA_TRAIN_ARR[@]}"
+rc=$?
+set -e
+
+echo ""
+echo "=========================================="
+if [[ ${rc} -eq 0 ]]; then
+    echo " PBS array element ${ARRAY_IDX} — OK  (rc=0)"
+else
+    echo " PBS array element ${ARRAY_IDX} — FAIL (rc=${rc})"
+fi
+echo "=========================================="
+
+# ---- push results back to the login node (best-effort, never masks rc) ---
+export HPC_COMPUTE_REPO_ROOT
+bash scripts/hpc_push_results.sh "${ARRAY_IDX}" "${rc}" "${CKPT_ROOT}" "${DATASET}" "${CKPT_NAME}" || true
+
+exit ${rc}
