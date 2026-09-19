@@ -1,0 +1,322 @@
+\documentclass{article}
+\usepackage{../guidelines/iclr2027_conference,times}
+
+\input{../guidelines/math_commands.tex}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{graphicx}
+
+\title{PRISM: A Dual-Stream Physics-Informed Variational Autoencoder for Spectrally Faithful Hyperspectral Reconstruction}
+
+% Keep this anonymous for ICLR submission. Do not enable \iclrfinalcopy.
+\author{Anonymous authors \\ Paper under double-blind review}
+
+\newcommand{\prism}{\textsc{Prism}}
+\newcommand{\sam}{\mathrm{SAM}}
+\newcommand{\tbd}{\textsc{TBD}}
+\newcommand{\metricpending}{\multicolumn{1}{c}{\tbd}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Hyperspectral images (HSIs) record a reflectance spectrum at every spatial location, making reconstruction errors consequential when they alter absorption signatures used for scientific inference. Standard variational autoencoders (VAEs) either process HSI as a high-channel image, which risks mixing material signatures across neighboring pixels, or process each spectrum independently, which discards spatial context. We introduce \prism{} (Physics-Informed Representation for Isolated Spectral-Spatial Modeling), a dual-stream VAE that assigns spatial context and per-pixel spectral structure to separate latent paths. Its spatial branch uses a nonlinear local spectral projection and an $8\times8$ spatial latent grid; its spectral branch encodes each pixel spectrum independently. A spatially adaptive gate late-fuses the two decoded cubes, and a spectral-angle loss constrains the fused reconstruction. We evaluate against 2D, pixelwise-1D, and 3D spatio-spectral VAEs on lunar, Martian, and airborne HSI. The evaluation measures spectral agreement alongside PSNR and SSIM, and probes latent-noise stability and interpolation smoothness. Final \prism{} measurements are pending a rerun; this manuscript therefore reports the complete protocol and finalized baseline reference results without making unverified comparative claims.
+\end{abstract}
+
+\section{Introduction}
+
+Hyperspectral imaging (HSI) measures a dense sequence of spectral bands at each image location. Those spectra encode material-dependent absorption features that support mineral mapping, planetary science, environmental monitoring, and precision agriculture. Instruments such as Chandrayaan-2 IIRS, CRISM, and AVIRIS illustrate the breadth of this setting: they observe different surfaces, spectral ranges, and noise regimes, yet all require representations that preserve both spatial organization and spectral shape \citep{chowdhury2020iirs,murchie2007crism,green1998aviris}.
+
+Representation learning is attractive for HSI compression, restoration, and as a first-stage encoder for latent generative models. In particular, VAEs provide a continuous, regularized latent space that can support interpolation and later latent diffusion \citep{kingma2014vae,rombach2022ldm}. However, reconstruction error alone is insufficient in scientific imaging. A spatially plausible reconstruction can still distort the relative depths and positions of absorption features, changing the apparent material signature. Conversely, a pixelwise spectral model can preserve a spectrum while failing to use neighborhood structure that is needed for robust reconstruction.
+
+We address this conflict with \prism{}, a physics-informed dual-stream VAE. It explicitly separates a spatial path, which learns local context and an addressable spatial latent grid, from a spectral path, which sees one spectrum at a time. The decoded streams are fused only at the output through a per-pixel, per-band gate. A differentiable Spectral Angle Mapper (SAM) loss further penalizes changes in spectral direction, an illumination-insensitive proxy for spectral identity \citep{kruse1993sips}.
+
+The paper tests the following question: can explicit spatial--spectral separation improve spectral agreement while retaining comparable spatial reconstruction fidelity? We compare \prism{} with representative 2D, 1D, and 3D VAE families under a common latent-rate-controlled protocol. We do \emph{not} train a latent diffusion model; the latent experiments are diagnostic evidence about properties relevant to a future diffusion backbone.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+    \item We introduce \prism{}, a dual-stream VAE with nonlinear spatial projection, spatial-grid and per-pixel spectral latents, adaptive gated late fusion, and a SAM-informed reconstruction objective.
+    \item We formulate a controlled HSI VAE comparison that separates spectral agreement from spatial reconstruction quality, controls latent rate, and evaluates across IIRS, AVIRIS, and CRISM.
+    \item We provide a diagnostic evaluation of latent noise sensitivity and spectral interpolation, alongside reconstruction metrics and a planned masked-pixel recovery test.
+\end{enumerate}
+
+\section{Related Work}
+
+\paragraph{HSI representation learning and unmixing.}
+Deep networks for HSI have long traded spatial context against spectral specificity. Three-dimensional convolutions jointly process spectral and spatial neighborhoods \citep{chen2016deep,roy2020hybridsn}, while autoencoder approaches to unmixing often encode spectra per pixel \citep{palsson2018unmixing,su2019daen}. These methods motivate our baseline families, but neither extreme directly addresses the representation conflict between spatial restoration and preserving an individual pixel's spectral signature.
+
+\paragraph{VAEs and generative latents.}
+VAEs learn a probabilistic representation by balancing reconstruction with divergence to a prior \citep{kingma2014vae}; $\beta$-VAE variants make that rate--distortion trade-off explicit \citep{higgins2017betavae}. Latent diffusion models demonstrate why the geometry of an autoencoder latent matters for downstream generation \citep{rombach2022ldm}. Our work studies the VAE stage only: its objective is to produce a spectrally faithful and spatially useful representation, not to claim an end-to-end diffusion restoration result.
+
+\paragraph{Physics-guided spectral fidelity.}
+Physics-informed learning incorporates domain constraints into an optimization objective \citep{raissi2019pinn}. In HSI, SAM is a standard spectral-similarity measure because it compares spectral direction rather than absolute magnitude \citep{kruse1993sips}; HSI restoration methods likewise emphasize specialized spectral--spatial processing \citep{chang2019hsidenet,fu2024sst}. \prism{} uses SAM as a lightweight, differentiable material-fidelity constraint while retaining separate paths for spatial and spectral evidence.
+
+\section{Method}
+
+\subsection{Problem formulation}
+
+Let $\mathbf{x}\in[0,1]^{H\times W\times C}$ be a normalized HSI patch with $C$ bands. A VAE produces a reconstruction $\hat{\mathbf{x}}$ through a latent posterior $q_\phi(\mathbf{z}\mid\mathbf{x})$ and decoder $p_\theta(\mathbf{x}\mid\mathbf{z})$. The design goal is not merely a low pixelwise error: it is a reconstruction that preserves spectral shape at each pixel without abandoning the spatial neighborhood information needed for reconstructing textures and structures.
+
+\subsection{PRISM architecture}
+
+\prism{} has two independent VAE streams. The \emph{spatial stream} first maps the input cube from $C$ bands to a spatial feature map using a nonlinear $3\times3$ 2D projection. A three-stage stride-2 convolutional pyramid then yields a spatially addressable latent grid $\mathbf{z}_s\in\mathbb{R}^{d_s\times8\times8}$. Its decoder mirrors the pyramid and returns a full-cube reconstruction $\hat{\mathbf{x}}_s$.
+
+The \emph{spectral stream} folds all $H\times W$ pixels into the batch dimension and applies shared one-dimensional convolutions along the spectral axis. It emits a per-pixel latent map $\mathbf{z}_p\in\mathbb{R}^{d_p\times H\times W}$ and independently decodes it to $\hat{\mathbf{x}}_p$. This stream has no spatial receptive field and is therefore structurally unable to mix spectra from different pixels.
+
+Both streams output means and log-variances and use the usual reparameterization,
+\begin{equation}
+\mathbf{z}=\boldsymbol{\mu}+\exp\left(\tfrac{1}{2}\log\boldsymbol{\sigma}^{2}\right)\odot\boldsymbol{\epsilon},
+\qquad \boldsymbol{\epsilon}\sim\mathcal{N}(\mathbf{0},\mathbf{I}).
+\end{equation}
+Log-variances are clamped to $[-30,20]$ before exponentiation for numerical stability. The streams re-couple only after decoding. A two-layer $3\times3$ convolutional gate predicts $\boldsymbol{\alpha}\in[0,1]^{H\times W\times C}$ from the concatenated reconstructions and returns the convex blend
+\begin{equation}
+\hat{\mathbf{x}}=\boldsymbol{\alpha}\odot\hat{\mathbf{x}}_s+
+(\mathbf{1}-\boldsymbol{\alpha})\odot\hat{\mathbf{x}}_p.
+\label{eq:fusion}
+\end{equation}
+The gate can therefore prefer spatial evidence or spectral evidence differently at each location and band.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox[c][1.25in][c]{0.92\linewidth}{\centering\textbf{Placeholder for Figure 1.}\\Level-1 PRISM architecture diagram: spatial stream, spectral stream, adaptive gate, and fused reconstruction.}}
+\caption{PRISM architecture. Final vector artwork will replace this placeholder.}
+\label{fig:architecture}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox[c][1.15in][c]{0.92\linewidth}{\centering\textbf{Placeholder for Figure 2.}\\Level-2 tensor-flow diagram showing $(H,W,C)$ input, spatial-grid latent, per-pixel spectral latent, and output tensors.}}
+\caption{Tensor flow in PRISM. Final vector artwork will replace this placeholder.}
+\label{fig:tensorflow}
+\end{figure}
+
+\subsection{Objective and physics-informed fusion}
+
+Each branch receives an auxiliary reconstruction loss so that it remains useful to the fused solution. With $w=0.1$, the normalized reconstruction loss is
+\begin{equation}
+\mathcal{L}_{\mathrm{rec}}=
+\frac{0.5\,\mathrm{MSE}(\hat{\mathbf{x}},\mathbf{x})+
+w\,\mathrm{MSE}(\hat{\mathbf{x}}_s,\mathbf{x})+
+w\,\mathrm{MSE}(\hat{\mathbf{x}}_p,\mathbf{x})}{0.5+2w}.
+\end{equation}
+The KL term is the mean of the two stream-wise KL divergences. We apply SAM to the fused output,
+\begin{equation}
+\mathcal{L}_{\sam}=\frac{1}{HW}\sum_{i,j}
+\arccos\left(
+\frac{\langle\mathbf{x}_{ij},\hat{\mathbf{x}}_{ij}\rangle}
+{\lVert\mathbf{x}_{ij}\rVert_2\lVert\hat{\mathbf{x}}_{ij}\rVert_2}
+\right),
+\end{equation}
+where the implementation uses numerical safeguards for near-zero spectra. The final training objective is
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{\mathrm{rec}}+\beta\mathcal{L}_{\mathrm{KL}}+
+\lambda_{\mathrm{phys}}\mathcal{L}_{\sam},
+\qquad \beta=10^{-3},\quad\lambda_{\mathrm{phys}}=0.3.
+\label{eq:objective}
+\end{equation}
+
+\section{Experimental Setup}
+
+\subsection{Datasets and preprocessing}
+
+We evaluate on IIRS (lunar), AVIRIS (airborne terrestrial), and CRISM (Martian) imagery. Cubes are partitioned into $64\times64\times C$ patches with stride 48. Spatially contiguous height regions define 70/15/15 train/validation/test splits to reduce autocorrelation leakage between splits. Each cube is normalized to $[0,1]$ before model input. The train and validation patch counts will be inserted once the final data manifest is exported.
+
+\begin{table}[t]
+\centering
+\small
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lccccc}
+\toprule
+Dataset & Domain & Bands used & Nominal range & Train / valid & Test \\
+\midrule
+IIRS \citep{chowdhury2020iirs} & Moon & 256 & $\sim$0.8--5.0 $\mu$m & \tbd{} / \tbd{} & 3,084 \\
+AVIRIS \citep{green1998aviris} & Airborne Earth & 424 & $\sim$0.4--2.5 $\mu$m & \tbd{} / \tbd{} & 1,950 \\
+CRISM \citep{murchie2007crism} & Mars & 456$^\dagger$ & $\sim$0.36--3.92 $\mu$m & \tbd{} / \tbd{} & 369 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Datasets after the preprocessing used for training and evaluation. $^\dagger$CRISM is cropped from 457 to 456 bands to preserve exact spectral decoder geometry.}
+\label{tab:datasets}
+\end{table}
+
+\subsection{Models and controlled comparison}
+
+We compare four model families: \prism{}; a 2D spatial VAE adapted from AutoencoderKL-style image processing \citep{rombach2022ldm}; a pixelwise 1D spectral VAE following spectral autoencoder and unmixing practice \citep{palsson2018unmixing,su2019daen}; and a 3D spatio-spectral convolutional VAE inspired by 3D HSI feature extractors \citep{chen2016deep}. All models share a common interface for training and evaluation.
+
+The principal control is latent rate rather than latent shape: within each dataset, models are assigned an approximately equal number of latent scalar elements per patch. The architectures retain their native latent geometry, which is the property under study. Models use reference-width capacities; parameter counts are reported rather than equalized. Each configuration is trained with seeds 67 and 69. Baselines are trained with standard ELBO and SAM-augmented objectives; the main comparison uses the physics-augmented arm because SAM is intrinsic to \prism{}.
+
+We select checkpoints by validation SAM for the spectral-fidelity comparison. Table values are arithmetic means over the two selected test-set runs. We report SAM-valid, which excludes near-zero-energy pixels that make the angular metric ill-defined, alongside PSNR and SSIM. SAM-valid values should only be compared within a dataset.
+
+\subsection{Latent diagnostics}
+
+For latent-noise robustness, we deterministically encode a test patch, add isotropic Gaussian noise to each latent tensor, and decode. We report degradation at $\sigma=0.5$. For chemical interpolation, we linearly interpolate the latents of two test samples at 11 evenly spaced mixing coefficients and measure decoded-spectrum jaggedness as the mean $\ell_2$ norm of its second finite difference. Lower jaggedness denotes a smoother decoded spectral path. A masked-pixel recovery protocol is being finalized and will report metrics only on masked pixels.
+
+\section{Results and Discussion}
+
+\paragraph{Reporting status.} The external-baseline rows below are finalized seed means from the current evaluation artifacts. The PRISM rerun and masked-pixel experiment are pending; their cells are deliberately left blank rather than filled from superseded results. Accordingly, this draft makes no quantitative claim that PRISM beats a baseline. Once the final output is supplied, boldface will mark the best value per dataset and metric, and the accompanying text will be updated from the same source table.
+
+\subsection{Reconstruction quality}
+
+\begin{table*}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrrrr}
+\toprule
+Dataset & Model & SAM-valid $\downarrow$ & PSNR $\uparrow$ & SSIM $\uparrow$ & Params (M) & Status \\
+\midrule
+\multirow{4}{*}{IIRS}
+ & 2D spatial VAE & 0.1719 & 39.93 & 0.946 & 23.40 & final \\
+ & 1D pixelwise VAE & 0.1210 & 32.47 & 0.825 & 0.60 & final \\
+ & 3D spatio-spectral VAE & 0.2012 & 39.19 & 0.955 & 3.10 & final \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} & \tbd{} & 5.20 & rerun pending \\
+\midrule
+\multirow{4}{*}{AVIRIS}
+ & 2D spatial VAE & 0.0947 & 14.78 & 0.720 & 24.38 & final \\
+ & 1D pixelwise VAE & 0.0283 & 34.93 & 0.849 & 0.77 & final \\
+ & 3D spatio-spectral VAE & 0.0344 & 33.24 & 0.839 & 3.10 & final \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} & \tbd{} & 5.85 & rerun pending \\
+\midrule
+\multirow{4}{*}{CRISM}
+ & 2D spatial VAE & 0.1067 & 23.77 & 0.801 & 24.45 & final \\
+ & 1D pixelwise VAE & 0.0648 & 29.46 & 0.760 & 0.80 & final \\
+ & 3D spatio-spectral VAE & 0.0493 & 27.13 & 0.927 & 3.10 & final \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} & \tbd{} & 5.95 & rerun pending \\
+\bottomrule
+\end{tabular}
+\caption{Reconstruction quality on the held-out test split. All finalized rows are seed means from SAM-selected physics-objective checkpoints. PRISM result cells await its final rerun.}
+\label{tab:reconstruction}
+\end{table*}
+
+Table~\ref{tab:reconstruction} establishes the reference trade-offs that PRISM must meet. The pixelwise VAE is competitive on spectral angle for IIRS and AVIRIS but has lower spatial-fidelity metrics, whereas 3D and 2D models can yield strong PSNR or SSIM while their spectral-angle behavior differs by dataset. The final interpretation will compare PRISM against this metric-wise Pareto structure, rather than reducing HSI fidelity to a single scalar.
+
+\subsection{Latent-noise robustness}
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llrr}
+\toprule
+Dataset & Model & PSNR at $\sigma=0.5$ $\uparrow$ & SAM at $\sigma=0.5$ $\downarrow$ \\
+\midrule
+\multirow{4}{*}{IIRS}
+ & 2D & 36.59 & 0.138 \\
+ & 1D & 29.26 & 0.171 \\
+ & 3D & 36.34 & 0.176 \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} \\
+\midrule
+\multirow{4}{*}{AVIRIS}
+ & 2D & 15.76 & 0.080 \\
+ & 1D & 26.57 & 0.038 \\
+ & 3D & 26.54 & 0.073 \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} \\
+\midrule
+\multirow{4}{*}{CRISM}
+ & 2D & 23.83 & 0.341 \\
+ & 1D & 23.09 & 0.318 \\
+ & 3D & 27.33 & 0.329 \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} \\
+\bottomrule
+\end{tabular}
+\caption{Latent-noise diagnostic at $\sigma=0.5$. Scores compare decoded noisy latents with the clean input. Finalized baseline rows are seed means; PRISM values await rerun.}
+\label{tab:noise}
+\end{table}
+
+This probe assesses local latent sensitivity rather than denoising performance: no diffusion model or input corruption is used. The completed baseline rows show that spatial, spectral, and joint architectures respond differently to an identical latent perturbation. PRISM's pending result will test whether the separated latent representation preserves spectral agreement while avoiding an undue spatial-fidelity loss.
+
+\subsection{Chemical interpolation}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llrr}
+\toprule
+Dataset & Model & Jaggedness $\downarrow$ & Path length \\
+\midrule
+\multirow{4}{*}{IIRS}
+ & 2D & 0.0095 & 0.488 \\
+ & 1D & 0.0243 & 0.381 \\
+ & 3D & 0.0053 & 0.548 \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} \\
+\midrule
+\multirow{4}{*}{AVIRIS}
+ & 2D & 0.0002 & 0.053 \\
+ & 1D & 0.0088 & 1.264 \\
+ & 3D & 0.0047 & 1.540 \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} \\
+\midrule
+\multirow{4}{*}{CRISM}
+ & 2D & 0.5697 & 15.134 \\
+ & 1D & 1.4521 & 13.854 \\
+ & 3D & 0.3728 & 15.394 \\
+ & \textbf{PRISM} & \tbd{} & \tbd{} \\
+\bottomrule
+\end{tabular}
+\caption{Spectral interpolation diagnostic. Jaggedness is the mean norm of the second finite difference across 11 latent interpolation points. Path length contextualizes transition magnitude.}
+\label{tab:interpolation}
+\end{table}
+
+Jaggedness should be interpreted with path length: a nearly constant decoder can obtain a short, smooth path without retaining useful variation. We therefore report both values and will inspect interpolated spectra visually in the appendix when final PRISM results are available.
+
+\subsection{Masked-pixel recovery}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Dataset & Model & Mask ratio & SAM-valid $\downarrow$ & PSNR / SSIM $\uparrow$ \\
+\midrule
+\multicolumn{5}{c}{\textit{Pending implementation and finalized inference output.}} \\
+\bottomrule
+\end{tabular}
+\caption{Masked-pixel recovery will score reconstruction only at pixels whose complete spectra are masked at the input.}
+\label{tab:masked}
+\end{table}
+
+This experiment addresses the practical setting in which a spatial pixel or small region is unavailable. The protocol will mask complete spectra, retain the clean patch as reference, and report reconstruction quality exclusively on the masked locations. It is intentionally not inferred from latent-noise results.
+
+\section{Conclusion}
+
+We introduced PRISM, a dual-stream physics-informed VAE that separates spatial context from per-pixel spectral encoding, preserves an addressable spatial latent grid, and adaptively fuses decoded evidence under a SAM objective. The experimental design evaluates the intended claim---spectral fidelity without sacrificing spatial reconstruction quality---with distinct spectral and spatial metrics rather than a single aggregate score. The current draft records finalized baselines and the complete evaluation protocol; final PRISM and masked-pixel results will determine the quantitative conclusion.
+
+\subsection*{AI use statement}
+
+Generative AI tools were used to assist with drafting and polishing portions of the manuscript. The authors reviewed, edited, and take responsibility for the final text, claims, experimental design, and reported artifacts.
+
+\subsection*{Ethics statement}
+
+HSI reconstruction can affect scientific interpretations about minerals, water, vegetation, or environmental change. A reconstruction can introduce or suppress spectral features even when it appears visually plausible. PRISM is therefore intended to support analysis of corrupted observations, not to replace raw measurements or establish scientific claims without provenance, uncertainty assessment, and domain-expert review. Any downstream deployment should preserve the distinction between measured and reconstructed data.
+
+\subsection*{Reproducibility statement}
+
+The repository contains the model implementations, dataset preprocessing and patching logic, dataset-specific hyperparameters, fixed seeds, checkpoint-selection criterion, and inference scripts used for the tables. The main paper specifies the architecture, loss weights, latent-rate control, and evaluation metrics; the appendix records the extended reporting protocol. We will release an anonymous reproducibility package containing the final manuscript source, configurations, and evaluation artifacts subject to dataset-access constraints.
+
+\bibliography{../../references}
+\bibliographystyle{../guidelines/iclr2027_conference}
+
+\appendix
+\section{Extended Experimental Protocol}
+
+\subsection{Optimization and checkpoint selection}
+
+All models use a learning rate of $10^{-3}$, weight decay $10^{-5}$, a five-epoch linear warmup followed by cosine annealing, and early stopping. Batch sizes are 32 for IIRS and 16 for AVIRIS and CRISM. Every reported main-table result uses the checkpoint selected by the lowest validation SAM, so comparisons use a common spectral selection criterion. The final paper will state the exact trained epoch for each seed in the accompanying artifact.
+
+\subsection{Latent budgets and parameter counts}
+
+The target latent budgets are 16,384 elements per IIRS patch and 28,672 elements per AVIRIS or CRISM patch. PRISM matches those targets exactly. The 3D model is within 5.4\% of the AVIRIS target and 1.8\% of the CRISM target owing to its discrete volume geometry; all other comparison cells match exactly. Table~\ref{tab:reconstruction} reports architecture parameter counts obtained by materializing each model with its dataset-specific configuration.
+
+\subsection{Physics-loss ablation reporting}
+
+The appendix will contain the full standard-ELBO versus physics-augmented baseline comparison once the final PRISM results are integrated. This separation avoids conflating the main architectural comparison with the question of whether adding SAM affects a particular baseline. Reported changes will include SAM-valid, PSNR, SSIM, and seed-level values for each dataset.
+
+\subsection{Statistical reporting}
+
+For the finalized version, each PRISM--baseline comparison will use paired test-patch differences within each seed, bootstrap confidence intervals, paired permutation tests, and Holm correction within dataset and metric families. The protocol treats $0.005$ rad SAM, $0.5$ dB PSNR, and $0.01$ SSIM as minimum practically meaningful effects. The main manuscript will retain seed means; complete seed-level results, confidence intervals, and corrected $p$-values will be supplied in the appendix or supplement.
+
+\end{document}
