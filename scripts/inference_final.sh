@@ -17,7 +17,8 @@
 #
 # Run from the repo root:
 #   bash scripts/inference_final.sh --dry-run             # print the plan, load nothing
-#   bash scripts/inference_final.sh                        # the real run
+#   bash scripts/inference_final.sh                        # the real run (resumable)
+#   bash scripts/inference_final.sh --overwrite            # recompute all cells ignoring cache
 #   bash scripts/inference_final.sh --no-telegram
 #   bash scripts/inference_final.sh --ckpt-dir model --out-dir results/final
 #
@@ -95,7 +96,14 @@ if [[ ${DRY_RUN} -eq 0 ]]; then
 fi
 
 echo "Running: python inference/inference_final.py ${PY_ARGS[*]}"
+set +e
 python "${REPO_ROOT}/inference/inference_final.py" "${PY_ARGS[@]}"
 rc=$?
+
+if [[ ${rc} -ne 0 && ${DRY_RUN} -eq 0 ]]; then
+    python "${SCRIPT_DIR}/../utils/notify_cli.py" \
+        --text "❌ Inference final EXITED WITH FAILURE (exit_code=${rc}) on $(hostname). Check terminal or log files for trace." \
+        || true
+fi
 
 exit "${rc}"
