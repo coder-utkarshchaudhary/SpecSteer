@@ -406,7 +406,7 @@ def effective_occupancy(flat: torch.Tensor) -> float:
 
 def _make_loader(dataset_obj, batch_size: int, num_workers: int) -> DataLoader:
     return DataLoader(dataset_obj, batch_size=batch_size, shuffle=False,
-                      num_workers=num_workers, pin_memory=True)
+                      num_workers=num_workers, pin_memory=torch.cuda.is_available())
 
 
 def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
@@ -428,40 +428,48 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
            SAM already came out of pass A)
     """
     out: dict = {}
+    torch.cuda.empty_cache()
 
     # --- Pass A: reconstruction-quality + P4 (intact & shuffled) ----------
     recon_acc = ReconAccumulator(min_energy, ext_cfg)
     p4_intact = SimpleAccumulator(min_energy)
     p4_shuffled = SimpleAccumulator(min_energy)
-    with torch.no_grad():
+    with torch.inference_mode():
         for x in loader:
             x = x.to(device, non_blocking=True)
             b, H, W, C = x.shape
             recon = model.reconstruct(x)
             recon_acc.update(x, recon)
             p4_intact.update(x, recon)
+            del recon
+
             x_sh = x.reshape(b, H * W, C)[:, shuffle_perm, :].reshape(b, H, W, C).contiguous()
             recon_sh = model.reconstruct(x_sh)
             p4_shuffled.update(x_sh, recon_sh)
+            del recon_sh, x_sh, x
+
     out["reconstruction"] = recon_acc.result()
     m_int, m_sh = p4_intact.result(), p4_shuffled.result()
     sri = (m_sh["sam"] - m_int["sam"]) / max(m_int["sam"], 1e-12)
     out["p4"] = {"sri": sri, "sam_intact": m_int["sam"], "sam_shuffled": m_sh["sam"],
                 "psnr_intact": m_int["psnr"], "psnr_shuffled": m_sh["psnr"],
                 "uses_spatial_context": sri >= cfg["p4_spatial_reliance"]["min_sri_for_spatial_use"]}
+    torch.cuda.empty_cache()
 
-    # --- Pass B: encode -> latents_full (small; cached for P3/5/6) --------
+    # --- Pass B: encode -> latents_full (cached on CPU for P3/5/6) --------
     parts: list[list[torch.Tensor]] = None
-    with torch.no_grad():
+    with torch.inference_mode():
         for x in loader:
             x = x.to(device, non_blocking=True)
             lat = model.encode_latents(x)
             if parts is None:
                 parts = [[] for _ in lat]
             for j, t in enumerate(lat):
-                parts[j].append(t)
+                parts[j].append(t.detach().cpu())
+            del x, lat
     latents_full = [torch.cat(p, dim=0) for p in parts]
     out["latents_full"] = latents_full  # consumed by steps 5/6, popped before JSON-ing
+    torch.cuda.empty_cache()
 
     # P2 — trivial, one patch's worth of latent already in latents_full
     elements = int(sum(t[:1].numel() for t in latents_full))
@@ -473,7 +481,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
                 "deviation_pct": dev,
                 "rate_matched": abs(dev) <= p2p["match_tolerance_pct"]}
 
-    # P3 — per-dim KL from the aggregate posterior (cheap, latents are tiny)
+    # P3 — per-dim KL from the aggregate posterior (computed on CPU)
     kls = []
     for t in latents_full:
         flat = t.reshape(t.shape[0], -1).double()
@@ -491,24 +499,28 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     n_pixels = 0
     sum_x = sum_x2 = None
     n_total = 0
-    with torch.no_grad():
+    with torch.inference_mode():
         i = 0
         for x in loader:
             x = x.to(device, non_blocking=True)
             b = x.shape[0]
-            base = model.decode_latents([t[i:i + b] for t in latents_full])
-            swapped = model.decode_latents([t[i:i + b] for t in lat_rolled])
+            base = model.decode_latents([t[i:i + b].to(device, non_blocking=True) for t in latents_full])
             angle_base = _sam_per_pixel(x, base)
-            angle_swap = _sam_per_pixel(x, swapped)
             sam_base_sum += float(angle_base.sum())
-            sam_swap_sum += float(angle_swap.sum())
-            n_pixels += angle_base.numel()
             if sum_x is None:
-                sum_x = base.sum(dim=0)
-                sum_x2 = (base ** 2).sum(dim=0)
+                sum_x = base.sum(dim=0).detach().cpu()
+                sum_x2 = (base ** 2).sum(dim=0).detach().cpu()
             else:
-                sum_x += base.sum(dim=0)
-                sum_x2 += (base ** 2).sum(dim=0)
+                sum_x += base.sum(dim=0).detach().cpu()
+                sum_x2 += (base ** 2).sum(dim=0).detach().cpu()
+            n_pixels += angle_base.numel()
+            del base, angle_base
+
+            swapped = model.decode_latents([t[i:i + b].to(device, non_blocking=True) for t in lat_rolled])
+            angle_swap = _sam_per_pixel(x, swapped)
+            sam_swap_sum += float(angle_swap.sum())
+            del swapped, angle_swap, x
+
             n_total += b
             i += b
     sam_base = sam_base_sum / max(n_pixels, 1)
@@ -521,27 +533,31 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     out["p3"] = {"active_unit_fraction": active, "mean_kl_per_dim": float(kl_all.mean()),
                 "latent_swap_delta": delta, "recon_std_across_batch": float(std_b.mean()),
                 "collapsed": bool(collapsed)}
+    torch.cuda.empty_cache()
 
     # --- Passes D-F: step 5, noise recovery (one pass per RNG seed) -------
     noise_raw = {sigma: {"sam": [], "psnr": []} for sigma in SIGMAS}
     for rng_seed in RNG_SEEDS:
         gen = torch.Generator(device=device).manual_seed(rng_seed)
         accs = {sigma: SimpleAccumulator(min_energy) for sigma in SIGMAS}
-        with torch.no_grad():
+        with torch.inference_mode():
             i = 0
             for x in loader:
                 x = x.to(device, non_blocking=True)
                 b = x.shape[0]
-                chunk = [t[i:i + b] for t in latents_full]
+                chunk = [t[i:i + b].to(device, non_blocking=True) for t in latents_full]
                 for sigma in SIGMAS:
                     noisy = add_latent_noise(chunk, sigma, generator=gen)
                     recon = model.decode_latents(noisy)
                     accs[sigma].update(x, recon)
+                    del noisy, recon
+                del x
                 i += b
         for sigma in SIGMAS:
             r = accs[sigma].result()
             noise_raw[sigma]["sam"].append(r["sam"])
             noise_raw[sigma]["psnr"].append(r["psnr"])
+        torch.cuda.empty_cache()
     out["noise"] = {sigma: {"sam": float(np.mean(noise_raw[sigma]["sam"])),
                             "psnr": float(np.mean(noise_raw[sigma]["psnr"]))}
                     for sigma in SIGMAS}
@@ -551,7 +567,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     for rng_seed in RNG_SEEDS:
         mask_np = mask_by_rng[rng_seed]  # (N_total, H, W) bool, dataset-level, model-independent
         acc = SimpleAccumulator(min_energy)
-        with torch.no_grad():
+        with torch.inference_mode():
             i = 0
             for x in loader:
                 x = x.to(device, non_blocking=True)
@@ -560,8 +576,10 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
                 x_masked = torch.where(m.unsqueeze(-1), torch.zeros_like(x), x)
                 recon = model.reconstruct(x_masked)
                 acc.update(x, recon)
+                del m, x_masked, recon, x
                 i += b
         drop_raw.append(acc.result()["sam"])
+        torch.cuda.empty_cache()
     out["missing_pixel_sam_masked"] = float(np.mean(drop_raw))
 
     return out
@@ -587,11 +605,18 @@ def interpolation_and_occupancy(latents_full: list[torch.Tensor], model, device,
     r, c = pixel
     alphas = np.linspace(0.0, 1.0, n_alpha)
     spectra = []  # (n_alpha, n_pairs, C)
+    interp_batch_size = 8  # Decode in small batches to prevent OOM in SpectralBranch (B*4096 px spectra)
     with torch.no_grad():
         for alpha in alphas:
             mix = lerp_latents(la, lb, float(alpha))
-            recon = model.decode_latents(mix)          # (n_pairs, H, W, C)
-            spectra.append(recon[:, r, c, :].detach().cpu().numpy())
+            pair_chunks = []
+            for p_start in range(0, n_pairs, interp_batch_size):
+                p_end = min(p_start + interp_batch_size, n_pairs)
+                mix_chunk = [t[p_start:p_end].to(device, non_blocking=True) for t in mix]
+                recon_chunk = model.decode_latents(mix_chunk)          # (chunk_size, H, W, C)
+                pair_chunks.append(recon_chunk[:, r, c, :].detach().cpu().numpy())
+            spectra.append(np.concatenate(pair_chunks, axis=0))
+            torch.cuda.empty_cache()
     spectra = np.stack(spectra, axis=0)                 # (n_alpha, n_pairs, C)
 
     if n_alpha >= 3:
@@ -784,7 +809,7 @@ def main() -> int:
 
                 inference_set, scenes = build_inference_set(ds, packed_root)
                 n_total = len(inference_set)
-                batch_size = args.batch_size or settings.batch_size
+                batch_size = args.batch_size or min(settings.batch_size, 16)
                 num_workers = args.num_workers if args.num_workers is not None else settings.num_workers
                 min_energy = cfg["p1_trivial_floors"]["sam_valid_min_energy"]
                 ext_cfg = _recon_metrics_ext_cfg()
