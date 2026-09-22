@@ -462,8 +462,10 @@ def p1_shared_floors(x: torch.Tensor, scenes: list[str], stats: dict,
         acc = ChunkedMetricAccumulator(min_energy)
         for i in range(0, B, PROBE_BATCH):
             j = min(i + PROBE_BATCH, B)
-            xb = x[i:j]
+            xb = x[i:j].to(device)
             pred = pred_fn(i, j)
+            if pred.device != device:
+                pred = pred.to(device)
             acc.update(xb, pred)
         return acc.result()
 
@@ -518,14 +520,16 @@ def p1_shared_floors(x: torch.Tensor, scenes: list[str], stats: dict,
     # model can lose to this; that fact is exactly what miscalibrated the old
     # pass/fail gate.
     def _patch_mean(i, j):
-        xb = x[i:j]
+        xb = x[i:j].to(device)
         return xb.mean(dim=(1, 2), keepdim=True).expand_as(xb)
     mean_patch = score_constant_per_patch(_patch_mean)
     mean_patch["note"] = ("uses the TEST patch's own spatial-mean spectrum — a "
                           "C-float-per-patch predictor, not a zero-rate floor")
 
     # identity oracle: SAM's own epsilon means a perfect copy does not score 0.
-    identity_oracle = metrics(x, x, min_energy)
+    def _identity(i, j):
+        return x[i:j].to(device)
+    identity_oracle = score_constant_per_patch(_identity)
 
     # random null: n_random_draws random predictions on a small sub-sample,
     # for a percentile check. Only the metrics in random_null_metrics are
@@ -533,7 +537,7 @@ def p1_shared_floors(x: torch.Tensor, scenes: list[str], stats: dict,
     p1 = cfg["p1_trivial_floors"]
     n_draws = p1["n_random_draws"]
     n_sub = min(p1.get("random_null_patches", 8), B)
-    x_sub = x[:n_sub]
+    x_sub = x[:n_sub].to(device)
     want = set(p1.get("random_null_metrics", ["psnr", "sam", "sam_valid"]))
     g = torch.Generator(device="cpu").manual_seed(cfg["sampling"]["seed"] + 7)
 
