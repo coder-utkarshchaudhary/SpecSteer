@@ -31,7 +31,10 @@ Scope (locked, see the session's plan):
         actually iterated), FULL SIZE, no subsampling, for every experiment.
 
 Five output CSVs (under --out-dir, default results/final/):
-    model-validity-probes.csv   P1 (trivial-floor lift) + P2 (latent-rate
+    model-validity-probes.csv   P1 (trivial-floor lift, reported against BOTH
+                                 trivial predictors — the best zero-rate mean
+                                 and the per-patch mean — as PSNR dB, SSIM,
+                                 absolute SAM rad AND relative SAM) + P2 (latent-rate
                                  audit) + P3 (posterior collapse) + P4
                                  (spatial-reliance shuffle) — validity
                                  diagnostics, no pass/fail verdict.
@@ -140,10 +143,15 @@ CSV_COLUMNS = {
         "recon_std_across_batch", "collapsed_frac",
         "sri", "sam_intact", "sam_shuffled", "psnr_intact", "psnr_shuffled",
         "uses_spatial_context_frac",
-        "p1_floor_psnr", "p1_floor_ssim", "p1_floor_sam_valid",
-        "p1_lift_psnr_db", "p1_lift_ssim", "p1_lift_sam_rel", "p1_lift_sam_valid_rel",
-        "p1_meanpatch_psnr", "p1_meanpatch_sam_valid",
-        "p1_lift_vs_meanpatch_psnr_db", "p1_lift_vs_meanpatch_sam_valid_rel",
+        "p1_floor_psnr", "p1_floor_ssim", "p1_floor_sam", "p1_floor_sam_valid",
+        "p1_lift_psnr_db", "p1_lift_ssim",
+        "p1_lift_sam_rad", "p1_lift_sam_rel",
+        "p1_lift_sam_valid_rad", "p1_lift_sam_valid_rel",
+        "p1_meanpatch_psnr", "p1_meanpatch_ssim",
+        "p1_meanpatch_sam", "p1_meanpatch_sam_valid",
+        "p1_lift_vs_meanpatch_psnr_db", "p1_lift_vs_meanpatch_ssim",
+        "p1_lift_vs_meanpatch_sam_rad", "p1_lift_vs_meanpatch_sam_rel",
+        "p1_lift_vs_meanpatch_sam_valid_rad", "p1_lift_vs_meanpatch_sam_valid_rel",
         "p1_headroom_psnr",
     ],
     "reconstruction-quality.csv": [
@@ -660,6 +668,62 @@ def stratified_subsample(dataset_obj, scenes: list[str], n: int, seed: int):
 
 
 # ---------------------------------------------------------------------------
+# P1 lift — absolute (rad) companions to probes.py's relative SAM lifts
+# ---------------------------------------------------------------------------
+
+def p1_lift_columns(p1r: dict, floor_key: str, lift_key: str,
+                    stat_prefix: str, lift_prefix: str) -> dict:
+    """
+    `inference.probes.p1_report` reports PSNR lift in an absolute physical unit
+    (dB) but SAM lift only as a fraction of the floor's own SAM. That makes the
+    two halves of a P1 row unquotable side by side: "+6.2 dB and +31 %" says
+    nothing about how many radians of spectral angle were actually recovered.
+
+    This adds the absolute deltas, in radians, computed here rather than in
+    `probes.py` — `p1_report` already returns the raw `model` / floor metric
+    dicts, and the exploratory sweep (probes.py:p1_report's other caller) must
+    keep its existing schema.
+
+    Sign convention matches `psnr_db` and `sam_relative`: **floor minus model**,
+    so a POSITIVE lift always means the model beat the trivial predictor. Both
+    SAM variants are emitted; `sam_valid` is the one to quote (raw `sam` carries
+    the pi/2 contamination from sub-epsilon-energy pixels — CLAUDE.md section 12).
+
+    NOTE on population: the floors are characterised on a P1_FLOOR_SAMPLE-patch
+    subsample while the model score is the full-set, seed-averaged number, so
+    these deltas are a diagnostic against a subsampled floor, not a full-set
+    quantity. This is pre-existing — `p1_lift_psnr_db` has always had it.
+    """
+    floor = p1r.get(floor_key, {}) or {}
+    model = p1r.get("model", {}) or {}
+    lift = p1r.get(lift_key, {}) or {}
+    nan = float("nan")
+
+    def delta(key: str) -> float:
+        f, m = floor.get(key, nan), model.get(key, nan)
+        if f is None or m is None:
+            return nan
+        try:
+            d = float(f) - float(m)
+        except (TypeError, ValueError):
+            return nan
+        return d
+
+    return {
+        f"{stat_prefix}_psnr": floor.get("psnr", nan),
+        f"{stat_prefix}_ssim": floor.get("ssim", nan),
+        f"{stat_prefix}_sam": floor.get("sam", nan),
+        f"{stat_prefix}_sam_valid": floor.get("sam_valid", nan),
+        f"{lift_prefix}_psnr_db": lift.get("psnr_db", nan),
+        f"{lift_prefix}_ssim": lift.get("ssim_absolute", nan),
+        f"{lift_prefix}_sam_rad": delta("sam"),
+        f"{lift_prefix}_sam_rel": lift.get("sam_relative", nan),
+        f"{lift_prefix}_sam_valid_rad": delta("sam_valid"),
+        f"{lift_prefix}_sam_valid_rel": lift.get("sam_valid_relative", nan),
+    }
+
+
+# ---------------------------------------------------------------------------
 # CSV writer
 # ---------------------------------------------------------------------------
 
@@ -884,19 +948,16 @@ def main() -> int:
                 "sam_shuffled": avg(["p4", "sam_shuffled"]),
                 "psnr_intact": avg(["p4", "psnr_intact"]), "psnr_shuffled": avg(["p4", "psnr_shuffled"]),
                 "uses_spatial_context_frac": frac(["p4", "uses_spatial_context"]),
-                "p1_floor_psnr": p1r.get("best_zero_rate_floor", {}).get("psnr", float("nan")),
-                "p1_floor_ssim": p1r.get("best_zero_rate_floor", {}).get("ssim", float("nan")),
-                "p1_floor_sam_valid": p1r.get("best_zero_rate_floor", {}).get("sam_valid", float("nan")),
-                "p1_lift_psnr_db": p1r.get("lift_over_zero_rate", {}).get("psnr_db", float("nan")),
-                "p1_lift_ssim": p1r.get("lift_over_zero_rate", {}).get("ssim_absolute", float("nan")),
-                "p1_lift_sam_rel": p1r.get("lift_over_zero_rate", {}).get("sam_relative", float("nan")),
-                "p1_lift_sam_valid_rel": p1r.get("lift_over_zero_rate", {}).get("sam_valid_relative", float("nan")),
-                "p1_meanpatch_psnr": p1r.get("mean_patch", {}).get("psnr", float("nan")),
-                "p1_meanpatch_sam_valid": p1r.get("mean_patch", {}).get("sam_valid", float("nan")),
-                "p1_lift_vs_meanpatch_psnr_db": p1r.get("lift_over_mean_patch", {}).get("psnr_db", float("nan")),
-                "p1_lift_vs_meanpatch_sam_valid_rel": p1r.get("lift_over_mean_patch", {}).get("sam_valid_relative", float("nan")),
                 "p1_headroom_psnr": p1r.get("headroom_captured_psnr", float("nan")),
             }
+            # both trivial-predictor lifts, each now carrying an absolute SAM
+            # delta (rad) next to its existing relative one
+            validity_row.update(p1_lift_columns(
+                p1r, "best_zero_rate_floor", "lift_over_zero_rate",
+                "p1_floor", "p1_lift"))
+            validity_row.update(p1_lift_columns(
+                p1r, "mean_patch", "lift_over_mean_patch",
+                "p1_meanpatch", "p1_lift_vs_meanpatch"))
             all_rows["model-validity-probes.csv"].append(validity_row)
             log.send(f"Inference final - model-validity-probes - DONE ON - {ds} | {model_name} | {loss}")
 
