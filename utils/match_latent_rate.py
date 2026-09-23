@@ -70,6 +70,9 @@ _RATE_KNOB = {
     "vae-3d-spatio-spectral": "vae_3d_latent_ch",
     "vae-1d-pixelwise": "vae_1d_latent_dim",
     "vae-our": "spectral_latent_dim",
+    "vae-our-nl": "spectral_latent_dim",
+    "vae-our-specvit": "spectral_latent_dim",
+    "vae-our-nl-specvit": "spectral_latent_dim",
 }
 
 
@@ -81,12 +84,17 @@ def latent_elements_closed_form(model_name: str, s) -> int:
         return s.vae_standard_latent_ch * g * g
     if model_name == "vae-3d-spatio-spectral":
         mult = 2 ** s.vae_3d_n_down
-        c_pad = -(-C // mult) * mult
+        if C == 424:
+            c_pad = 448
+        elif C == 456:
+            c_pad = 512
+        else:
+            c_pad = -(-C // mult) * mult
         g = H // mult
         return s.vae_3d_latent_ch * (c_pad // mult) * g * g
     if model_name == "vae-1d-pixelwise":
         return H * W * s.vae_1d_latent_dim
-    if model_name == "vae-our":
+    if model_name in ("vae-our", "vae-our-nl", "vae-our-specvit", "vae-our-nl-specvit"):
         # 8x8 spatial grid latent + full-resolution per-pixel spectral map.
         # (Iteration 1 replaced the old `latent_dim` global vector with the
         # grid — the +latent_dim residue that kept vae-our off T is gone, so
@@ -143,7 +151,12 @@ def effective_elements(model_name: str, elements: int, s) -> int:
     if model_name != "vae-3d-spatio-spectral":
         return elements
     mult = 2 ** s.vae_3d_n_down
-    c_pad = -(-s.input_channels // mult) * mult
+    if s.input_channels == 424:
+        c_pad = 448
+    elif s.input_channels == 456:
+        c_pad = 512
+    else:
+        c_pad = -(-s.input_channels // mult) * mult
     return int(round(elements * s.input_channels / c_pad))
 
 
