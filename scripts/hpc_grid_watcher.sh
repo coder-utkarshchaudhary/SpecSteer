@@ -35,7 +35,7 @@
 #
 # Not intended to be invoked by hand — hpc_smoke_watcher.sh wires it up. But
 # it works standalone (e.g. to re-attach after the lab machine rebooted):
-#   HPC_FULL_JOBID=1234[].padum FULL_ARRAY_RANGE=1-60 bash scripts/hpc_grid_watcher.sh
+#   HPC_FULL_JOBID=1234[].<cluster> FULL_ARRAY_RANGE=1-60 bash scripts/hpc_grid_watcher.sh
 
 set -uo pipefail
 

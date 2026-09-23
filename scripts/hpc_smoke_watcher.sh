@@ -23,7 +23,7 @@
 #
 # Not intended to be invoked by hand — the launcher wires it up. But it works
 # standalone:
-#   HPC_SMOKE_JOBID=1234.padum bash scripts/hpc_smoke_watcher.sh
+#   HPC_SMOKE_JOBID=1234.<cluster> bash scripts/hpc_smoke_watcher.sh
 
 set -uo pipefail
 

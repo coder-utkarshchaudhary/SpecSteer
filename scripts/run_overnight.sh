@@ -91,7 +91,7 @@ fi
 # ---- sanity: shared drive mounted -----------------------------------------
 # Reuse the hard-coded default from utils/config.py so the check matches the
 # path the training code will actually try to open.
-DATA_ROOT="${PRISM_DATA_ROOT:-/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/data/processed}"
+DATA_ROOT="${PRISM_DATA_ROOT:-/path/to/data/processed}"
 if [[ ! -d "${DATA_ROOT}" ]]; then
     echo "ERROR: processed data not found at:"
     echo "         ${DATA_ROOT}"

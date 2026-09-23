@@ -5,17 +5,17 @@ set -euo pipefail
 # ==========================
 # Configuration
 # ==========================
-USER="yashdeep"
-HOST="192.168.1.36"
+USER="<USERNAME>"
+HOST="<HOST_IP>"
 
 SOURCE="data/processed/"
-DEST="/media/yashdeep/New Volume 21/UTKARSH_CHAUDHARY_prism/prism/data/processed"
+DEST="/path/to/data/processed"
 
 # ==========================
 # Configuration v2 -> Vultr
 # ==========================
 # USER="root"
-# HOST="38.128.232.57"
+# HOST="<REMOTE_HOST_IP>"
 # PORT="46508"
 
 # SOURCE="data/processed/"

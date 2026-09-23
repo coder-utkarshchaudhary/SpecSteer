@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/hpc_launch.sh
 # ---------------------
-# Single-entry-point launcher for the IITD HPC ablation run.
+# Single-entry-point launcher for the institutional HPC ablation run.
 # Data is assumed to already be present on the HPC — no rsync steps.
 #
 # TOPOLOGY: two separate hosts, two separate filesystems.
@@ -301,11 +301,11 @@ done
 # 1f. tools on both remote nodes
 missing_login=$(login_ssh 'for t in rsync tmux ssh; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
 if [[ -n "${missing_login}" ]]; then
-    fatal "login node missing tools: ${missing_login}. Ask IITD HPC support / your PI."
+    fatal "login node missing tools: ${missing_login}. Ask your HPC support / PI."
 fi
 missing_compute=$(compute_ssh 'for t in python3 tmux rsync curl; do command -v $t >/dev/null 2>&1 || echo $t; done' 2>/dev/null | xargs)
 if [[ -n "${missing_compute}" ]]; then
-    fatal "compute node missing tools: ${missing_compute}. Ask IITD HPC support / your PI."
+    fatal "compute node missing tools: ${missing_compute}. Ask your HPC support / PI."
 fi
 log_ok "login + compute nodes have the tools this launcher needs"
 # NOTE: qsub is intentionally NOT probed directly — see hpc_common.sh's
@@ -540,7 +540,7 @@ else
 Most likely causes:
   * your lab->login SSH key has a passphrase, or
   * the login node forbids remote port-forwarding (AllowTcpForwarding no).
-Check ${LOG_DIR}/tunnel.log and ask Utkarsh."
+Check ${LOG_DIR}/tunnel.log and verify your SSH and port-forwarding configuration."
             fi
             log_ok "outer tunnel pid=${tunnel_pid}"
         fi

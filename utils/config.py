@@ -30,7 +30,7 @@ class Settings:
     `input_channels`. Tying the width to the band count (as the original code
     did) made the branch cost scale as O(C^2) per pixel spectrum — 99.7% of
     vae-our's total FLOPs — and made vae-our's parameter count swing 3x across
-    sensors for no principled reason. See CLAUDE.md §10.
+    sensors for no principled reason.
     """
 
     # ------------------------------------------------------------------
@@ -67,7 +67,7 @@ class Settings:
     data_original_root: str = "data/original"
     data_processed_root: str = "data/processed"
     # Packed fp16 memmap shards written by utils/dataset/pack.py. One file per
-    # (dataset, split) replaces ~15k individual .npy patches — see CLAUDE.md §4.
+    # (dataset, split) replaces ~15k individual .npy patches.
     data_packed_root: str = "data/packed"
 
     # ------------------------------------------------------------------

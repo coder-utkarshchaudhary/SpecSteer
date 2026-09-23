@@ -134,7 +134,7 @@ if (( BLOCKED == 0 )); then
         else
             err "base interpreter ${base_python} does NOT exist on the compute node."
             err "THE 'REUSE THE .venv AS-IS' PREMISE IS DEAD — this cluster doesn't have the Python version the venv was built against."
-            echo "    Options: ask IITD HPC support for a python3.10 module, or rebuild the venv"
+            echo "    Options: ask your HPC support for a python3.10 module, or rebuild the venv"
             echo "    against whatever python3 IS on the compute node, or fall back to the"
             echo "    offline-wheels bootstrap path (set USE_SHIPPED_VENV=0 in hpc_config.env)."
             BLOCKED=1
@@ -154,7 +154,7 @@ if (( BLOCKED == 0 )); then
         ok "compute node reached api.telegram.org (HTTP ${code}) — direct-send mode is available (no tunnel needed)."
         echo "    HPC_TELEGRAM_MODE=direct is viable; the chained-tunnel path still works too."
     else
-        warn "compute node could NOT reach api.telegram.org (probe='${code}') — expected on IITD compute nodes."
+        warn "compute node could NOT reach api.telegram.org (probe='${code}') — expected on isolated HPC compute nodes."
         echo "    Will use the chained reverse-tunnel path (lab -> login -> compute)."
     fi
 else

@@ -6,10 +6,9 @@ Prove the four Kaggle notebooks are safe to commit, without a GPU.
 WHY
 ===
 `notebooks/*.ipynb` inline a copy of `utils/config.py`, `utils/hyperparams.py`
-and all four hyperparam YAMLs so they run standalone on Kaggle. CLAUDE.md
-already records what that costs: `CRIMS: 544` survived in five places at once
-because nothing checked. "Double-check before committing" is not a deliverable;
-this is.
+and all four hyperparam YAMLs so they run standalone on Kaggle. Any change to
+band counts, model widths, or latent dimensions must be mirrored into all four
+notebooks — without an automated check, stale inline configs survive silently.
 
 CHECKS
 ======

@@ -104,7 +104,7 @@ def build_model(name: str):
 #
 # Selecting everything on SAM instead would break the other way: `standard` cells
 # train with no SAM term at all, so their SAM is an incidental by-product of an
-# MSE trajectory, not a signal (see CLAUDE.md 12 -- those are the cells that
+# MSE trajectory, not a signal (those are the cells that
 # collapse to sam = pi/2). Writing both costs ~88 MB per cell and lets each
 # analysis read the checkpoint selected on the metric that analysis reports,
 # uniformly across all cells.

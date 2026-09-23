@@ -99,7 +99,7 @@ vae_1d_latent_dim: 4            # vae-1d   :  16,384 elements (EXACT)
 #     ~vae-our's param count (seed 42, IIRS+AVIRIS) via
 #     `check-model-params.py --solve-capacity`; vae-standard (~23M) is larger
 #     than vae-our, so it is defended by direction,
-#   * covariate regression + Pareto frontier (CLAUDE.md 12) unchanged.
+#   * covariate regression + Pareto frontier unchanged.
 vae_standard_base_ch: 128               # Rombach et al. 2022 (AutoencoderKL)
 vae_3d_base_ch: 24                      # Mei et al. 2019 (3D-CAE, representative)
 vae_1d_hidden_dims: [512, 256, 128]     # Palsson 2018 / Liu 2022 (FC spectral AE)

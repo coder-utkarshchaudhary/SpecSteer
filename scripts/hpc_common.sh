@@ -2,7 +2,7 @@
 # ----------------------
 # Shared two-hop SSH/rsync helpers for the HPC scripts.
 #
-# Topology: IITD Padum has a LOGIN node (reachable directly from the lab as
+# Topology: the HPC cluster has a LOGIN node (reachable directly from the lab as
 # ${HPC_USER}@${HPC_HOST}) and a separate COMPUTE node with its own
 # filesystem, reachable only from the login node as `ssh ${HPC_INNER_HOST}`
 # (default alias "hpc" — set HPC_INNER_HOST in hpc_config.env if yours

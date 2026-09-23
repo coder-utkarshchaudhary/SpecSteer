@@ -3,7 +3,7 @@ utils/notify_relay.py
 ---------------------
 Lab-side HTTP relay for the HPC pipeline.
 
-The IITD HPC compute nodes have no outbound internet, so training cannot reach
+HPC compute nodes typically have no outbound internet, so training cannot reach
 Telegram directly. Instead, ``scripts/hpc_launch.sh`` opens a reverse SSH
 tunnel from the HPC login node back to this relay, and a forwarder on the
 login node (``scripts/notify_forwarder.py``) drains a shared-FS queue file
