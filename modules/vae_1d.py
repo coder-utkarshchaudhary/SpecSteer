@@ -100,9 +100,26 @@ class VAE_1D_Pixelwise(nn.Module):
         b, h, w, c = x.shape
         flat = x.reshape(b * h * w, c)                # (N, C); N = B*H*W
 
-        params = self.encoder(flat)                   # (N, 2Z)
-        z, mu, logvar = self.reparameterize(params)   # (N, Z) each
-        recon = torch.sigmoid(self.decoder(z))        # (N, C)
+        chunk_size = 16384
+        if flat.shape[0] <= chunk_size:
+            params = self.encoder(flat)
+            z, mu, logvar = self.reparameterize(params)
+            recon = torch.sigmoid(self.decoder(z))
+        else:
+            p_list, z_list, mu_list, logvar_list, r_list = [], [], [], [], []
+            for i in range(0, flat.shape[0], chunk_size):
+                fb = flat[i:i + chunk_size]
+                pb = self.encoder(fb)
+                zb, mub, logvarb = self.reparameterize(pb)
+                rb = torch.sigmoid(self.decoder(zb))
+                z_list.append(zb)
+                mu_list.append(mub)
+                logvar_list.append(logvarb)
+                r_list.append(rb)
+            z = torch.cat(z_list, dim=0)
+            mu = torch.cat(mu_list, dim=0)
+            logvar = torch.cat(logvar_list, dim=0)
+            recon = torch.cat(r_list, dim=0)
 
         recon = recon.reshape(b, h, w, c)
         mu = mu.reshape(b, h, w, self.latent_dim)
@@ -136,7 +153,13 @@ class VAE_1D_Pixelwise(nn.Module):
     def encode_latents(self, x):
         """Deterministic per-pixel latents (mu): [ (B, H, W, Z) ]."""
         b, h, w, c = x.shape
-        params = self.encoder(x.reshape(b * h * w, c))
+        flat = x.reshape(b * h * w, c)
+        chunk_size = 16384
+        if flat.shape[0] <= chunk_size:
+            params = self.encoder(flat)
+        else:
+            params = torch.cat([self.encoder(flat[i:i + chunk_size])
+                                for i in range(0, flat.shape[0], chunk_size)], dim=0)
         mu, _ = torch.chunk(params, 2, dim=-1)
         return [mu.reshape(b, h, w, self.latent_dim)]
 
@@ -145,5 +168,11 @@ class VAE_1D_Pixelwise(nn.Module):
         """[ (B, H, W, Z) ] -> recon (B, H, W, C)."""
         z = latents[0]
         b, h, w, _ = z.shape
-        recon = torch.sigmoid(self.decoder(z.reshape(b * h * w, self.latent_dim)))
+        flat = z.reshape(b * h * w, self.latent_dim)
+        chunk_size = 16384
+        if flat.shape[0] <= chunk_size:
+            recon = torch.sigmoid(self.decoder(flat))
+        else:
+            recon = torch.cat([torch.sigmoid(self.decoder(flat[i:i + chunk_size]))
+                               for i in range(0, flat.shape[0], chunk_size)], dim=0)
         return recon.reshape(b, h, w, settings.input_channels)

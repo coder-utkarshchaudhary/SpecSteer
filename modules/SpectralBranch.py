@@ -54,13 +54,20 @@ class Encoder(nn.Module):
         x = x.reshape(batch * h * w, 1, c)
         # (B*H*W, 1, input_channels)
 
-        x = self.conv1D_block(x)
-        # (B*H*W, final_conv_c, final_conv_l)
-
-        x = self.flatten(x)
-        # (B*H*W, final_conv_c * final_conv_l)
-
-        x = self.linear(x)
+        # Chunk large pixel batches (e.g. 131k px @ batch 32) to keep peak VRAM bounded
+        chunk_size = 16384
+        if x.shape[0] <= chunk_size:
+            x_conv = self.conv1D_block(x)
+            x_flat = self.flatten(x_conv)
+            x = self.linear(x_flat)
+        else:
+            chunks = []
+            for i in range(0, x.shape[0], chunk_size):
+                xb = x[i:i + chunk_size]
+                cb = self.conv1D_block(xb)
+                fb = self.flatten(cb)
+                chunks.append(self.linear(fb))
+            x = torch.cat(chunks, dim=0)
         # (B*H*W, 2*spectral_latent_dim)
 
         x = x.reshape(batch, h, w, 2 * settings.spectral_latent_dim)
@@ -128,13 +135,20 @@ class Decoder(nn.Module):
         x = x.reshape(batch * h * w, settings.spectral_latent_dim)
         # (B*H*W, spectral_latent_dim)
 
-        x = self.linear(x)
-        # (B*H*W, spectral_linear_expansion_dim)
-
-        x = x.view(batch * h * w, self.trans_in_c, self.trans_in_l)
-        # (B*H*W, spectral_transpose_c, spectral_transpose_l)
-
-        x = self.transposeconv1D_block(x)
+        # Chunk large pixel batches (e.g. 131k px @ batch 32) to prevent OOM
+        chunk_size = 16384
+        if x.shape[0] <= chunk_size:
+            x = self.linear(x)
+            x = x.view(batch * h * w, self.trans_in_c, self.trans_in_l)
+            x = self.transposeconv1D_block(x)
+        else:
+            chunks = []
+            for i in range(0, x.shape[0], chunk_size):
+                xb = x[i:i + chunk_size]
+                lin_b = self.linear(xb)
+                view_b = lin_b.view(xb.shape[0], self.trans_in_c, self.trans_in_l)
+                chunks.append(self.transposeconv1D_block(view_b))
+            x = torch.cat(chunks, dim=0)
         # (B*H*W, 1, output_sequence_length)
         
         assert x.shape[2] == settings.input_channels, f"SPECTRAL DECODER: Sequence reconstruction length mismatch. Expected: {settings.input_channels} found: {x.shape[2]}."

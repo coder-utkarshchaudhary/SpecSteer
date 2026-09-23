@@ -414,7 +414,7 @@ def effective_occupancy(flat: torch.Tensor) -> float:
 
 def _make_loader(dataset_obj, batch_size: int, num_workers: int) -> DataLoader:
     return DataLoader(dataset_obj, batch_size=batch_size, shuffle=False,
-                      num_workers=num_workers, pin_memory=True)
+                      num_workers=num_workers, pin_memory=torch.cuda.is_available())
 
 
 def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
@@ -436,40 +436,48 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
            SAM already came out of pass A)
     """
     out: dict = {}
+    torch.cuda.empty_cache()
 
     # --- Pass A: reconstruction-quality + P4 (intact & shuffled) ----------
     recon_acc = ReconAccumulator(min_energy, ext_cfg)
     p4_intact = SimpleAccumulator(min_energy)
     p4_shuffled = SimpleAccumulator(min_energy)
-    with torch.no_grad():
+    with torch.inference_mode():
         for x in loader:
             x = x.to(device, non_blocking=True)
             b, H, W, C = x.shape
             recon = model.reconstruct(x)
             recon_acc.update(x, recon)
             p4_intact.update(x, recon)
+            del recon
+
             x_sh = x.reshape(b, H * W, C)[:, shuffle_perm, :].reshape(b, H, W, C).contiguous()
             recon_sh = model.reconstruct(x_sh)
             p4_shuffled.update(x_sh, recon_sh)
+            del recon_sh, x_sh, x
+
     out["reconstruction"] = recon_acc.result()
     m_int, m_sh = p4_intact.result(), p4_shuffled.result()
     sri = (m_sh["sam"] - m_int["sam"]) / max(m_int["sam"], 1e-12)
     out["p4"] = {"sri": sri, "sam_intact": m_int["sam"], "sam_shuffled": m_sh["sam"],
                 "psnr_intact": m_int["psnr"], "psnr_shuffled": m_sh["psnr"],
                 "uses_spatial_context": sri >= cfg["p4_spatial_reliance"]["min_sri_for_spatial_use"]}
+    torch.cuda.empty_cache()
 
-    # --- Pass B: encode -> latents_full (small; cached for P3/5/6) --------
+    # --- Pass B: encode -> latents_full (cached on CPU for P3/5/6) --------
     parts: list[list[torch.Tensor]] = None
-    with torch.no_grad():
+    with torch.inference_mode():
         for x in loader:
             x = x.to(device, non_blocking=True)
             lat = model.encode_latents(x)
             if parts is None:
                 parts = [[] for _ in lat]
             for j, t in enumerate(lat):
-                parts[j].append(t)
+                parts[j].append(t.detach().cpu())
+            del x, lat
     latents_full = [torch.cat(p, dim=0) for p in parts]
     out["latents_full"] = latents_full  # consumed by steps 5/6, popped before JSON-ing
+    torch.cuda.empty_cache()
 
     # P2 — trivial, one patch's worth of latent already in latents_full
     elements = int(sum(t[:1].numel() for t in latents_full))
@@ -481,7 +489,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
                 "deviation_pct": dev,
                 "rate_matched": abs(dev) <= p2p["match_tolerance_pct"]}
 
-    # P3 — per-dim KL from the aggregate posterior (cheap, latents are tiny)
+    # P3 — per-dim KL from the aggregate posterior (computed on CPU)
     kls = []
     for t in latents_full:
         flat = t.reshape(t.shape[0], -1).double()
@@ -499,24 +507,28 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     n_pixels = 0
     sum_x = sum_x2 = None
     n_total = 0
-    with torch.no_grad():
+    with torch.inference_mode():
         i = 0
         for x in loader:
             x = x.to(device, non_blocking=True)
             b = x.shape[0]
-            base = model.decode_latents([t[i:i + b] for t in latents_full])
-            swapped = model.decode_latents([t[i:i + b] for t in lat_rolled])
+            base = model.decode_latents([t[i:i + b].to(device, non_blocking=True) for t in latents_full])
             angle_base = _sam_per_pixel(x, base)
-            angle_swap = _sam_per_pixel(x, swapped)
             sam_base_sum += float(angle_base.sum())
-            sam_swap_sum += float(angle_swap.sum())
-            n_pixels += angle_base.numel()
             if sum_x is None:
-                sum_x = base.sum(dim=0)
-                sum_x2 = (base ** 2).sum(dim=0)
+                sum_x = base.sum(dim=0).detach().cpu()
+                sum_x2 = (base ** 2).sum(dim=0).detach().cpu()
             else:
-                sum_x += base.sum(dim=0)
-                sum_x2 += (base ** 2).sum(dim=0)
+                sum_x += base.sum(dim=0).detach().cpu()
+                sum_x2 += (base ** 2).sum(dim=0).detach().cpu()
+            n_pixels += angle_base.numel()
+            del base, angle_base
+
+            swapped = model.decode_latents([t[i:i + b].to(device, non_blocking=True) for t in lat_rolled])
+            angle_swap = _sam_per_pixel(x, swapped)
+            sam_swap_sum += float(angle_swap.sum())
+            del swapped, angle_swap, x
+
             n_total += b
             i += b
     sam_base = sam_base_sum / max(n_pixels, 1)
@@ -529,27 +541,31 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     out["p3"] = {"active_unit_fraction": active, "mean_kl_per_dim": float(kl_all.mean()),
                 "latent_swap_delta": delta, "recon_std_across_batch": float(std_b.mean()),
                 "collapsed": bool(collapsed)}
+    torch.cuda.empty_cache()
 
     # --- Passes D-F: step 5, noise recovery (one pass per RNG seed) -------
     noise_raw = {sigma: {"sam": [], "psnr": []} for sigma in SIGMAS}
     for rng_seed in RNG_SEEDS:
         gen = torch.Generator(device=device).manual_seed(rng_seed)
         accs = {sigma: SimpleAccumulator(min_energy) for sigma in SIGMAS}
-        with torch.no_grad():
+        with torch.inference_mode():
             i = 0
             for x in loader:
                 x = x.to(device, non_blocking=True)
                 b = x.shape[0]
-                chunk = [t[i:i + b] for t in latents_full]
+                chunk = [t[i:i + b].to(device, non_blocking=True) for t in latents_full]
                 for sigma in SIGMAS:
                     noisy = add_latent_noise(chunk, sigma, generator=gen)
                     recon = model.decode_latents(noisy)
                     accs[sigma].update(x, recon)
+                    del noisy, recon
+                del x
                 i += b
         for sigma in SIGMAS:
             r = accs[sigma].result()
             noise_raw[sigma]["sam"].append(r["sam"])
             noise_raw[sigma]["psnr"].append(r["psnr"])
+        torch.cuda.empty_cache()
     out["noise"] = {sigma: {"sam": float(np.mean(noise_raw[sigma]["sam"])),
                             "psnr": float(np.mean(noise_raw[sigma]["psnr"]))}
                     for sigma in SIGMAS}
@@ -559,7 +575,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     for rng_seed in RNG_SEEDS:
         mask_np = mask_by_rng[rng_seed]  # (N_total, H, W) bool, dataset-level, model-independent
         acc = SimpleAccumulator(min_energy)
-        with torch.no_grad():
+        with torch.inference_mode():
             i = 0
             for x in loader:
                 x = x.to(device, non_blocking=True)
@@ -568,8 +584,10 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
                 x_masked = torch.where(m.unsqueeze(-1), torch.zeros_like(x), x)
                 recon = model.reconstruct(x_masked)
                 acc.update(x, recon)
+                del m, x_masked, recon, x
                 i += b
         drop_raw.append(acc.result()["sam"])
+        torch.cuda.empty_cache()
     out["missing_pixel_sam_masked"] = float(np.mean(drop_raw))
 
     return out
@@ -595,11 +613,18 @@ def interpolation_and_occupancy(latents_full: list[torch.Tensor], model, device,
     r, c = pixel
     alphas = np.linspace(0.0, 1.0, n_alpha)
     spectra = []  # (n_alpha, n_pairs, C)
+    interp_batch_size = 8  # Decode in small batches to prevent OOM in SpectralBranch (B*4096 px spectra)
     with torch.no_grad():
         for alpha in alphas:
             mix = lerp_latents(la, lb, float(alpha))
-            recon = model.decode_latents(mix)          # (n_pairs, H, W, C)
-            spectra.append(recon[:, r, c, :].detach().cpu().numpy())
+            pair_chunks = []
+            for p_start in range(0, n_pairs, interp_batch_size):
+                p_end = min(p_start + interp_batch_size, n_pairs)
+                mix_chunk = [t[p_start:p_end].to(device, non_blocking=True) for t in mix]
+                recon_chunk = model.decode_latents(mix_chunk)          # (chunk_size, H, W, C)
+                pair_chunks.append(recon_chunk[:, r, c, :].detach().cpu().numpy())
+            spectra.append(np.concatenate(pair_chunks, axis=0))
+            torch.cuda.empty_cache()
     spectra = np.stack(spectra, axis=0)                 # (n_alpha, n_pairs, C)
 
     if n_alpha >= 3:
@@ -736,6 +761,14 @@ def write_csv(rows: list[dict], columns: list[str], path: Path) -> None:
             w.writerow(r)
 
 
+def flush_all_csvs(all_rows: dict[str, list[dict]], columns_map: dict[str, list[str]], out_dir: Path) -> None:
+    """Incrementally persist all non-empty CSVs so partial progress is never lost."""
+    for name, cols in columns_map.items():
+        if all_rows.get(name):
+            path = out_dir / name
+            write_csv(all_rows[name], cols, path)
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -782,6 +815,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-alpha", type=int, default=N_ALPHA)
     p.add_argument("--pixel", type=int, nargs=2, default=list(INTERP_PIXEL))
     p.add_argument("--p1-floor-sample", type=int, default=P1_FLOOR_SAMPLE)
+    p.add_argument("--overwrite", action="store_true",
+                   help="Recompute all cells even if cached results exist on disk.")
     p.add_argument("--no-telegram", action="store_true")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the cell grid + patch-audit counts; load no model.")
@@ -794,12 +829,16 @@ def main() -> int:
     datasets = [d.strip().upper() for d in args.datasets.split(",") if d.strip()]
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     out_dir = Path(args.out_dir)
+    cache_dir = out_dir / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
     log = Logger(enabled=not args.no_telegram)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = load_prereg()
 
     cells = cell_grid(models, datasets)
-    log.send(f"Inference final started — {len(cells)} cells "
+    total_cells = len(cells)
+    log.send(f"Inference final started — {total_cells} cells "
              f"({len(datasets)} datasets x models/losses), device={device}, "
              f"out_dir={out_dir}")
 
@@ -818,191 +857,247 @@ def main() -> int:
 
     all_rows: dict[str, list[dict]] = {name: [] for name in CSV_COLUMNS}
     t0 = time.time()
+    cell_idx = 0
+    had_fatal_error = False
 
-    for ds in datasets:
-        packed_root = resolve_packed_root(ds, args.packed_root)
-        audit_dataset(ds, packed_root, log)
+    try:
+        for ds in datasets:
+            packed_root = resolve_packed_root(ds, args.packed_root)
+            try:
+                audit_dataset(ds, packed_root, log)
+                apply_dataset(ds, verify=True)
+                apply_hyperparams(settings, load_hyperparams(ds))
+                overrides = apply_cli_overrides(settings, args.set)
+                if overrides:
+                    log.send(f"--set overrides active for {ds}: {overrides}")
 
-        apply_dataset(ds, verify=True)
-        apply_hyperparams(settings, load_hyperparams(ds))
-        overrides = apply_cli_overrides(settings, args.set)
-        if overrides:
-            log.send(f"--set overrides active for {ds}: {overrides}")
+                inference_set, scenes = build_inference_set(ds, packed_root)
+                n_total = len(inference_set)
+                batch_size = args.batch_size or min(settings.batch_size, 16)
+                num_workers = args.num_workers if args.num_workers is not None else settings.num_workers
+                min_energy = cfg["p1_trivial_floors"]["sam_valid_min_energy"]
+                ext_cfg = _recon_metrics_ext_cfg()
+                H, W = settings.input_height, settings.input_width
 
-        inference_set, scenes = build_inference_set(ds, packed_root)
-        n_total = len(inference_set)
-        batch_size = args.batch_size or settings.batch_size
-        num_workers = args.num_workers if args.num_workers is not None else settings.num_workers
-        min_energy = cfg["p1_trivial_floors"]["sam_valid_min_energy"]
-        ext_cfg = _recon_metrics_ext_cfg()
-        H, W = settings.input_height, settings.input_width
+                g = torch.Generator(device="cpu").manual_seed(cfg["sampling"]["seed"] + 3)
+                shuffle_perm = torch.randperm(H * W, generator=g).to(device)
 
-        g = torch.Generator(device="cpu").manual_seed(cfg["sampling"]["seed"] + 3)
-        shuffle_perm = torch.randperm(H * W, generator=g).to(device)
+                mask_by_rng = {}
+                for rng_seed in RNG_SEEDS:
+                    rng = np.random.default_rng(rng_seed)
+                    mask_by_rng[rng_seed] = rng.random((n_total, H, W)) < PIXEL_MASK_FRACTION
 
-        mask_by_rng = {}
-        for rng_seed in RNG_SEEDS:
-            rng = np.random.default_rng(rng_seed)
-            mask_by_rng[rng_seed] = rng.random((n_total, H, W)) < PIXEL_MASK_FRACTION
-
-        stats = train_band_statistics(ds, cfg, packed_root=str(packed_root))
-        floor_x, floor_scenes = stratified_subsample(
-            inference_set, scenes, args.p1_floor_sample, cfg["sampling"]["seed"])
-        floors_cache = out_dir / "model-validity-probes" / f"floors_{ds}.json"
-        floors = get_or_build_floors(ds, cfg, floor_x, floor_scenes, stats, device, floors_cache)
-
-        for exp in ("model-validity-probes", "reconstruction-quality", "noise-recovery",
-                   "chemical-interpolation", "missing-pixel-recovery"):
-            log.send(f"Inference final - {exp} - START - {ds}")
-
-        ds_cells = [(m, l) for d, m, l in cells if d == ds]
-        for model_name, loss in ds_cells:
-            per_seed = []
-            occ_per_seed = []
-            for seed in CHECKPOINT_SEEDS:
-                try:
-                    ckpt_path = resolve_checkpoint(args.ckpt_dir, ds, model_name, loss,
-                                                   seed=seed, select="sam")
-                    if not ckpt_path.is_file():
-                        raise FileNotFoundError(f"missing checkpoint {ckpt_path}")
-                    model, _ = load_model(model_name, ckpt_path, device)
-                    loader = _make_loader(inference_set, batch_size, num_workers)
-                    res = evaluate_one_checkpoint(
-                        model, loader, device, cfg, min_energy, ext_cfg, model_name,
-                        shuffle_perm, mask_by_rng)
-                    occ_res = interpolation_and_occupancy(
-                        res["latents_full"], model, device, model_name,
-                        args.n_interp_pairs, args.n_alpha, tuple(args.pixel),
-                        cfg["sampling"]["seed"])
-                    res.pop("latents_full")
-                    per_seed.append(res)
-                    occ_per_seed.append(occ_res)
-                    del model
-                    torch.cuda.empty_cache()
-                except Exception as e:  # noqa: BLE001
-                    tb = traceback.format_exc()
-                    log.send(f"Inference final - {model_name}|{ds}|{loss}|seed{seed} FAILED: {e}")
-                    print(tb)
-
-            if not per_seed:
-                log.send(f"Inference final - {model_name}|{ds}|{loss} - NO USABLE CHECKPOINT, skipped")
+                stats = train_band_statistics(ds, cfg, packed_root=str(packed_root))
+                floor_x, floor_scenes = stratified_subsample(
+                    inference_set, scenes, args.p1_floor_sample, cfg["sampling"]["seed"])
+                floors_cache = out_dir / "model-validity-probes" / f"floors_{ds}.json"
+                floors = get_or_build_floors(ds, cfg, floor_x, floor_scenes, stats, device, floors_cache)
+            except Exception as e:
+                tb = traceback.format_exc()
+                log.send_pre(f"❌ Inference final - dataset setup FAILED on {ds}: {e}", tb[-2000:])
+                print(f"Error setting up dataset {ds}:\n{tb}", file=sys.stderr)
                 continue
 
-            def avg(key_path, seeds=per_seed):
-                vals = []
-                for r in seeds:
-                    d = r
-                    for k in key_path:
-                        d = d[k]
-                    if d is not None and not (isinstance(d, float) and math.isnan(d)):
-                        vals.append(d)
-                return float(np.mean(vals)) if vals else float("nan")
+            for exp in ("model-validity-probes", "reconstruction-quality", "noise-recovery",
+                       "chemical-interpolation", "missing-pixel-recovery"):
+                log.send(f"Inference final - {exp} - START - {ds}")
 
-            def frac(key_path, seeds=per_seed):
-                vals = [1.0 if r[key_path[0]][key_path[1]] else 0.0 for r in seeds]
-                return float(np.mean(vals))
+            ds_cells = [(m, l) for d, m, l in cells if d == ds]
+            for model_name, loss in ds_cells:
+                cell_idx += 1
+                cell_cache_path = cache_dir / f"{ds}__{model_name}__{loss}.json"
 
-            recon_row = {k: avg(["reconstruction", k]) for k in
-                        ("mse", "sam_rad", "sam_valid", "valid_pixel_frac", "psnr",
-                         "ssim", "sid", "sid_clamped_frac", "scc", "q2n", "n_samples")}
-            recon_row.update({"dataset": ds, "model": model_name, "loss": loss})
-            all_rows["reconstruction-quality.csv"].append(recon_row)
-            log.send(f"Inference final - reconstruction-quality - DONE ON - {ds} | {model_name} | {loss}")
+                # ---- Resume / cache check --------------------------------
+                if not args.overwrite and cell_cache_path.is_file():
+                    try:
+                        cached_cell = json.loads(cell_cache_path.read_text(encoding="utf-8"))
+                        cached_rows = cached_cell.get("rows", {})
+                        if all(k in cached_rows for k in CSV_COLUMNS):
+                            for name in CSV_COLUMNS:
+                                all_rows[name].append(cached_rows[name])
+                            log.send(f"Inference final [{cell_idx}/{total_cells}] - {ds} | {model_name} | {loss} - LOADED FROM CACHE, skipping")
+                            flush_all_csvs(all_rows, CSV_COLUMNS, out_dir)
+                            continue
+                    except Exception as e:
+                        print(f"Failed to read cache {cell_cache_path}: {e}")
 
-            recon_for_p1 = {"psnr": recon_row["psnr"], "ssim": recon_row["ssim"],
-                            "sam": recon_row["sam_rad"], "sam_valid": recon_row["sam_valid"]}
-            n_sub = floors.get("random_null_patches", 8) if not floors.get("error") else 8
-            n_sub = min(n_sub, floor_x.shape[0])
-            sub_recon = None
-            try:
-                # cheap: reload the first available checkpoint just to score the
-                # small P1 sub-sample consistently with recon_for_p1 -- reuse
-                # per_seed[0]'s own accumulator instead where possible; simplest
-                # correct route is scoring the SAME floor subsample fresh here.
-                ckpt_path = resolve_checkpoint(args.ckpt_dir, ds, model_name, loss,
-                                               seed=CHECKPOINT_SEEDS[0], select="sam")
-                probe_model, _ = load_model(model_name, ckpt_path, device)
-                with torch.no_grad():
-                    sub_x = floor_x[:n_sub].to(device)
-                    sub_recon_t = probe_model.reconstruct(sub_x)
-                sub_recon = small_sample_metrics(sub_x, sub_recon_t, min_energy)
-                del probe_model
-                torch.cuda.empty_cache()
-            except Exception:  # noqa: BLE001
-                sub_recon = {"mse": float("nan"), "psnr": float("nan"), "ssim": float("nan"),
-                            "sam": float("nan"), "sam_valid": float("nan")}
-            p1r = p1_report(recon_for_p1, sub_recon, floors, cfg) if not floors.get("error") else {"error": floors["error"]}
+                log.send(f"Inference final [{cell_idx}/{total_cells}] - START - {ds} | {model_name} | {loss}")
 
-            validity_row = {
-                "dataset": ds, "model": model_name, "loss": loss,
-                "latent_elements": avg(["p2", "latent_elements"]),
-                "compression_ratio": avg(["p2", "compression_ratio"]),
-                "rate_dev_pct": avg(["p2", "deviation_pct"]),
-                "rate_matched_frac": frac(["p2", "rate_matched"]),
-                "active_units": avg(["p3", "active_unit_fraction"]),
-                "mean_kl_per_dim": avg(["p3", "mean_kl_per_dim"]),
-                "latent_swap_delta": avg(["p3", "latent_swap_delta"]),
-                "recon_std_across_batch": avg(["p3", "recon_std_across_batch"]),
-                "collapsed_frac": frac(["p3", "collapsed"]),
-                "sri": avg(["p4", "sri"]), "sam_intact": avg(["p4", "sam_intact"]),
-                "sam_shuffled": avg(["p4", "sam_shuffled"]),
-                "psnr_intact": avg(["p4", "psnr_intact"]), "psnr_shuffled": avg(["p4", "psnr_shuffled"]),
-                "uses_spatial_context_frac": frac(["p4", "uses_spatial_context"]),
-                "p1_headroom_psnr": p1r.get("headroom_captured_psnr", float("nan")),
-            }
-            # both trivial-predictor lifts, each now carrying an absolute SAM
-            # delta (rad) next to its existing relative one
-            validity_row.update(p1_lift_columns(
-                p1r, "best_zero_rate_floor", "lift_over_zero_rate",
-                "p1_floor", "p1_lift"))
-            validity_row.update(p1_lift_columns(
-                p1r, "mean_patch", "lift_over_mean_patch",
-                "p1_meanpatch", "p1_lift_vs_meanpatch"))
-            all_rows["model-validity-probes.csv"].append(validity_row)
-            log.send(f"Inference final - model-validity-probes - DONE ON - {ds} | {model_name} | {loss}")
+                try:
+                    per_seed = []
+                    occ_per_seed = []
+                    for seed in CHECKPOINT_SEEDS:
+                        try:
+                            ckpt_path = resolve_checkpoint(args.ckpt_dir, ds, model_name, loss,
+                                                           seed=seed, select="sam")
+                            if not ckpt_path.is_file():
+                                raise FileNotFoundError(f"missing checkpoint {ckpt_path}")
+                            model, _ = load_model(model_name, ckpt_path, device)
+                            loader = _make_loader(inference_set, batch_size, num_workers)
+                            res = evaluate_one_checkpoint(
+                                model, loader, device, cfg, min_energy, ext_cfg, model_name,
+                                shuffle_perm, mask_by_rng)
+                            occ_res = interpolation_and_occupancy(
+                                res["latents_full"], model, device, model_name,
+                                args.n_interp_pairs, args.n_alpha, tuple(args.pixel),
+                                cfg["sampling"]["seed"])
+                            res.pop("latents_full")
+                            per_seed.append(res)
+                            occ_per_seed.append(occ_res)
+                            del model
+                            torch.cuda.empty_cache()
+                        except Exception as e:  # noqa: BLE001
+                            tb = traceback.format_exc()
+                            log.send_pre(f"❌ Inference final - {model_name}|{ds}|{loss}|seed{seed} FAILED: {e}", tb[-2000:])
+                            print(tb, file=sys.stderr)
 
-            noise_row = {"dataset": ds, "model": model_name, "loss": loss}
-            for sigma in SIGMAS:
-                noise_row[f"sam_recovery_s{sigma}"] = avg(["noise", sigma, "sam"])
-                noise_row[f"psnr_recovery_s{sigma}"] = avg(["noise", sigma, "psnr"])
-            all_rows["noise-recovery.csv"].append(noise_row)
-            log.send(f"Inference final - noise-recovery - DONE ON - {ds} | {model_name} | {loss}")
+                    if not per_seed:
+                        log.send(f"Inference final - {model_name}|{ds}|{loss} - NO USABLE CHECKPOINT, skipped")
+                        continue
 
-            def occ_avg(key, seeds=occ_per_seed):
-                vals = [r[key] for r in seeds if not math.isnan(r[key])]
-                return float(np.mean(vals)) if vals else float("nan")
+                    def avg(key_path, seeds=per_seed):
+                        vals = []
+                        for r in seeds:
+                            d = r
+                            for k in key_path:
+                                d = d[k]
+                            if d is not None and not (isinstance(d, float) and math.isnan(d)):
+                                vals.append(d)
+                        return float(np.mean(vals)) if vals else float("nan")
 
-            interp_row = {
-                "dataset": ds, "model": model_name, "loss": loss,
-                "jaggedness": float(np.mean([r["jaggedness"] for r in occ_per_seed])),
-                "path_length": float(np.mean([r["path_length"] for r in occ_per_seed])),
-                "occupancy_spatial": occ_avg("occupancy_spatial"),
-                "occupancy_spectral": occ_avg("occupancy_spectral"),
-                "occupancy_mean": occ_avg("occupancy_mean"),
-            }
-            all_rows["chemical-interpolation.csv"].append(interp_row)
-            log.send(f"Inference final - chemical-interpolation - DONE ON - {ds} | {model_name} | {loss}")
+                    def frac(key_path, seeds=per_seed):
+                        vals = [1.0 if r[key_path[0]][key_path[1]] else 0.0 for r in seeds]
+                        return float(np.mean(vals))
 
-            sam_masked = avg(["missing_pixel_sam_masked"])
-            sam_clean = recon_row["sam_rad"]
-            mp_row = {"dataset": ds, "model": model_name, "loss": loss,
-                     "sam_clean": sam_clean, "sam_masked": sam_masked,
-                     "sam_drop": sam_masked - sam_clean}
-            all_rows["missing-pixel-recovery.csv"].append(mp_row)
-            log.send(f"Inference final - missing-pixel-recovery - DONE ON - {ds} | {model_name} | {loss}")
+                    recon_row = {k: avg(["reconstruction", k]) for k in
+                                ("mse", "sam_rad", "sam_valid", "valid_pixel_frac", "psnr",
+                                 "ssim", "sid", "sid_clamped_frac", "scc", "q2n", "n_samples")}
+                    recon_row.update({"dataset": ds, "model": model_name, "loss": loss})
 
+                    recon_for_p1 = {"psnr": recon_row["psnr"], "ssim": recon_row["ssim"],
+                                    "sam": recon_row["sam_rad"], "sam_valid": recon_row["sam_valid"]}
+                    n_sub = floors.get("random_null_patches", 8) if not floors.get("error") else 8
+                    n_sub = min(n_sub, floor_x.shape[0])
+                    sub_recon = None
+                    try:
+                        ckpt_path = resolve_checkpoint(args.ckpt_dir, ds, model_name, loss,
+                                                       seed=CHECKPOINT_SEEDS[0], select="sam")
+                        probe_model, _ = load_model(model_name, ckpt_path, device)
+                        with torch.no_grad():
+                            sub_x = floor_x[:n_sub].to(device)
+                            sub_recon_t = probe_model.reconstruct(sub_x)
+                        sub_recon = small_sample_metrics(sub_x, sub_recon_t, min_energy)
+                        del probe_model
+                        torch.cuda.empty_cache()
+                    except Exception:  # noqa: BLE001
+                        sub_recon = {"mse": float("nan"), "psnr": float("nan"), "ssim": float("nan"),
+                                    "sam": float("nan"), "sam_valid": float("nan")}
+                    p1r = p1_report(recon_for_p1, sub_recon, floors, cfg) if not floors.get("error") else {"error": floors["error"]}
+
+                    validity_row = {
+                        "dataset": ds, "model": model_name, "loss": loss,
+                        "latent_elements": avg(["p2", "latent_elements"]),
+                        "compression_ratio": avg(["p2", "compression_ratio"]),
+                        "rate_dev_pct": avg(["p2", "deviation_pct"]),
+                        "rate_matched_frac": frac(["p2", "rate_matched"]),
+                        "active_units": avg(["p3", "active_unit_fraction"]),
+                        "mean_kl_per_dim": avg(["p3", "mean_kl_per_dim"]),
+                        "latent_swap_delta": avg(["p3", "latent_swap_delta"]),
+                        "recon_std_across_batch": avg(["p3", "recon_std_across_batch"]),
+                        "collapsed_frac": frac(["p3", "collapsed"]),
+                        "sri": avg(["p4", "sri"]), "sam_intact": avg(["p4", "sam_intact"]),
+                        "sam_shuffled": avg(["p4", "sam_shuffled"]),
+                        "psnr_intact": avg(["p4", "psnr_intact"]), "psnr_shuffled": avg(["p4", "psnr_shuffled"]),
+                        "uses_spatial_context_frac": frac(["p4", "uses_spatial_context"]),
+                        "p1_floor_psnr": p1r.get("best_zero_rate_floor", {}).get("psnr", float("nan")),
+                        "p1_floor_ssim": p1r.get("best_zero_rate_floor", {}).get("ssim", float("nan")),
+                        "p1_floor_sam_valid": p1r.get("best_zero_rate_floor", {}).get("sam_valid", float("nan")),
+                        "p1_lift_psnr_db": p1r.get("lift_over_zero_rate", {}).get("psnr_db", float("nan")),
+                        "p1_lift_ssim": p1r.get("lift_over_zero_rate", {}).get("ssim_absolute", float("nan")),
+                        "p1_lift_sam_rel": p1r.get("lift_over_zero_rate", {}).get("sam_relative", float("nan")),
+                        "p1_lift_sam_valid_rel": p1r.get("lift_over_zero_rate", {}).get("sam_valid_relative", float("nan")),
+                        "p1_meanpatch_psnr": p1r.get("mean_patch", {}).get("psnr", float("nan")),
+                        "p1_meanpatch_sam_valid": p1r.get("mean_patch", {}).get("sam_valid", float("nan")),
+                        "p1_lift_vs_meanpatch_psnr_db": p1r.get("lift_over_mean_patch", {}).get("psnr_db", float("nan")),
+                        "p1_lift_vs_meanpatch_sam_valid_rel": p1r.get("lift_over_mean_patch", {}).get("sam_valid_relative", float("nan")),
+                        "p1_headroom_psnr": p1r.get("headroom_captured_psnr", float("nan")),
+                    }
+
+                    noise_row = {"dataset": ds, "model": model_name, "loss": loss}
+                    for sigma in SIGMAS:
+                        noise_row[f"sam_recovery_s{sigma}"] = avg(["noise", sigma, "sam"])
+                        noise_row[f"psnr_recovery_s{sigma}"] = avg(["noise", sigma, "psnr"])
+
+                    def occ_avg(key, seeds=occ_per_seed):
+                        vals = [r[key] for r in seeds if not math.isnan(r[key])]
+                        return float(np.mean(vals)) if vals else float("nan")
+
+                    interp_row = {
+                        "dataset": ds, "model": model_name, "loss": loss,
+                        "jaggedness": float(np.mean([r["jaggedness"] for r in occ_per_seed])),
+                        "path_length": float(np.mean([r["path_length"] for r in occ_per_seed])),
+                        "occupancy_spatial": occ_avg("occupancy_spatial"),
+                        "occupancy_spectral": occ_avg("occupancy_spectral"),
+                        "occupancy_mean": occ_avg("occupancy_mean"),
+                    }
+
+                    sam_masked = avg(["missing_pixel_sam_masked"])
+                    sam_clean = recon_row["sam_rad"]
+                    mp_row = {"dataset": ds, "model": model_name, "loss": loss,
+                             "sam_clean": sam_clean, "sam_masked": sam_masked,
+                             "sam_drop": sam_masked - sam_clean}
+
+                    # Append to current memory rows
+                    all_rows["reconstruction-quality.csv"].append(recon_row)
+                    all_rows["model-validity-probes.csv"].append(validity_row)
+                    all_rows["noise-recovery.csv"].append(noise_row)
+                    all_rows["chemical-interpolation.csv"].append(interp_row)
+                    all_rows["missing-pixel-recovery.csv"].append(mp_row)
+
+                    # Save intermediate cache & write CSVs
+                    cell_cache = {
+                        "dataset": ds,
+                        "model": model_name,
+                        "loss": loss,
+                        "rows": {
+                            "reconstruction-quality.csv": recon_row,
+                            "model-validity-probes.csv": validity_row,
+                            "noise-recovery.csv": noise_row,
+                            "chemical-interpolation.csv": interp_row,
+                            "missing-pixel-recovery.csv": mp_row,
+                        },
+                    }
+                    cell_cache_path.write_text(json.dumps(cell_cache, indent=2), encoding="utf-8")
+                    flush_all_csvs(all_rows, CSV_COLUMNS, out_dir)
+
+                    log.send(f"Inference final [{cell_idx}/{total_cells}] - DONE - {ds} | {model_name} | {loss} "
+                             f"(SAM={recon_row['sam_rad']:.4f}, PSNR={recon_row['psnr']:.2f}dB)")
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    log.send_pre(f"❌ Inference final - {model_name}|{ds}|{loss} CELL PROCESSING FAILED: {e}", tb[-2000:])
+                    print(f"Error processing cell {model_name}|{ds}|{loss}:\n{tb}", file=sys.stderr)
+                    continue
+
+    except Exception as e:
+        had_fatal_error = True
+        tb = traceback.format_exc()
+        log.send_pre(f"❌ Inference final UNHANDLED FATAL ERROR: {e}", tb[-2500:])
+        print(f"Fatal unhandled exception:\n{tb}", file=sys.stderr)
+
+    # Persist and send whatever CSV rows we have collected
+    flush_all_csvs(all_rows, CSV_COLUMNS, out_dir)
     for name, cols in CSV_COLUMNS.items():
         path = out_dir / name
-        write_csv(all_rows[name], cols, path)
-        log.send_document(path, caption=name)
+        if path.is_file():
+            log.send_document(path, caption=name)
 
     # --- Step 4.2: the lift Telegram message ------------------------------
-    recon_rows = all_rows["reconstruction-quality.csv"]
-    ours = [r for r in recon_rows if r["model"] == "vae-our-nl"]
-    others = [r for r in recon_rows if r["model"] != "vae-our-nl"]
+    recon_rows = all_rows.get("reconstruction-quality.csv", [])
+    ours = [r for r in recon_rows if r.get("model") == "vae-our-nl"]
+    others = [r for r in recon_rows if r.get("model") != "vae-our-nl"]
     if ours and others:
-        ours_sorted = sorted(ours, key=lambda r: (r["sam_rad"], -r["psnr"]))
-        others_sorted = sorted(others, key=lambda r: (r["sam_rad"], -r["psnr"]))
+        ours_sorted = sorted(ours, key=lambda r: (r.get("sam_rad", 999), -r.get("psnr", 0)))
+        others_sorted = sorted(others, key=lambda r: (r.get("sam_rad", 999), -r.get("psnr", 0)))
         our_best, other_best = ours_sorted[0], others_sorted[0]
         sam_lift = other_best["sam_rad"] - our_best["sam_rad"]
         psnr_lift = our_best["psnr"] - other_best["psnr"]
@@ -1020,7 +1115,8 @@ def main() -> int:
     elapsed = time.time() - t0
     summary = "\n".join(f"{name}: {len(rows)} rows" for name, rows in all_rows.items())
     log.send_pre(f"Inference final complete — {elapsed/60:.1f} min", summary)
-    return 0
+
+    return 1 if had_fatal_error else 0
 
 
 if __name__ == "__main__":

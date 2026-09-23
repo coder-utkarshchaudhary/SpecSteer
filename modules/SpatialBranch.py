@@ -88,7 +88,12 @@ class Encoder(nn.Module):
 
         x = x.reshape(batch * h * w, 1, c)
 
-        x = self.conv1D_block(x)
+        chunk_size = 16384
+        if x.shape[0] <= chunk_size:
+            x = self.conv1D_block(x)
+        else:
+            chunks = [self.conv1D_block(x[i:i + chunk_size]) for i in range(0, x.shape[0], chunk_size)]
+            x = torch.cat(chunks, dim=0)
         # (B*H*W, reduced_dim, 1)
 
         x = x.squeeze(-1)
@@ -180,7 +185,12 @@ class Decoder(nn.Module):
             settings.reduced_dims
         )
 
-        x = self.conv1D_block(x)
+        chunk_size = 16384
+        if x.shape[0] <= chunk_size:
+            x = self.conv1D_block(x)
+        else:
+            chunks = [self.conv1D_block(x[i:i + chunk_size]) for i in range(0, x.shape[0], chunk_size)]
+            x = torch.cat(chunks, dim=0)
         # (B*H*W, Bands, 1)
 
         x = x.squeeze(-1)
