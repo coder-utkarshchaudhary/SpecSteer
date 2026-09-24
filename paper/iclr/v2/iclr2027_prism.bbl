@@ -1,0 +1,132 @@
+\begin{thebibliography}{14}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Chang et~al.(2019)Chang, Yan, Fang, Zhong, and
+  Liao]{chang2019hsidenet}
+Yi~Chang, Luxin Yan, Houzhang Fang, Sheng Zhong, and Wenshan Liao.
+\newblock {HSI-DeNet}: Hyperspectral image restoration via convolutional neural
+  network.
+\newblock \emph{IEEE Transactions on Geoscience and Remote Sensing},
+  57\penalty0 (2):\penalty0 667--682, 2019.
+\newblock \doi{10.1109/TGRS.2018.2859203}.
+
+\bibitem[Chen et~al.(2016)Chen, Jiang, Li, Jia, and Ghamisi]{chen2016deep}
+Yushi Chen, Hanlu Jiang, Chunyang Li, Xiuping Jia, and Pedram Ghamisi.
+\newblock Deep feature extraction and classification of hyperspectral images
+  based on convolutional neural networks.
+\newblock \emph{IEEE Transactions on Geoscience and Remote Sensing},
+  54\penalty0 (10):\penalty0 6232--6251, 2016.
+\newblock \doi{10.1109/TGRS.2016.2584107}.
+
+\bibitem[Chowdhury et~al.(2020)Chowdhury, Banerjee, Joshi, Dutta, Kumar,
+  Bhattacharya, Amitabh, Rehman, Bhati, Karelia, et~al.]{chowdhury2020iirs}
+Arup~Roy Chowdhury, Arup Banerjee, S.~R. Joshi, Moumita Dutta, Ankush Kumar,
+  Satadru Bhattacharya, Amitabh, Sami~Ur Rehman, Sunil Bhati, J.~C. Karelia,
+  et~al.
+\newblock Imaging infrared spectrometer onboard {Chandrayaan-2} orbiter.
+\newblock \emph{Current Science}, 118\penalty0 (3):\penalty0 368--375, 2020.
+\newblock \doi{10.18520/cs/v118/i3/368-375}.
+
+\bibitem[Fu et~al.(2024)Fu, Xiong, Lu, Zhou, Zhou, and Qian]{fu2024sst}
+Guanyiman Fu, Fengchao Xiong, Jianfeng Lu, Jun Zhou, Jiantao Zhou, and Yuntao
+  Qian.
+\newblock Hyperspectral image denoising via spatial--spectral recurrent
+  transformer.
+\newblock \emph{IEEE Transactions on Geoscience and Remote Sensing},
+  62:\penalty0 1--14, 2024.
+\newblock \doi{10.1109/TGRS.2024.3374953}.
+
+\bibitem[Green et~al.(1998)Green, Eastwood, Sarture, Chrien, Aronsson,
+  Chippendale, Faust, Pavri, Chovit, Solis, Olah, and
+  Williams]{green1998aviris}
+Robert~O. Green, Michael~L. Eastwood, Charles~M. Sarture, Thomas~G. Chrien,
+  Mikael Aronsson, Bruce~J. Chippendale, Jessica~A. Faust, Betina~E. Pavri,
+  Christopher~J. Chovit, Manuel Solis, Martin~R. Olah, and Orlesa Williams.
+\newblock Imaging spectroscopy and the airborne visible/infrared imaging
+  spectrometer ({AVIRIS}).
+\newblock \emph{Remote Sensing of Environment}, 65\penalty0 (3):\penalty0
+  227--248, 1998.
+\newblock \doi{10.1016/S0034-4257(98)00064-9}.
+
+\bibitem[Higgins et~al.(2017)Higgins, Matthey, Pal, Burgess, Glorot, Botvinick,
+  Mohamed, and Lerchner]{higgins2017betavae}
+Irina Higgins, Lo{\"i}c Matthey, Arka Pal, Christopher Burgess, Xavier Glorot,
+  Matthew Botvinick, Shakir Mohamed, and Alexander Lerchner.
+\newblock $\beta$-{VAE}: Learning basic visual concepts with a constrained
+  variational framework.
+\newblock In \emph{Proceedings of the International Conference on Learning
+  Representations (ICLR)}, 2017.
+
+\bibitem[Kingma \& Welling(2014)Kingma and Welling]{kingma2014vae}
+Diederik~P. Kingma and Max Welling.
+\newblock Auto-encoding variational bayes, 2014.
+\newblock URL \url{https://arxiv.org/abs/1312.6114}.
+
+\bibitem[Kruse et~al.(1993)Kruse, Lefkoff, Boardman, Heidebrecht, Shapiro,
+  Barloon, and Goetz]{kruse1993sips}
+F.~A. Kruse, A.~B. Lefkoff, J.~W. Boardman, K.~B. Heidebrecht, A.~T. Shapiro,
+  P.~J. Barloon, and A.~F.~H. Goetz.
+\newblock The spectral image processing system ({SIPS})---interactive
+  visualization and analysis of imaging spectrometer data.
+\newblock \emph{Remote Sensing of Environment}, 44\penalty0 (2--3):\penalty0
+  145--163, 1993.
+\newblock \doi{10.1016/0034-4257(93)90013-N}.
+
+\bibitem[Murchie et~al.(2007)Murchie, Arvidson, Bedini, Beisser, Bibring,
+  Bishop, Boldt, Cavender, Choo, Clancy, et~al.]{murchie2007crism}
+S.~Murchie, R.~Arvidson, P.~Bedini, K.~Beisser, J.-P. Bibring, J.~Bishop,
+  J.~Boldt, P.~Cavender, T.~Choo, R.~T. Clancy, et~al.
+\newblock Compact reconnaissance imaging spectrometer for {Mars} ({CRISM}) on
+  {Mars} reconnaissance orbiter ({MRO}).
+\newblock \emph{Journal of Geophysical Research: Planets}, 112\penalty0
+  (E5):\penalty0 E05S03, 2007.
+\newblock \doi{10.1029/2006JE002682}.
+
+\bibitem[Palsson et~al.(2018)Palsson, Sigurdsson, Sveinsson, and
+  Ulfarsson]{palsson2018unmixing}
+Burkni Palsson, Jakob Sigurdsson, Johannes~R. Sveinsson, and Magnus~O.
+  Ulfarsson.
+\newblock Hyperspectral unmixing using a neural network autoencoder.
+\newblock \emph{IEEE Access}, 6:\penalty0 25646--25656, 2018.
+\newblock \doi{10.1109/ACCESS.2018.2818280}.
+
+\bibitem[Raissi et~al.(2019)Raissi, Perdikaris, and
+  Karniadakis]{raissi2019pinn}
+M.~Raissi, P.~Perdikaris, and G.~E. Karniadakis.
+\newblock Physics-informed neural networks: A deep learning framework for
+  solving forward and inverse problems involving nonlinear partial differential
+  equations.
+\newblock \emph{Journal of Computational Physics}, 378:\penalty0 686--707,
+  2019.
+\newblock \doi{10.1016/j.jcp.2018.10.045}.
+
+\bibitem[Rombach et~al.(2022)Rombach, Blattmann, Lorenz, Esser, and
+  Ommer]{rombach2022ldm}
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj{\"o}rn
+  Ommer.
+\newblock High-resolution image synthesis with latent diffusion models.
+\newblock In \emph{Proceedings of the IEEE/CVF Conference on Computer Vision
+  and Pattern Recognition (CVPR)}, pp.\  10684--10695, 2022.
+
+\bibitem[Roy et~al.(2020)Roy, Krishna, Dubey, and Chaudhuri]{roy2020hybridsn}
+Swalpa~Kumar Roy, Gopal Krishna, Shiv~Ram Dubey, and Bidyut~B. Chaudhuri.
+\newblock {HybridSN}: Exploring 3-d--2-d {CNN} feature hierarchy for
+  hyperspectral image classification.
+\newblock \emph{IEEE Geoscience and Remote Sensing Letters}, 17\penalty0
+  (2):\penalty0 277--281, 2020.
+\newblock \doi{10.1109/LGRS.2019.2918719}.
+
+\bibitem[Su et~al.(2019)Su, Li, Plaza, Marinoni, Gamba, and
+  Chakravortty]{su2019daen}
+Yuanchao Su, Jun Li, Antonio Plaza, Andrea Marinoni, Paolo Gamba, and Somdatta
+  Chakravortty.
+\newblock {DAEN}: Deep autoencoder networks for hyperspectral unmixing.
+\newblock \emph{IEEE Transactions on Geoscience and Remote Sensing},
+  57\penalty0 (7):\penalty0 4309--4321, 2019.
+\newblock \doi{10.1109/TGRS.2018.2890633}.
+
+\end{thebibliography}

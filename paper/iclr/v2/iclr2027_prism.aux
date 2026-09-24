@@ -1,0 +1,94 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{chowdhury2020iirs,murchie2007crism,green1998aviris}
+\citation{kingma2014vae,rombach2022ldm}
+\citation{kruse1993sips}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\citation{chen2016deep,roy2020hybridsn}
+\citation{palsson2018unmixing,su2019daen}
+\citation{kingma2014vae}
+\citation{higgins2017betavae}
+\citation{rombach2022ldm}
+\citation{raissi2019pinn}
+\citation{kruse1993sips}
+\citation{chang2019hsidenet,fu2024sst}
+\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{HSI representation learning and unmixing.}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{VAEs and generative latents.}{2}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Physics-guided spectral fidelity.}{2}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Method}{2}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Problem formulation}{2}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}PRISM architecture}{2}{subsection.3.2}\protected@file@percent }
+\citation{chowdhury2020iirs}
+\citation{green1998aviris}
+\citation{murchie2007crism}
+\citation{rombach2022ldm}
+\citation{palsson2018unmixing,su2019daen}
+\citation{chen2016deep}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces PRISM architecture. Final vector artwork will replace this placeholder.}}{3}{figure.1}\protected@file@percent }
+\newlabel{fig:architecture}{{1}{3}{PRISM architecture. Final vector artwork will replace this placeholder}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Tensor flow in PRISM. Final vector artwork will replace this placeholder.}}{3}{figure.2}\protected@file@percent }
+\newlabel{fig:tensorflow}{{2}{3}{Tensor flow in PRISM. Final vector artwork will replace this placeholder}{figure.2}{}}
+\newlabel{eq:fusion}{{2}{3}{PRISM architecture}{equation.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Objective and physics-informed fusion}{3}{subsection.3.3}\protected@file@percent }
+\newlabel{eq:objective}{{5}{3}{Objective and physics-informed fusion}{equation.3.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{3}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Datasets and preprocessing}{3}{subsection.4.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Datasets after the preprocessing used for training and evaluation. $^\dagger $CRISM is cropped from 457 to 456 bands to preserve exact spectral decoder geometry.}}{4}{table.1}\protected@file@percent }
+\newlabel{tab:datasets}{{1}{4}{Datasets after the preprocessing used for training and evaluation. $^\dagger $CRISM is cropped from 457 to 456 bands to preserve exact spectral decoder geometry}{table.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Models and controlled comparison}{4}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Latent diagnostics}{4}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results and Discussion}{4}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Reporting status.}{4}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Reconstruction quality}{4}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Reconstruction quality on the held-out test split. All finalized rows are seed means from SAM-selected physics-objective checkpoints. PRISM result cells await its final rerun.}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:reconstruction}{{2}{5}{Reconstruction quality on the held-out test split. All finalized rows are seed means from SAM-selected physics-objective checkpoints. PRISM result cells await its final rerun}{table.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Latent-noise diagnostic at $\sigma =0.5$. Scores compare decoded noisy latents with the clean input. Finalized baseline rows are seed means; PRISM values await rerun.}}{5}{table.3}\protected@file@percent }
+\newlabel{tab:noise}{{3}{5}{Latent-noise diagnostic at $\sigma =0.5$. Scores compare decoded noisy latents with the clean input. Finalized baseline rows are seed means; PRISM values await rerun}{table.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Latent-noise robustness}{5}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Chemical interpolation}{5}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Masked-pixel recovery}{5}{subsection.5.4}\protected@file@percent }
+\bibdata{../../references}
+\bibcite{chang2019hsidenet}{{1}{2019}{{Chang et~al.}}{{Chang, Yan, Fang, Zhong, and Liao}}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Spectral interpolation diagnostic. Jaggedness is the mean norm of the second finite difference across 11 latent interpolation points. Path length contextualizes transition magnitude.}}{6}{table.4}\protected@file@percent }
+\newlabel{tab:interpolation}{{4}{6}{Spectral interpolation diagnostic. Jaggedness is the mean norm of the second finite difference across 11 latent interpolation points. Path length contextualizes transition magnitude}{table.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Masked-pixel recovery will score reconstruction only at pixels whose complete spectra are masked at the input.}}{6}{table.5}\protected@file@percent }
+\newlabel{tab:masked}{{5}{6}{Masked-pixel recovery will score reconstruction only at pixels whose complete spectra are masked at the input}{table.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{6}{section.6}\protected@file@percent }
+\bibcite{chen2016deep}{{2}{2016}{{Chen et~al.}}{{Chen, Jiang, Li, Jia, and Ghamisi}}}
+\bibcite{chowdhury2020iirs}{{3}{2020}{{Chowdhury et~al.}}{{Chowdhury, Banerjee, Joshi, Dutta, Kumar, Bhattacharya, Amitabh, Rehman, Bhati, Karelia, et~al.}}}
+\bibcite{fu2024sst}{{4}{2024}{{Fu et~al.}}{{Fu, Xiong, Lu, Zhou, Zhou, and Qian}}}
+\bibcite{green1998aviris}{{5}{1998}{{Green et~al.}}{{Green, Eastwood, Sarture, Chrien, Aronsson, Chippendale, Faust, Pavri, Chovit, Solis, Olah, and Williams}}}
+\bibcite{higgins2017betavae}{{6}{2017}{{Higgins et~al.}}{{Higgins, Matthey, Pal, Burgess, Glorot, Botvinick, Mohamed, and Lerchner}}}
+\bibcite{kingma2014vae}{{7}{2014}{{Kingma \& Welling}}{{Kingma and Welling}}}
+\bibcite{kruse1993sips}{{8}{1993}{{Kruse et~al.}}{{Kruse, Lefkoff, Boardman, Heidebrecht, Shapiro, Barloon, and Goetz}}}
+\bibcite{murchie2007crism}{{9}{2007}{{Murchie et~al.}}{{Murchie, Arvidson, Bedini, Beisser, Bibring, Bishop, Boldt, Cavender, Choo, Clancy, et~al.}}}
+\bibcite{palsson2018unmixing}{{10}{2018}{{Palsson et~al.}}{{Palsson, Sigurdsson, Sveinsson, and Ulfarsson}}}
+\bibcite{raissi2019pinn}{{11}{2019}{{Raissi et~al.}}{{Raissi, Perdikaris, and Karniadakis}}}
+\bibcite{rombach2022ldm}{{12}{2022}{{Rombach et~al.}}{{Rombach, Blattmann, Lorenz, Esser, and Ommer}}}
+\bibcite{roy2020hybridsn}{{13}{2020}{{Roy et~al.}}{{Roy, Krishna, Dubey, and Chaudhuri}}}
+\bibcite{su2019daen}{{14}{2019}{{Su et~al.}}{{Su, Li, Plaza, Marinoni, Gamba, and Chakravortty}}}
+\bibstyle{../guidelines/iclr2027_conference}
+\@writefile{toc}{\contentsline {section}{\numberline {A}Extended Experimental Protocol}{8}{appendix.A}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Optimization and checkpoint selection}{8}{subsection.A.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Latent budgets and parameter counts}{8}{subsection.A.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Physics-loss ablation reporting}{8}{subsection.A.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.4}Statistical reporting}{8}{subsection.A.4}\protected@file@percent }
+\gdef \@abspage@last{8}
