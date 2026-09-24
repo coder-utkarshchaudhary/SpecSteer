@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import math
 import sys
@@ -185,6 +186,13 @@ CSV_COLUMNS = {
     ],
 }
 
+# Every CSV except dataset-floors.csv gets rows per cell; each is cached per
+# cell as a LIST of rows so a resumed run rebuilds the CSVs exactly.
+PER_CELL_CSVS = [name for name in CSV_COLUMNS if name != "dataset-floors.csv"]
+# Bump whenever a cached cell's schema or meaning changes, so a stale
+# results/final/.cache/*.json from an older run is recomputed, not reused.
+CACHE_VERSION = 2
+
 
 # ---------------------------------------------------------------------------
 # Telegram helpers — thin wrapper so --no-telegram is a single guard
@@ -205,7 +213,9 @@ class Logger:
                 print(f"  (telegram send failed: {e})")
 
     def send_pre(self, header: str, body: str) -> None:
-        self.send(f"{header}\n<pre>{body}</pre>")
+        # Escaped: tracebacks carry "<module>", which Telegram's HTML parse
+        # mode rejects outright — the failure message would never arrive.
+        self.send(f"{header}\n<pre>{html.escape(body)}</pre>")
 
     def send_document(self, path: Path, caption: str = "") -> None:
         print(f"  -> {path}")
@@ -563,13 +573,30 @@ def get_training_spectra_sample(dataset_name: str, packed_root: Path, num_spectr
     patch_indices = rng.choice(n, size=min(100, n), replace=False)
     pixels = []
     for idx in patch_indices:
-        patch = torch.from_numpy(train_ds[int(idx)])  # (H, W, C)
+        patch = train_ds[int(idx)]  # (H, W, C) float32 tensor already
         flat = patch.reshape(-1, patch.shape[-1])
         k = max(1, num_spectra // len(patch_indices))
         pixel_indices = rng.choice(flat.shape[0], size=min(k, flat.shape[0]), replace=False)
         pixels.append(flat[pixel_indices])
     sampled_spectra = torch.cat(pixels, dim=0)[:num_spectra]
     return sampled_spectra
+
+
+def reconstruct_zero_spatial(model, x: torch.Tensor) -> torch.Tensor:
+    """
+    Spatial-stream ablation for the dual-stream models (vae-our / vae-our-nl):
+    mirrors HSI_DualStream_PI_VAE.forward exactly, except the spatial latent is
+    replaced by zeros (the prior mean) before the spatial decoder — so the
+    spatial stream carries no information about x, and the spectral stream
+    and the gated fusion run unchanged. Local to this script on purpose: the
+    model code is frozen training code.
+    """
+    with torch.no_grad():
+        mu_s, _ = torch.chunk(model.spatial_stream.encoder(x), 2, dim=1)
+        recon_s = model.spatial_stream.decoder(torch.zeros_like(mu_s))
+        z_p, _, _ = model.reparameterize(model.spectral_stream.encoder(x))
+        recon_p = model.spectral_stream.decoder(z_p)
+        return model.fusion(recon_s, recon_p)
 
 
 def compute_per_sample_reconstruction_metrics(model, loader: DataLoader, device,
@@ -580,7 +607,7 @@ def compute_per_sample_reconstruction_metrics(model, loader: DataLoader, device,
         for x in loader:
             x = x.to(device, non_blocking=True)
             b = x.shape[0]
-            recon = model.reconstruct(x, zero_spatial=zero_spatial) if hasattr(model, "reconstruct") else model(x)[0]
+            recon = reconstruct_zero_spatial(model, x) if zero_spatial else model.reconstruct(x)
             
             for k in range(b):
                 xk = x[k:k+1]
@@ -698,7 +725,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
         with torch.inference_mode():
             for x in loader:
                 x = x.to(device, non_blocking=True)
-                recon_ab = model.reconstruct(x, zero_spatial=True)
+                recon_ab = reconstruct_zero_spatial(model, x)
                 ab_recon_acc.update(x, recon_ab)
                 del recon_ab, x
         out["spatial_ablation"] = ab_recon_acc.result()
@@ -799,7 +826,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
                 for sigma in SIGMAS:
                     if batch_start_idx == 0 and rng_seed == RNG_SEEDS[0]:
                         print(f"[Interpretability Log] Adding noise σ={sigma} as explicit multiplier of per-band signal std.")
-                    noise = torch.randn_like(x, generator=gen) * (sigma * per_band_std)
+                    noise = torch.randn(x.shape, generator=gen, device=x.device, dtype=x.dtype) * (sigma * per_band_std)
                     x_corrupted = x + noise
                     recon = model.reconstruct(x_corrupted)
                     accs[sigma].update(x, recon, divisors=div_tensor)
@@ -903,15 +930,18 @@ def interpolation_and_occupancy(latents_full: list[torch.Tensor], model, device,
     x_A = []
     x_B = []
     for p in range(n_pairs):
-        patch_a = torch.from_numpy(dataset_obj[int(idx_a[p])])  # (H, W, C)
-        patch_b = torch.from_numpy(dataset_obj[int(idx_b[p])])  # (H, W, C)
+        patch_a = dataset_obj[int(idx_a[p])]  # (H, W, C) float32 tensor already
+        patch_b = dataset_obj[int(idx_b[p])]
         x_A.append(patch_a[r, c])
         x_B.append(patch_b[r, c])
     x_A = torch.stack(x_A).to(device)  # (n_pairs, C)
     x_B = torch.stack(x_B).to(device)  # (n_pairs, C)
 
-    recon_t0 = torch.from_numpy(spectra[0]).to(device)  # (n_pairs, C)
-    recon_t1 = torch.from_numpy(spectra[-1]).to(device) # (n_pairs, C)
+    # lerp_latents is alpha*z_A + (1-alpha)*z_B: alpha=1 (spectra[-1]) decodes
+    # patch A's latent, alpha=0 (spectra[0]) decodes patch B's. t=0 is the
+    # patch-A endpoint, t=1 the patch-B endpoint.
+    recon_t0 = torch.from_numpy(spectra[-1]).to(device)  # (n_pairs, C) — decodes z_A
+    recon_t1 = torch.from_numpy(spectra[0]).to(device)   # (n_pairs, C) — decodes z_B
 
     def sam_angle(y1, y2):
         y1_norm = y1 / y1.norm(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -1146,7 +1176,7 @@ def compute_noisy_input_reference(loader: DataLoader, device, min_energy: float)
                 for sigma in SIGMAS:
                     if batch_start_idx == 0 and rng_seed == RNG_SEEDS[0]:
                         print(f"[Interpretability Log] Adding reference noise σ={sigma} as explicit multiplier of per-band signal std.")
-                    noise = torch.randn_like(x, generator=gen) * (sigma * per_band_std)
+                    noise = torch.randn(x.shape, generator=gen, device=x.device, dtype=x.dtype) * (sigma * per_band_std)
                     x_corrupted = x + noise
                     accs[sigma].update(x, x_corrupted, divisors=div_tensor)
                     del noise, x_corrupted
@@ -1255,7 +1285,7 @@ def main() -> int:
                 
             except Exception as e:
                 tb = traceback.format_exc()
-                log.send_pre(f"❌ Inference final - dataset setup FAILED on {ds}: {e}", tb[-2000:])
+                log.send_pre(f"❌ Inference final - dataset setup FAILED on {ds}: {html.escape(str(e))}", tb[-2000:])
                 print(f"Error setting up dataset {ds}:\n{tb}", file=sys.stderr)
                 continue
 
@@ -1273,14 +1303,10 @@ def main() -> int:
                     try:
                         cached_cell = json.loads(cell_cache_path.read_text(encoding="utf-8"))
                         cached_rows = cached_cell.get("rows", {})
-                        if all(k in cached_rows for k in CSV_COLUMNS):
-                            for name in CSV_COLUMNS:
-                                if name == "reconstruction-quality-per-sample.csv":
-                                    all_rows[name].extend(cached_rows[name])
-                                elif name == "missing-pixel-recovery.csv":
-                                    all_rows[name].extend(cached_rows[name])
-                                else:
-                                    all_rows[name].append(cached_rows[name])
+                        if (cached_cell.get("version") == CACHE_VERSION
+                                and all(isinstance(cached_rows.get(k), list) for k in PER_CELL_CSVS)):
+                            for name in PER_CELL_CSVS:
+                                all_rows[name].extend(cached_rows[name])
                             log.send(f"Inference final [{cell_idx}/{total_cells}] - {ds} | {model_name} | {loss} - LOADED FROM CACHE, skipping")
                             flush_all_csvs(all_rows, CSV_COLUMNS, out_dir)
                             continue
@@ -1292,6 +1318,7 @@ def main() -> int:
                 try:
                     per_seed = []
                     occ_per_seed = []
+                    cell_ps_rows: list[dict] = []   # per-sample rows, this cell only
                     for seed in CHECKPOINT_SEEDS:
                         try:
                             ckpt_path = resolve_checkpoint(args.ckpt_dir, ds, model_name, loss,
@@ -1322,8 +1349,8 @@ def main() -> int:
                                     "sample_id": sample_id,
                                     **r_sample
                                 }
-                                all_rows["reconstruction-quality-per-sample.csv"].append(sample_row)
-                                
+                                cell_ps_rows.append(sample_row)
+
                             # --- (h) Spatial ablation per-sample metrics if IIRS and vae-our-nl ---
                             if ds == "IIRS" and model_name == "vae-our-nl":
                                 per_sample_res_ab = compute_per_sample_reconstruction_metrics(model, loader, device, min_energy, ext_cfg, zero_spatial=True)
@@ -1336,13 +1363,13 @@ def main() -> int:
                                         "sample_id": sample_id,
                                         **r_sample
                                     }
-                                    all_rows["reconstruction-quality-per-sample.csv"].append(sample_row)
+                                    cell_ps_rows.append(sample_row)
                                     
                             del model
                             torch.cuda.empty_cache()
                         except Exception as e:  # noqa: BLE001
                             tb = traceback.format_exc()
-                            log.send_pre(f"❌ Inference final - {model_name}|{ds}|{loss}|seed{seed} FAILED: {e}", tb[-2000:])
+                            log.send_pre(f"❌ Inference final - {model_name}|{ds}|{loss}|seed{seed} FAILED: {html.escape(str(e))}", tb[-2000:])
                             print(tb, file=sys.stderr)
 
                     if not per_seed:
@@ -1416,13 +1443,26 @@ def main() -> int:
                         noise_row[f"sam_rad_recovery_s{sigma}"] = avg(["noise", sigma, "sam_rad"])
                         noise_row[f"psnr_recovery_s{sigma}"] = avg(["noise", sigma, "psnr"])
 
-                    clean_psnr = recon_row["psnr"]
+                    # Regression check. Noise-recovery PSNR is a MEAN OF PER-SAMPLE dB
+                    # values, so the clean reference must be the same kind of number
+                    # (the per-sample rows' mean), not recon_row["psnr"], which comes
+                    # from the pooled MSE and is always lower by Jensen's inequality.
+                    # A violation is warned about, never fatal: it must not kill a
+                    # multi-hour frozen run.
+                    clean_ps = [r["psnr"] for r in cell_ps_rows if r["model"] == model_name]
+                    clean_psnr = float(np.mean(clean_ps)) if clean_ps else float("nan")
+                    psnr_warnings = []
                     for i, sigma in enumerate(SIGMAS):
                         p_val = noise_row[f"psnr_recovery_s{sigma}"]
-                        assert p_val <= clean_psnr + 1e-2, f"Recovered PSNR {p_val:.2f} for sigma {sigma} exceeds clean PSNR {clean_psnr:.2f}"
+                        if p_val > clean_psnr + 1e-2:
+                            psnr_warnings.append(f"sigma={sigma}: recovered PSNR {p_val:.2f} dB exceeds clean per-sample PSNR {clean_psnr:.2f} dB")
                         if i > 0:
                             prev_p = noise_row[f"psnr_recovery_s{SIGMAS[i-1]}"]
-                            assert p_val <= prev_p + 1e-2, f"Recovered PSNR {p_val:.2f} for sigma {sigma} exceeds that for sigma {SIGMAS[i-1]} ({prev_p:.2f})"
+                            if p_val > prev_p + 1e-2:
+                                psnr_warnings.append(f"sigma={sigma}: recovered PSNR {p_val:.2f} dB exceeds sigma={SIGMAS[i-1]} ({prev_p:.2f} dB)")
+                    if psnr_warnings:
+                        log.send_pre(f"⚠️ Inference final - {model_name}|{ds}|{loss} - noise-recovery PSNR regression check",
+                                     "\n".join(psnr_warnings))
 
                     def occ_avg(key, seeds=occ_per_seed):
                         vals = [r[key] for r in seeds if not math.isnan(r[key])]
@@ -1466,33 +1506,34 @@ def main() -> int:
                             "sam_rad_masked_only": avg_mp("sam_rad_masked_only"),
                             "psnr_masked_only": avg_mp("psnr_masked_only"),
                         }
-                        all_rows["missing-pixel-recovery.csv"].append(mp_row)
                         mp_rows.append(mp_row)
 
+                    recon_rows = [recon_row]
                     if ds == "IIRS" and model_name == "vae-our-nl":
                         ab_row = {k: avg(["spatial_ablation", k]) for k in
                                   ("mse", "sam_rad", "sam_valid", "valid_pixel_frac", "psnr",
                                    "ssim", "sid", "sid_clamped_frac", "scc", "q2n", "n_samples")}
                         ab_row.update({"dataset": ds, "model": "vae-our-nl-spatial-ablation", "loss": loss})
-                        all_rows["reconstruction-quality.csv"].append(ab_row)
+                        recon_rows.insert(0, ab_row)
 
-                    all_rows["reconstruction-quality.csv"].append(recon_row)
-                    all_rows["model-validity-probes.csv"].append(validity_row)
-                    all_rows["noise-recovery.csv"].append(noise_row)
-                    all_rows["chemical-interpolation.csv"].append(interp_row)
+                    cell_rows = {
+                        "model-validity-probes.csv": [validity_row],
+                        "reconstruction-quality.csv": recon_rows,
+                        "reconstruction-quality-per-sample.csv": cell_ps_rows,
+                        "noise-recovery.csv": [noise_row],
+                        "chemical-interpolation.csv": [interp_row],
+                        "missing-pixel-recovery.csv": mp_rows,
+                    }
+                    assert set(cell_rows) == set(PER_CELL_CSVS)
+                    for name, rows in cell_rows.items():
+                        all_rows[name].extend(rows)
 
                     cell_cache = {
+                        "version": CACHE_VERSION,
                         "dataset": ds,
                         "model": model_name,
                         "loss": loss,
-                        "rows": {
-                            "reconstruction-quality.csv": recon_row,
-                            "reconstruction-quality-per-sample.csv": [r for r in all_rows["reconstruction-quality-per-sample.csv"] if r["dataset"] == ds and r["model"] in (model_name, "vae-our-nl-spatial-ablation") and r["loss"] == loss],
-                            "model-validity-probes.csv": validity_row,
-                            "noise-recovery.csv": noise_row,
-                            "chemical-interpolation.csv": interp_row,
-                            "missing-pixel-recovery.csv": mp_rows,
-                        },
+                        "rows": cell_rows,
                     }
                     cell_cache_path.write_text(json.dumps(cell_cache, indent=2), encoding="utf-8")
                     flush_all_csvs(all_rows, CSV_COLUMNS, out_dir)
@@ -1501,14 +1542,14 @@ def main() -> int:
                              f"(SAM={recon_row['sam_rad']:.4f}, PSNR={recon_row['psnr']:.2f}dB)")
                 except Exception as e:
                     tb = traceback.format_exc()
-                    log.send_pre(f"❌ Inference final - {model_name}|{ds}|{loss} CELL PROCESSING FAILED: {e}", tb[-2000:])
+                    log.send_pre(f"❌ Inference final - {model_name}|{ds}|{loss} CELL PROCESSING FAILED: {html.escape(str(e))}", tb[-2000:])
                     print(f"Error processing cell {model_name}|{ds}|{loss}:\n{tb}", file=sys.stderr)
                     continue
 
     except Exception as e:
         had_fatal_error = True
         tb = traceback.format_exc()
-        log.send_pre(f"❌ Inference final UNHANDLED FATAL ERROR: {e}", tb[-2500:])
+        log.send_pre(f"❌ Inference final UNHANDLED FATAL ERROR: {html.escape(str(e))}", tb[-2500:])
         print(f"Fatal unhandled exception:\n{tb}", file=sys.stderr)
 
     flush_all_csvs(all_rows, CSV_COLUMNS, out_dir)
@@ -1519,7 +1560,8 @@ def main() -> int:
 
     recon_rows = all_rows.get("reconstruction-quality.csv", [])
     ours = [r for r in recon_rows if r.get("model") == "vae-our-nl"]
-    others = [r for r in recon_rows if r.get("model") != "vae-our-nl"]
+    others = [r for r in recon_rows
+              if r.get("model") not in ("vae-our-nl", "vae-our-nl-spatial-ablation")]
     if ours and others:
         ours_sorted = sorted(ours, key=lambda r: (r.get("sam_rad", 999), -r.get("psnr", 0)))
         others_sorted = sorted(others, key=lambda r: (r.get("sam_rad", 999), -r.get("psnr", 0)))

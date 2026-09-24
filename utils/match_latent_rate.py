@@ -84,12 +84,7 @@ def latent_elements_closed_form(model_name: str, s) -> int:
         return s.vae_standard_latent_ch * g * g
     if model_name == "vae-3d-spatio-spectral":
         mult = 2 ** s.vae_3d_n_down
-        if C == 424:
-            c_pad = 448
-        elif C == 456:
-            c_pad = 512
-        else:
-            c_pad = -(-C // mult) * mult
+        c_pad = -(-C // mult) * mult
         g = H // mult
         return s.vae_3d_latent_ch * (c_pad // mult) * g * g
     if model_name == "vae-1d-pixelwise":
@@ -151,12 +146,7 @@ def effective_elements(model_name: str, elements: int, s) -> int:
     if model_name != "vae-3d-spatio-spectral":
         return elements
     mult = 2 ** s.vae_3d_n_down
-    if s.input_channels == 424:
-        c_pad = 448
-    elif s.input_channels == 456:
-        c_pad = 512
-    else:
-        c_pad = -(-s.input_channels // mult) * mult
+    c_pad = -(-s.input_channels // mult) * mult
     return int(round(elements * s.input_channels / c_pad))
 
 
