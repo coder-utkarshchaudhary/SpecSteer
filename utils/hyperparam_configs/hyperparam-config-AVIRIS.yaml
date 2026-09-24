@@ -70,7 +70,7 @@ early_stopping_patience: 3
 spectral_latent_dim: 5           # vae-our d_p:  20,480 of T per-pixel spectral
 vae_our_spatial_latent_ch: 128   # vae-our d_s: + 8,192 spatial grid = 28,672 (EXACT)
 vae_standard_latent_ch: 448      # vae-std  :  28,672 elements (EXACT)
-vae_3d_latent_ch: 8            # vae-3d   :  27,136 elements (-5.4%)
+vae_3d_latent_ch: 8            # vae-3d   :  28,672 elements (EXACT)
 vae_1d_latent_dim: 7            # vae-1d   :  28,672 elements (EXACT)
 # worst deviation from T: 5.4% (tolerance +/-10%)
 

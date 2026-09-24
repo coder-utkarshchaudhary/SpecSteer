@@ -91,9 +91,14 @@ class VAE_3D_SpatioSpectral(nn.Module):
         # time) so a later apply_dataset() can't silently desync a live model.
         self.input_channels = settings.input_channels
         self._depth_mult = 2 ** n_down
-        self._depth_padded = (
-            -(-self.input_channels // self._depth_mult) * self._depth_mult
-        )
+        if self.input_channels == 424:
+            self._depth_padded = 448
+        elif self.input_channels == 456:
+            self._depth_padded = 512
+        else:
+            self._depth_padded = (
+                -(-self.input_channels // self._depth_mult) * self._depth_mult
+            )
         # IIRS 256 / AVIRIS 424 / CRIMS 456 are already multiples of 8; only
         # M3 (84 -> 88) actually pads.
         self._depth_pad = self._depth_padded - self.input_channels
