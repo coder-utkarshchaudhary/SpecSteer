@@ -90,6 +90,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import ConcatDataset, DataLoader
+from tqdm.auto import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # Repo root must come FIRST: this file's own directory is sys.path[0] when run
@@ -129,7 +130,7 @@ DATASETS_SCOPE = ["IIRS", "AVIRIS", "CRIMS"]
 MODELS_SCOPE = ["vae-our-nl", "vae-standard", "vae-1d-pixelwise", "vae-3d-spatio-spectral"]
 CHECKPOINT_SEEDS = [67, 69]
 RNG_SEEDS = [67, 69, 1234]          # noise / mask draws — unrelated to which checkpoint is loaded
-SIGMAS = [0.05, 0.1, 0.2, 0.5, 1.0]
+SIGMAS = [0.01, 0.05, 0.2]
 PIXEL_MASK_FRACTION = 0.10
 N_INTERP_PAIRS = 100
 N_ALPHA = 11
@@ -164,11 +165,9 @@ CSV_COLUMNS = {
     ],
     "noise-recovery.csv": [
         "dataset", "model", "loss",
+        "sam_recovery_s0.01", "sam_rad_recovery_s0.01", "psnr_recovery_s0.01",
         "sam_recovery_s0.05", "sam_rad_recovery_s0.05", "psnr_recovery_s0.05",
-        "sam_recovery_s0.1", "sam_rad_recovery_s0.1", "psnr_recovery_s0.1",
         "sam_recovery_s0.2", "sam_rad_recovery_s0.2", "psnr_recovery_s0.2",
-        "sam_recovery_s0.5", "sam_rad_recovery_s0.5", "psnr_recovery_s0.5",
-        "sam_recovery_s1.0", "sam_rad_recovery_s1.0", "psnr_recovery_s1.0",
     ],
     "chemical-interpolation.csv": [
         "dataset", "model", "loss",
@@ -191,7 +190,7 @@ CSV_COLUMNS = {
 PER_CELL_CSVS = [name for name in CSV_COLUMNS if name != "dataset-floors.csv"]
 # Bump whenever a cached cell's schema or meaning changes, so a stale
 # results/final/.cache/*.json from an older run is recomputed, not reused.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +603,7 @@ def compute_per_sample_reconstruction_metrics(model, loader: DataLoader, device,
                                               zero_spatial: bool = False) -> list[dict]:
     results = []
     with torch.inference_mode():
-        for x in loader:
+        for x in tqdm(loader, desc="Per-sample Recon Metrics", leave=False):
             x = x.to(device, non_blocking=True)
             b = x.shape[0]
             recon = reconstruct_zero_spatial(model, x) if zero_spatial else model.reconstruct(x)
@@ -698,7 +697,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     p4_intact = SimpleAccumulator(min_energy)
     p4_shuffled = SimpleAccumulator(min_energy)
     with torch.inference_mode():
-        for x in loader:
+        for x in tqdm(loader, desc=f"[{ds}|{model_name}] Pass A (Recon+P4)", leave=False):
             x = x.to(device, non_blocking=True)
             b, H, W, C = x.shape
             recon = model.reconstruct(x)
@@ -723,7 +722,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     if ds == "IIRS" and model_name == "vae-our-nl":
         ab_recon_acc = ReconAccumulator(min_energy, ext_cfg)
         with torch.inference_mode():
-            for x in loader:
+            for x in tqdm(loader, desc=f"[{ds}|{model_name}] Zero-Spatial Ablation", leave=False):
                 x = x.to(device, non_blocking=True)
                 recon_ab = reconstruct_zero_spatial(model, x)
                 ab_recon_acc.update(x, recon_ab)
@@ -734,7 +733,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     # --- Pass B: encode -> latents_full (cached on CPU for P3/5/6) --------
     parts: list[list[torch.Tensor]] = None
     with torch.inference_mode():
-        for x in loader:
+        for x in tqdm(loader, desc=f"[{ds}|{model_name}] Pass B (Encode Latents)", leave=False):
             x = x.to(device, non_blocking=True)
             lat = model.encode_latents(x)
             if parts is None:
@@ -776,7 +775,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
     n_total_acc = 0
     with torch.inference_mode():
         i = 0
-        for x in loader:
+        for x in tqdm(loader, desc=f"[{ds}|{model_name}] Pass C (Latent Swap)", leave=False):
             x = x.to(device, non_blocking=True)
             b = x.shape[0]
             base = model.decode_latents([t[i:i + b].to(device, non_blocking=True) for t in latents_full])
@@ -817,7 +816,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
         accs = {sigma: SimpleAccumulator(min_energy) for sigma in SIGMAS}
         with torch.inference_mode():
             batch_start_idx = 0
-            for x in loader:
+            for x in tqdm(loader, desc=f"[{ds}|{model_name}] Noise Recov (rng={rng_seed})", leave=False):
                 x = x.to(device, non_blocking=True)
                 b = x.shape[0]
                 per_band_std = x.std(dim=(1, 2), keepdim=True)
@@ -848,9 +847,9 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
         for sigma in SIGMAS
     }
 
-    # --- Passes G-I: step 7, missing-pixel recovery (sweep mask ratios) ----
+    # --- Passes G-I: step 7, missing-pixel recovery (mask ratio 0.10) ----
     out["missing_pixel"] = {}
-    for ratio in [0.10, 0.25, 0.50]:
+    for ratio in [PIXEL_MASK_FRACTION]:
         ratio_results = []
         for rng_seed in RNG_SEEDS:
             rng = np.random.default_rng(rng_seed)
@@ -858,7 +857,7 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
             acc = MissingPixelAccumulator(min_energy)
             with torch.inference_mode():
                 i = 0
-                for x in loader:
+                for x in tqdm(loader, desc=f"[{ds}|{model_name}] Mask Recov (ratio={ratio:.2f}, rng={rng_seed})", leave=False):
                     x = x.to(device, non_blocking=True)
                     b = x.shape[0]
                     m = torch.from_numpy(mask_np[i:i + b]).to(device)
@@ -1168,7 +1167,7 @@ def compute_noisy_input_reference(loader: DataLoader, device, min_energy: float)
         accs = {sigma: SimpleAccumulator(min_energy) for sigma in SIGMAS}
         with torch.inference_mode():
             batch_start_idx = 0
-            for x in loader:
+            for x in tqdm(loader, desc=f"Ref Noise Reference (seed={rng_seed})", leave=False):
                 x = x.to(device, non_blocking=True)
                 b = x.shape[0]
                 per_band_std = x.std(dim=(1, 2), keepdim=True)
@@ -1294,8 +1293,10 @@ def main() -> int:
                 log.send(f"Inference final - {exp} - START - {ds}")
 
             ds_cells = [(m, l) for d, m, l in cells if d == ds]
-            for model_name, loss in ds_cells:
+            pbar_cells = tqdm(ds_cells, desc=f"Eval Cells ({ds})", leave=True)
+            for model_name, loss in pbar_cells:
                 cell_idx += 1
+                pbar_cells.set_description(f"Eval [{cell_idx}/{total_cells}] {ds} | {model_name} | {loss}")
                 cell_cache_path = cache_dir / f"{ds}__{model_name}__{loss}.json"
 
                 # ---- Resume / cache check --------------------------------
@@ -1482,7 +1483,7 @@ def main() -> int:
                     }
 
                     mp_rows = []
-                    for ratio in [0.10, 0.25, 0.50]:
+                    for ratio in [PIXEL_MASK_FRACTION]:
                         def avg_mp(key):
                             vals = []
                             for r in per_seed:
