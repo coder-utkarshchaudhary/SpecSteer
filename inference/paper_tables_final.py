@@ -19,9 +19,15 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) in sys.path:
+    sys.path.remove(str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT))
 
 MODELS = [  # (registry name, display name) in the paper's row order
     ("vae-standard", "2D Spatial VAE"),
@@ -130,6 +136,7 @@ def main() -> int:
     p.add_argument("--missing-pixels", type=Path,
                    default=Path("results/final/missing_pixels/missing-pixel-recovery.csv"))
     p.add_argument("--out-dir", type=Path, default=Path("results/final/paper_snippets"))
+    p.add_argument("--no-telegram", action="store_true")
     args = p.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -190,6 +197,18 @@ def main() -> int:
     (args.out_dir / "summary.txt").write_text("\n".join(summary) + "\n")
     print("\n".join(summary))
     print(f"\nwrote {args.out_dir}/table4_noise.tex, table6_missing_pixels.tex, summary.txt")
+
+    # Telegram: the only window the author has onto the lab box. Text is always
+    # sent (attachments need direct bot credentials; the relay can't carry files).
+    from inference.inference_final import Logger
+    log = Logger(enabled=not args.no_telegram)
+    log.send_pre_long("Paper tables — PRISM rank per column (Table 4)",
+                      "\n".join(s4) or "no noise-recovery CSV found")
+    log.send_pre_long("Paper tables — PRISM rank per column (Table 6)",
+                      "\n".join(s6) or "no missing-pixel CSV found")
+    for name, tex in (("table4_noise.tex", t4), ("table6_missing_pixels.tex", t6)):
+        log.send_document(args.out_dir / name, caption=name)
+        log.send_pre_long(f"LaTeX — {name}", tex)
     return 0
 
 

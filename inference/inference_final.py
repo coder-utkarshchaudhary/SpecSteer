@@ -181,6 +181,52 @@ class Logger:
         # mode rejects outright — the failure message would never arrive.
         self.send(f"{header}\n<pre>{html.escape(body)}</pre>")
 
+    def send_pre_long(self, header: str, body: str, limit: int = 3500) -> None:
+        """Like send_pre, but split on line boundaries into several messages,
+        each with its own <pre> — the notifier's own splitter would cut one
+        <pre> in half, and Telegram rejects the unbalanced halves."""
+        chunk: list[str] = []
+        size, part = 0, 1
+        for line in body.splitlines():
+            if chunk and size + len(line) + 1 > limit:
+                self.send_pre(f"{header} ({part})", "\n".join(chunk))
+                chunk, size, part = [], 0, part + 1
+            chunk.append(line)
+            size += len(line) + 1
+        if chunk:
+            self.send_pre(f"{header} ({part})" if part > 1 else header, "\n".join(chunk))
+
+    def send_csv_as_text(self, path: Path, title: str, columns: list[tuple[str, str]],
+                         group_by: str = "dataset") -> None:
+        """
+        Post a results CSV as fixed-width text, one message per dataset.
+        Always sent, alongside send_document: a file attachment needs the
+        direct bot credentials, and over the relay only a one-line
+        '[attachment unavailable]' notice arrives — the numbers would never
+        reach Telegram. columns = [(csv_column, short_header), ...].
+        """
+        if not path.is_file():
+            return
+        with path.open(newline="") as fh:
+            rows = list(csv.DictReader(fh))
+        if not rows:
+            return
+
+        def cell(v: str) -> str:
+            try:
+                return f"{float(v):.4g}"
+            except (TypeError, ValueError):
+                return (v or "")[:22]
+
+        groups: dict[str, list[dict]] = {}
+        for r in rows:
+            groups.setdefault(r.get(group_by, ""), []).append(r)
+        for g, grows in groups.items():
+            table = [[h for _, h in columns]] + [[cell(r.get(c, "")) for c, _ in columns] for r in grows]
+            widths = [max(len(row[j]) for row in table) for j in range(len(columns))]
+            body = "\n".join("  ".join(v.ljust(w) for v, w in zip(row, widths)) for row in table)
+            self.send_pre_long(f"{title} — {g}", body)
+
     def send_document(self, path: Path, caption: str = "") -> None:
         print(f"  -> {path}")
         if self.tg is not None:
@@ -1192,6 +1238,12 @@ def main() -> int:
         path = out_dir / name
         if path.is_file():
             log.send_document(path, caption=name)
+    text_cols = [("model", "model"), ("loss", "loss")]
+    for sigma in SIGMAS:
+        text_cols += [(f"psnr_recovery_s{sigma}", f"PSNR@{sigma}"),
+                      (f"sam_recovery_s{sigma}", f"SAMv@{sigma}")]
+    log.send_csv_as_text(out_dir / "noise-recovery.csv",
+                         "Noise recovery (input-space; SAMv = SAM-valid, rad)", text_cols)
 
     elapsed = time.time() - t0
     summary = "\n".join(f"{name}: {len(rows)} rows" for name, rows in all_rows.items())

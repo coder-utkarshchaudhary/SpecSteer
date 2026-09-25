@@ -231,12 +231,20 @@ def main() -> int:
             cache_path.write_text(json.dumps({"version": CACHE_VERSION, "row": row}, indent=2),
                                   encoding="utf-8")
             write_csv(rows, CSV_COLUMNS, csv_path)
-            log.send(f"Missing-pixel - DONE - {tag} (PSNR clean {res['psnr_clean']:.2f} dB, "
-                     f"masked {res['psnr_masked']:.2f} dB, drop {res['psnr_drop']:.2f} dB)")
+            log.send(f"Missing-pixel - DONE - {tag}: PSNR clean {res['psnr_clean']:.2f} / "
+                     f"masked {res['psnr_masked']:.2f} / drop {res['psnr_drop']:.2f} dB; "
+                     f"SAM-valid clean {res['sam_valid_clean']:.4f} / masked "
+                     f"{res['sam_valid_masked']:.4f} / drop {res['sam_valid_drop']:.4f} rad")
 
     if rows:
         write_csv(rows, CSV_COLUMNS, csv_path)
         log.send_document(csv_path, caption=CSV_NAME)
+        log.send_csv_as_text(csv_path, "Missing-pixel recovery (10% pixels, seed 67; SAMv rad)", [
+            ("model", "model"), ("loss", "loss"),
+            ("psnr_clean", "PSNR_clean"), ("psnr_masked", "PSNR_masked"), ("psnr_drop", "PSNR_drop"),
+            ("sam_valid_clean", "SAMv_clean"), ("sam_valid_masked", "SAMv_masked"),
+            ("sam_valid_drop", "SAMv_drop"),
+        ])
     log.send(f"Missing-pixel recovery complete — {len(rows)}/{len(cells)} cells, "
              f"{(time.time() - t0) / 60:.1f} min")
     return 1 if had_failure else 0
