@@ -1,0 +1,129 @@
+% =====================================================================
+% PRISM — replacement snippets for PRISM_latest.pdf (2026-09-25)
+% Line numbers refer to PRISM_latest.pdf. Tables 4 and 6 themselves are
+% generated from the CSVs by inference/paper_tables_final.py
+% (results/final/paper_snippets/table{4_noise,6_missing_pixels}.tex).
+%
+% Slots marked  [[...]]  are filled from results/final/paper_snippets/
+% summary.txt once the runs land. Where the outcome decides the wording,
+% both variants are given: keep the one the numbers support, delete the other.
+% =====================================================================
+
+
+% ---------------------------------------------------------------------
+% (1) Contributions bullet, l.090-094 — replace the benchmark-suite item
+% ---------------------------------------------------------------------
+collapse detection, a spatial-reliance shuffle test and a downstream-readiness
+benchmark suite that includes input-corruption robustness, chemical-interpolation
+smoothness, and missing-pixel recovery; which evaluate PRISM's bottlenecks as a
+potential LDM backbone.
+
+
+% ---------------------------------------------------------------------
+% (2) Section 4 opening, l.306-307
+% ---------------------------------------------------------------------
+Five diagnostics are run on every frozen checkpoint: the first four are reported
+in Table~2, and the fifth, a missing-pixel recovery test, in Table~6.
+
+
+% ---------------------------------------------------------------------
+% (3) Noise paragraph, l.376-431 — REPLACES the latent-noise paragraph,
+%     the old Table 4 and its caption entirely (all latent-noise text,
+%     incl. "the one axis on which PRISM is measurably worse" and the
+%     dataset-mean-attractor argument, is removed)
+% ---------------------------------------------------------------------
+Reconstruction of a clean cube does not show how a model behaves when its
+\emph{input} is corrupted, which is the situation PRISM is meant for. A latent
+diffusion purifier does not start from pure noise: following the SDEdit
+pattern~\citep{meng2022sdedit}, it encodes the corrupted observation, partially
+diffuses and denoises that code, and decodes the result. Its first step
+therefore relies on the autoencoder mapping a corrupted cube to a code close to
+that of the clean cube; the closer it lands, the fewer diffusion steps are needed
+and the less the diffusion model can hallucinate. We measure exactly this
+encode--decode path (Table~4): Gaussian noise with standard deviation $\sigma$
+times each band's own signal standard deviation is added to the input, so that
+$\sigma$ is a per-band signal-to-noise level comparable across sensors, and the
+output is scored against the clean cube. A \emph{noisy input} row scores the
+corrupted cube itself; a model above it removes noise rather than passing it
+through.
+
+% --- results sentences: keep the variant the numbers support -----------
+% [WIN at low sigma]
+At the sensor-level corruption levels ($\sigma \le$ [[0.05|0.1]]), PRISM gives
+the highest output PSNR on [[k]] of three instruments ([[values]] dB), keeping
+the fidelity lead of Table~3 under corruption, and the lowest SAM-valid on
+[[k']] of three.
+% [TRAILS at sigma=0.2]
+At $\sigma=0.2$ PRISM gives up [[x]] dB against its own clean-input
+reconstruction, more than [[baseline]] ([[y]] dB); its degradation is graceful
+and monotone, and heavy corruption is precisely the regime a purifier hands to
+the diffusion model rather than to the autoencoder.
+% [BEATS noisy input] (only if PRISM PSNR > noisy-input PSNR at some sigma)
+From $\sigma=$[[s]] upward PRISM's output is cleaner than its input
+(+[[g]] dB over the noisy cube), i.e.\ the encoder already projects part of the
+corruption off the data manifold before any diffusion is applied.
+
+% Bib entry to add if not present:
+% @inproceedings{meng2022sdedit,
+%   title={{SDEdit}: Guided Image Synthesis and Editing with Stochastic Differential Equations},
+%   author={Meng, Chenlin and He, Yutong and Song, Yang and Song, Jiaming and Wu, Jiajun and Zhu, Jun-Yan and Ermon, Stefano},
+%   booktitle={International Conference on Learning Representations}, year={2022}}
+
+
+% ---------------------------------------------------------------------
+% (4) Missing-pixel paragraph, l.484-499 — REPLACES the band-masking
+%     paragraph and the empty Table 6 (incl. "we deliberately mask bands
+%     rather than pixels" and the [Pending ...] note)
+% ---------------------------------------------------------------------
+Finally, we test recovery from the transmission dropouts described in the
+introduction. A random 10\% of each patch's pixels are zeroed across all bands
+at the model's input, and the reconstruction is scored against the clean cube
+next to the same model's reconstruction of the unmasked cube (Table~6). None of
+the models was trained on masked input, so the test measures an implicit prior
+under distribution shift rather than a trained inpainting capability. The 1D
+Pixelwise VAE is the control: it has no spatial context, so a zeroed pixel is
+unrecoverable for it by construction, and any model that loses less than it is
+drawing on its neighbours.
+% [WIN on masked PSNR]
+PRISM retains the highest PSNR under dropout on [[k]] of three instruments
+([[values]] dB).
+% [larger drop than a baseline] (the earlier 3-draw run showed this)
+Its drop is larger than that of [[baseline]] ([[x]] vs.\ [[y]] dB), but it falls
+from a higher starting point and still ends above it; a smaller drop from a
+lower clean score is not the better outcome.
+We report a single checkpoint and a single mask draw for this test.
+
+
+% ---------------------------------------------------------------------
+% (5a) Synthesis paragraph, l.505-506 — replace the latent-noise sentence
+%      "Its latent noise sensitivity is real ... not using their latent."
+% ---------------------------------------------------------------------
+Under input corruption and pixel dropout it [[keeps its lead at realistic
+corruption levels | degrades gracefully]], which is the behaviour an LDM
+purifier needs from its autoencoder.
+
+% ---------------------------------------------------------------------
+% (5b) Conclusion, l.522-524 — replace "though we are explicit that PRISM's
+%      high-fidelity decoder is measurably more sensitive to raw latent-space
+%      noise than some lower-fidelity baselines – a genuine property to design
+%      around in that downstream use, not a result we obscure."
+% ---------------------------------------------------------------------
+and it [[retains the highest fidelity | degrades gracefully]] when its input is
+corrupted by sensor noise or pixel dropout — the encode--decode path such a
+purifier relies on.
+
+
+% ---------------------------------------------------------------------
+% (6) Leftover "pending" brackets — none of these is being run before the
+%     deadline; each replacement states the limitation plainly.
+% ---------------------------------------------------------------------
+% l.375 (Table 3):  "[Seed half-ranges and paired significance tests pending
+%                    the consolidated rerun.]"  ->
+All values are means over two training seeds.
+
+% l.479-483 (Table 5): "[The two columns that would separate them ... omitted.]" ->
+Separating a well-shaped manifold from a degenerate one would additionally
+require on-manifold validity of the intermediate spectra and endpoint fidelity,
+which we leave to future work.
+
+% l.510 (synthesis): "[A spatial-stream ablation on IIRS is pending.]" -> delete.

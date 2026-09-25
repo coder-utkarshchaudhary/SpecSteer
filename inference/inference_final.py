@@ -131,20 +131,24 @@ MODELS_SCOPE = ["vae-our-nl", "vae-standard", "vae-1d-pixelwise", "vae-3d-spatio
 CHECKPOINT_SEEDS = [67, 69]
 RNG_SEEDS = [67, 69, 1234]          # noise / mask draws — unrelated to which checkpoint is loaded
 SIGMAS = [0.01, 0.05, 0.2]
+LEGACY_CACHE_SIGMAS = [0.01, 0.05, 0.2]
 PIXEL_MASK_FRACTION = 0.10
 N_INTERP_PAIRS = 100
 N_ALPHA = 11
 INTERP_PIXEL = (32, 32)
 P1_FLOOR_SAMPLE = 2000              # subsample size for the trivial-floor characterisation
 
-CSV_COLUMNS = {
-    "noise-recovery.csv": [
-        "dataset", "model", "loss",
-        "sam_recovery_s0.01", "sam_rad_recovery_s0.01", "psnr_recovery_s0.01",
-        "sam_recovery_s0.05", "sam_rad_recovery_s0.05", "psnr_recovery_s0.05",
-        "sam_recovery_s0.2", "sam_rad_recovery_s0.2", "psnr_recovery_s0.2",
-    ],
-}
+
+
+def noise_columns(sigmas: list[float]) -> list[str]:
+    """noise-recovery.csv header, derived from the sigma list so the two can't drift."""
+    cols = ["dataset", "model", "loss"]
+    for sigma in sigmas:
+        cols += [f"sam_recovery_s{sigma}", f"sam_rad_recovery_s{sigma}", f"psnr_recovery_s{sigma}"]
+    return cols
+
+
+CSV_COLUMNS = {"noise-recovery.csv": noise_columns(SIGMAS)}
 
 # Every CSV except dataset-floors.csv gets rows per cell; each is cached per
 # cell as a LIST of rows so a resumed run rebuilds the CSVs exactly.
@@ -966,6 +970,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true",
                    help="Print the cell grid + patch-audit counts; load no model.")
     p.add_argument("--set", action="append", default=None, metavar="KEY=VALUE")
+    p.add_argument("--sigmas", default=",".join(str(s) for s in SIGMAS),
+                   help="Comma list of input-noise sigmas (multiples of each band's own "
+                        "std). Use a separate --out-dir per sigma set: a cell cache is only "
+                        "reused when its sigma list matches exactly.")
     return p.parse_args()
 
 
@@ -1006,7 +1014,10 @@ def compute_noisy_input_reference(loader: DataLoader, device, min_energy: float)
 
 
 def main() -> int:
+    global SIGMAS
     args = parse_args()
+    SIGMAS = [float(s) for s in args.sigmas.split(",") if s.strip()]
+    CSV_COLUMNS["noise-recovery.csv"] = noise_columns(SIGMAS)
     datasets = [d.strip().upper() for d in args.datasets.split(",") if d.strip()]
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     out_dir = Path(args.out_dir)
@@ -1019,7 +1030,7 @@ def main() -> int:
 
     cells = cell_grid(models, datasets)
     total_cells = len(cells)
-    log.send(f"Inference final started — {total_cells} cells "
+    log.send(f"Inference final started — sigmas={SIGMAS}, {total_cells} cells "
              f"({len(datasets)} datasets x models/losses), device={device}, "
              f"out_dir={out_dir}")
 
@@ -1091,6 +1102,9 @@ def main() -> int:
                         cached_cell = json.loads(cell_cache_path.read_text(encoding="utf-8"))
                         cached_rows = cached_cell.get("rows", {})
                         if (cached_cell.get("version") == CACHE_VERSION
+                                # caches written before --sigmas existed carry no list;
+                                # they were all computed at the original [0.01, 0.05, 0.2]
+                                and cached_cell.get("sigmas", LEGACY_CACHE_SIGMAS) == SIGMAS
                                 and all(isinstance(cached_rows.get(k), list) for k in PER_CELL_CSVS)):
                             for name in PER_CELL_CSVS:
                                 all_rows[name].extend(cached_rows[name])
@@ -1151,6 +1165,7 @@ def main() -> int:
 
                     cell_cache = {
                         "version": CACHE_VERSION,
+                        "sigmas": SIGMAS,
                         "dataset": ds,
                         "model": model_name,
                         "loss": loss,
