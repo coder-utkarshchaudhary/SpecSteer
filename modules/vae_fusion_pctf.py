@@ -4,16 +4,26 @@ modules/vae_fusion_pctf.py
 Physics-Constrained Trust-Region Fusion (PCTF) and Fusion Ablation Suite
 for Dual-Stream HSI VAE (PRISM).
 
-Implements the five fusion mechanisms for the methodological ablation:
-  1. `vae-fusion-fixed` : Fixed-Weight Fusion (alpha = 0.5, parameter-free convex blend)
-  2. `vae-fusion-unconstrained` : Learned Unconstrained Fusion (Gate trained without SAM penalty)
-  3. `vae-fusion-sam-penalty` : Learned + SAM Penalty (Standard PRISM regularized fusion)
-  4. `vae-fusion-constrained` : Physics-Constrained Trust-Region Fusion (PCTF)
-     Formulation: min_{alpha_{ij}} D(x_f, x)  s.t.  SAM(x_{ij}, x_{f,ij}) <= epsilon
-     Uses spatial reconstruction as much as possible within a physically admissible spectral trust region.
-  5. `vae-fusion-uncertainty` : Uncertainty-Aware Constrained Fusion (U-PCTF)
-     Formulation: min_{alpha_{ij}} D(x_f, x)  s.t.  SAM(x_{ij}, x_{f,ij}) <= epsilon_{ij}
-     where epsilon_{ij} = f(spectral SNR, ||x_s - x_p||, latent uncertainty).
+Implements the refined fusion mechanisms based on constrained-optimization theory:
+  1. `vae-fusion-fixed` : Fixed-Weight Fusion (alpha = 0.5 per pixel, parameter-free)
+  2. `vae-fusion-unconstrained` : Learned Unconstrained Fusion (alpha = Gate(h_s, h_p), no SAM penalty)
+  3. `vae-fusion-sam-penalty` : Learned + SAM Penalty (Current PRISM baseline: L_ELBO + lambda * L_SAM)
+  4. `vae-fusion-constrained` : Primal-Dual Constrained Optimization (PCTF)
+     Formulation: min_{theta, phi, alpha} L_ELBO  s.t.  E[SAM(x, x_f)] <= epsilon
+     Lagrange multiplier lambda is dynamically updated via dual gradient ascent during training.
+  5. `vae-fusion-uncertainty` : Explicit Uncertainty-Aware Constrained Fusion (U-PCTF)
+     Tolerance epsilon_i = f(u_i, d_i, s_i) where:
+       * u_i : spatial latent uncertainty (sigma_s^2)
+       * d_i : branch disagreement SAM(x_s, x_p)
+       * s_i : spectral signal-to-noise ratio
+     High discrepancy and uncertainty tighten the spectral trust region (smaller epsilon_i).
+
+Key Architectural Invariants:
+  - Single fusion weight per spatial pixel: alpha is shape (B, H, W, 1) shared across
+    all spectral bands to prevent independent inter-band mixing and spectral distortion.
+  - Training vs Inference separation: Training enforces E[SAM(x, x_f)] <= epsilon with
+    respect to ground truth x. Inference operates ground-truth-free, utilizing the learned
+    gate and internal stream consistency SAM(x_s, x_p).
 """
 
 from __future__ import annotations
@@ -50,30 +60,33 @@ def _pixelwise_sam(x1: torch.Tensor, x2: torch.Tensor, eps: float = 1e-7) -> tor
 
 
 # ===========================================================================
-# 1. Fusion Module Implementations
+# 1. Fusion Modules with Single Weight Per Pixel (Shared Across Bands)
 # ===========================================================================
 
 class FixedWeightFusionModule(nn.Module):
     """
     Experiment 1: Fixed-Weight Fusion.
-    Parameter-free equal convex blend:
-        x_f = alpha * x_s + (1 - alpha) * x_p  (alpha = 0.5)
+    Scalar alpha = 0.5 shared across all pixels and bands:
+        x_f = 0.5 * x_s + 0.5 * x_p
     """
 
     def __init__(self, alpha: float = 0.5):
         super().__init__()
         self.alpha = float(alpha)
 
-    def forward(self, recon_s, recon_p, target_x=None, mu_s=None, logvar_s=None, mu_p=None, logvar_p=None):
+    def forward(self, recon_s, recon_p, training: bool = True):
         fused = self.alpha * recon_s + (1.0 - self.alpha) * recon_p
         alpha_map = torch.full_like(recon_s[..., :1], self.alpha)
-        return fused, alpha_map, None
+        return fused, alpha_map
 
 
 class LearnedUnconstrainedFusionModule(nn.Module):
     """
     Experiment 2: Learned Unconstrained Fusion.
-    Learned gating network optimizing reconstruction MSE without SAM constraint.
+    Learned 1x1 conv gate predicting a single scalar alpha_ij per spatial pixel,
+    shared across all spectral bands:
+        alpha = sigmoid( Gate( [h_s, h_p] ) )  # (B, H, W, 1)
+        x_f = alpha * x_s + (1 - alpha) * x_p
     """
 
     def __init__(self, channels: int, hidden: int = 64):
@@ -81,21 +94,22 @@ class LearnedUnconstrainedFusionModule(nn.Module):
         self.gate = nn.Sequential(
             nn.Conv2d(channels * 2, hidden, kernel_size=1),
             nn.ReLU(),
-            nn.Conv2d(hidden, channels, kernel_size=1),
+            nn.Conv2d(hidden, 1, kernel_size=1),  # Single weight per spatial pixel
         )
 
-    def forward(self, recon_s, recon_p, target_x=None, mu_s=None, logvar_s=None, mu_p=None, logvar_p=None):
+    def forward(self, recon_s, recon_p, training: bool = True):
         h_s = recon_s.permute(0, 3, 1, 2)
         h_p = recon_p.permute(0, 3, 1, 2)
-        alpha = torch.sigmoid(self.gate(torch.cat([h_s, h_p], dim=1)))
-        fused = alpha * h_s + (1.0 - alpha) * h_p
-        return fused.permute(0, 2, 3, 1), alpha.permute(0, 2, 3, 1), None
+        # alpha is (B, 1, H, W) -> permuted to (B, H, W, 1) and broadcast across C
+        alpha = torch.sigmoid(self.gate(torch.cat([h_s, h_p], dim=1))).permute(0, 2, 3, 1)
+        fused = alpha * recon_s + (1.0 - alpha) * recon_p
+        return fused, alpha
 
 
 class LearnedSAMPenaltyFusionModule(nn.Module):
     """
     Experiment 3: Learned + SAM Penalty (Current PRISM Baseline).
-    Learned gating network regularized by scalar SAM penalty in the objective.
+    Learned single weight per pixel, regularized by a fixed scalar SAM loss.
     """
 
     def __init__(self, channels: int, hidden: int = 64):
@@ -103,27 +117,29 @@ class LearnedSAMPenaltyFusionModule(nn.Module):
         self.gate = nn.Sequential(
             nn.Conv2d(channels * 2, hidden, kernel_size=1),
             nn.ReLU(),
-            nn.Conv2d(hidden, channels, kernel_size=1),
+            nn.Conv2d(hidden, 1, kernel_size=1),
         )
 
-    def forward(self, recon_s, recon_p, target_x=None, mu_s=None, logvar_s=None, mu_p=None, logvar_p=None):
+    def forward(self, recon_s, recon_p, training: bool = True):
         h_s = recon_s.permute(0, 3, 1, 2)
         h_p = recon_p.permute(0, 3, 1, 2)
-        alpha = torch.sigmoid(self.gate(torch.cat([h_s, h_p], dim=1)))
-        fused = alpha * h_s + (1.0 - alpha) * h_p
-        return fused.permute(0, 2, 3, 1), alpha.permute(0, 2, 3, 1), None
+        alpha = torch.sigmoid(self.gate(torch.cat([h_s, h_p], dim=1))).permute(0, 2, 3, 1)
+        fused = alpha * recon_s + (1.0 - alpha) * recon_p
+        return fused, alpha
 
 
 class PhysicsConstrainedTrustRegionFusionModule(nn.Module):
     """
     Experiment 4: Physics-Constrained Trust-Region Fusion (PCTF).
-    Formulation:
-        min_{alpha_{ij}} D(x_f, x)  s.t.  SAM(x_{ij}, x_{f,ij}) <= epsilon
-
-    Spatial context is utilized as much as possible up to the boundary of
-    the physically admissible spectral trust region (epsilon). If the candidate
-    spatial reliance breaches the trust region, alpha is projected back towards
-    the physical spectral branch.
+    
+    Training:
+        Enforces primal-dual constraint E[SAM(x, x_f)] <= epsilon.
+        The gate learns candidate spatial reliance alpha_cand per pixel.
+    Inference (Ground-Truth Free):
+        Evaluates internal physical consistency between streams:
+            disagreement = SAM(x_s, x_p)
+        If disagreement > epsilon, contracts alpha towards physical spectral stream:
+            alpha = alpha_cand * min(1.0, epsilon / (disagreement + 1e-7))
     """
 
     def __init__(self, channels: int, hidden: int = 64, epsilon: float = 0.08):
@@ -132,47 +148,44 @@ class PhysicsConstrainedTrustRegionFusionModule(nn.Module):
         self.gate = nn.Sequential(
             nn.Conv2d(channels * 2, hidden, kernel_size=1),
             nn.ReLU(),
-            nn.Conv2d(hidden, channels, kernel_size=1),
+            nn.Conv2d(hidden, 1, kernel_size=1),
         )
 
-    def forward(self, recon_s, recon_p, target_x=None, mu_s=None, logvar_s=None, mu_p=None, logvar_p=None):
+    def forward(self, recon_s, recon_p, training: bool = True):
         h_s = recon_s.permute(0, 3, 1, 2)
         h_p = recon_p.permute(0, 3, 1, 2)
         alpha_cand = torch.sigmoid(self.gate(torch.cat([h_s, h_p], dim=1))).permute(0, 2, 3, 1)
 
-        # Candidate fusion using proposed spatial weight
-        recon_cand = alpha_cand * recon_s + (1.0 - alpha_cand) * recon_p
+        if training:
+            # During training, the encoder/decoder/gate parameters are guided by the
+            # primal-dual Lagrangian objective in loss_terms().
+            alpha = alpha_cand
+        else:
+            # During inference (deployment), ground truth is unavailable.
+            # Enforce physical trust region via inter-stream consistency SAM(x_s, x_p):
+            stream_disagreement = _pixelwise_sam(recon_s, recon_p)  # (B, H, W, 1)
+            trust_contraction = torch.clamp(self.epsilon / (stream_disagreement + 1e-7), max=1.0)
+            alpha = alpha_cand * trust_contraction
 
-        # Ground-truth input target if present, else physical spectral stream reference
-        ref = target_x if target_x is not None else recon_p
-        sam_cand = _pixelwise_sam(recon_cand, ref)  # (B, H, W, 1)
-
-        # Trust-region contraction factor:
-        # If sam_cand <= epsilon: factor = 1.0 (unconstrained spatial reliance)
-        # If sam_cand > epsilon: factor = epsilon / sam_cand (contracts alpha towards 0)
-        eps_t = self.epsilon
-        factor = torch.clamp(eps_t / (sam_cand + 1e-7), max=1.0)
-        alpha_proj = alpha_cand * factor
-
-        fused = alpha_proj * recon_s + (1.0 - alpha_proj) * recon_p
-
-        # Barrier violation penalty: ReLU(SAM - epsilon)^2
-        violation = torch.relu(sam_cand - eps_t)
-        barrier_loss = torch.mean(violation ** 2)
-
-        return fused, alpha_proj, barrier_loss
+        fused = alpha * recon_s + (1.0 - alpha) * recon_p
+        return fused, alpha
 
 
 class UncertaintyAwareConstrainedFusionModule(nn.Module):
     """
-    Experiment 5: Uncertainty-Aware Constrained Fusion (U-PCTF).
-    Formulation:
-        min_{alpha_{ij}} D(x_f, x)  s.t.  SAM(x_{ij}, x_{f,ij}) <= epsilon_{ij}
-        where epsilon_{ij} = f(spectral SNR, ||x_s - x_p||, latent uncertainty).
+    Experiment 5: Explicit Uncertainty-Aware Constrained Fusion (U-PCTF).
+    
+    Tolerance is spatially varying:
+        epsilon_i = f(u_i, d_i, s_i)
+    where:
+        * u_i : spatial latent uncertainty (sigma_s^2)
+        * d_i : branch disagreement SAM(x_s, x_p)
+        * s_i : spectral signal-to-noise ratio (mean / std)
 
-    Dynamically contracts the spectral trust boundary in ambiguous/high-discrepancy
-    regions to guard against spatial hallucination, while relaxing the boundary
-    in high-confidence regions to maximize spatial texture.
+    Physical direction:
+        High discrepancy (d_i) and high uncertainty (u_i) signify potential spatial
+        hallucination -> TIGHTEN spectral tolerance (smaller epsilon_i).
+        Clean high SNR (s_i) with stream agreement -> RELAX tolerance (allow spatial sharpness).
     """
 
     def __init__(self, channels: int, hidden: int = 64, eps_min: float = 0.03, eps_max: float = 0.12):
@@ -182,61 +195,59 @@ class UncertaintyAwareConstrainedFusionModule(nn.Module):
         self.gate = nn.Sequential(
             nn.Conv2d(channels * 2, hidden, kernel_size=1),
             nn.ReLU(),
-            nn.Conv2d(hidden, channels, kernel_size=1),
-        )
-        # Trust boundary predictor from local discrepancy, SNR proxy, and variance
-        self.trust_net = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 1, kernel_size=1),
-            nn.Sigmoid(),
+            nn.Conv2d(hidden, 1, kernel_size=1),
         )
 
-    def forward(self, recon_s, recon_p, target_x=None, mu_s=None, logvar_s=None, mu_p=None, logvar_p=None):
+    def compute_tolerance(self, recon_s, recon_p, logvar_s=None) -> torch.Tensor:
+        """
+        Compute explicit spatially varying epsilon_i per pixel without ground truth.
+        """
+        # 1. Branch disagreement d_i = SAM(recon_s, recon_p) in radians
+        d_i = _pixelwise_sam(recon_s, recon_p)  # (B, H, W, 1)
+        mean_d = torch.mean(d_i, dim=(1, 2), keepdim=True) + 1e-6
+        norm_d = d_i / mean_d
+
+        # 2. Spectral SNR proxy s_i = mean / (std + eps) along spectral bands
+        spec_std = torch.std(recon_p, dim=-1, keepdim=True) + 1e-6
+        spec_mean = torch.mean(recon_p, dim=-1, keepdim=True)
+        s_i = spec_mean / spec_std
+        mean_s = torch.mean(s_i, dim=(1, 2), keepdim=True) + 1e-6
+        norm_s = s_i / mean_s
+
+        # 3. Latent uncertainty u_i from spatial stream logvar_s
+        if logvar_s is not None:
+            var_s = torch.exp(0.5 * torch.clamp(logvar_s, -10.0, 10.0))
+            u_map = torch.mean(var_s, dim=1, keepdim=True)  # (B, 1, G, G)
+            u_map = F.interpolate(u_map, size=(recon_s.shape[1], recon_s.shape[2]), mode="bilinear", align_corners=False)
+            u_i = u_map.permute(0, 2, 3, 1)
+            mean_u = torch.mean(u_i, dim=(1, 2), keepdim=True) + 1e-6
+            norm_u = u_i / mean_u
+        else:
+            norm_u = torch.ones_like(norm_d)
+
+        # Physically grounded score:
+        # High SNR increases trust; High discrepancy & uncertainty penalize trust.
+        # tau_i in (0, 1): 1 = high confidence (relax epsilon), 0 = high risk (tighten epsilon)
+        tau_i = torch.sigmoid(norm_s - 1.5 * norm_d - 1.0 * norm_u)
+        epsilon_i = self.eps_min + (self.eps_max - self.eps_min) * tau_i  # (B, H, W, 1)
+        return epsilon_i, d_i
+
+    def forward(self, recon_s, recon_p, logvar_s=None, training: bool = True):
         h_s = recon_s.permute(0, 3, 1, 2)
         h_p = recon_p.permute(0, 3, 1, 2)
         alpha_cand = torch.sigmoid(self.gate(torch.cat([h_s, h_p], dim=1))).permute(0, 2, 3, 1)
 
-        # 1. Inter-stream spectral discrepancy ||x_s - x_p||_2
-        discrepancy = torch.norm(recon_s - recon_p, p=2, dim=-1, keepdim=True)  # (B, H, W, 1)
-        mean_disc = torch.mean(discrepancy, dim=(1, 2), keepdim=True) + 1e-6
-        norm_disc = torch.clamp(discrepancy / mean_disc, 0.0, 5.0) / 5.0
+        epsilon_i, d_i = self.compute_tolerance(recon_s, recon_p, logvar_s)
 
-        # 2. Spectral SNR proxy (mean / std along band axis)
-        spec_std = torch.std(recon_p, dim=-1, keepdim=True) + 1e-6
-        spec_mean = torch.mean(recon_p, dim=-1, keepdim=True)
-        norm_snr = torch.clamp(spec_mean / spec_std, 0.0, 10.0) / 10.0
-
-        # 3. Spatial latent uncertainty map
-        if logvar_s is not None:
-            var_s = torch.exp(0.5 * torch.clamp(logvar_s, -10.0, 10.0))
-            var_map = torch.mean(var_s, dim=1, keepdim=True)  # (B, 1, G, G)
-            var_map = F.interpolate(var_map, size=(recon_s.shape[1], recon_s.shape[2]), mode="bilinear", align_corners=False)
-            norm_unc = torch.clamp(var_map.permute(0, 2, 3, 1), 0.0, 5.0) / 5.0
+        if training:
+            alpha = alpha_cand
         else:
-            norm_unc = torch.zeros_like(norm_disc)
+            # Inference: contract spatial weight if branch disagreement breaches local tolerance
+            contraction = torch.clamp(epsilon_i / (d_i + 1e-7), max=1.0)
+            alpha = alpha_cand * contraction
 
-        feat = torch.cat([norm_disc, norm_snr, norm_unc], dim=-1).permute(0, 3, 1, 2)
-        # trust_scale in [0, 1]: 1 = high confidence (loose constraint), 0 = high uncertainty (tight constraint)
-        confidence = self.trust_net(feat).permute(0, 2, 3, 1)
-        epsilon_ij = self.eps_min + (self.eps_max - self.eps_min) * confidence  # (B, H, W, 1)
-
-        # Candidate fusion and spectral check
-        recon_cand = alpha_cand * recon_s + (1.0 - alpha_cand) * recon_p
-        ref = target_x if target_x is not None else recon_p
-        sam_cand = _pixelwise_sam(recon_cand, ref)
-
-        # Contraction factor bounded by adaptive trust radius
-        factor = torch.clamp(epsilon_ij / (sam_cand + 1e-7), max=1.0)
-        alpha_proj = alpha_cand * factor
-
-        fused = alpha_proj * recon_s + (1.0 - alpha_proj) * recon_p
-
-        # Barrier loss on trust-boundary violations
-        violation = torch.relu(sam_cand - epsilon_ij)
-        barrier_loss = torch.mean(violation ** 2)
-
-        return fused, alpha_proj, barrier_loss
+        fused = alpha * recon_s + (1.0 - alpha) * recon_p
+        return fused, alpha, epsilon_i
 
 
 # ===========================================================================
@@ -246,17 +257,15 @@ class UncertaintyAwareConstrainedFusionModule(nn.Module):
 class HSI_DualStream_Fusion_Base(HSI_DualStream_PI_VAE):
     """
     Common Dual-Stream base model for the fusion ablation experiments.
-    Equipped with PRISM-NL's spatial stream and standard spectral stream.
-    Subclasses only specify their fusion module and loss computation regime.
+    Uses PRISM-NL's Non-Linear spatial stream and standard spectral stream.
     """
 
     def __init__(self, fusion_module: nn.Module, loss_mode: str = "sam_penalty"):
         super().__init__()
-        # State-of-the-art Non-Linear spatial stream
         self.spatial_stream = SpatialEncoderDecoderNL()
         self.spectral_stream = SpectralEncoderDecoder()
         self.fusion = fusion_module
-        self.loss_mode = loss_mode  # "fixed", "unconstrained", "sam_penalty", "constrained", "uncertainty"
+        self.loss_mode = loss_mode
 
     def forward(self, x, zero_spatial: bool = False):
         spatial_features = self.spatial_stream.encoder(x)
@@ -269,15 +278,17 @@ class HSI_DualStream_Fusion_Base(HSI_DualStream_PI_VAE):
         z_p, mu_p, logvar_p = self.reparameterize(spectral_features)
         recon_p = self.spectral_stream.decoder(z_p)
 
-        fused, alpha, barrier = self.fusion(
-            recon_s, recon_p, target_x=x,
-            mu_s=mu_s, logvar_s=logvar_s, mu_p=mu_p, logvar_p=logvar_p,
-        )
+        if self.loss_mode == "uncertainty":
+            fused, alpha, epsilon_i = self.fusion(recon_s, recon_p, logvar_s=logvar_s, training=self.training)
+            extra_ctx = {"epsilon_i": epsilon_i}
+        else:
+            fused, alpha = self.fusion(recon_s, recon_p, training=self.training)
+            extra_ctx = {}
 
-        return fused, recon_s, recon_p, mu_s, logvar_s, mu_p, logvar_p, alpha, barrier
+        return fused, recon_s, recon_p, mu_s, logvar_s, mu_p, logvar_p, alpha, extra_ctx
 
     def loss_terms(self, x, beta: float = 1e-3, lambda_physics: float = 0.3, use_physics: bool = True):
-        fused, recon_s, recon_p, mu_s, logvar_s, mu_p, logvar_p, alpha, barrier = self(x)
+        fused, recon_s, recon_p, mu_s, logvar_s, mu_p, logvar_p, alpha, extra_ctx = self(x)
 
         # Standard multi-branch weighted MSE (5:1:1 convention)
         mse_final = self.mse_loss_fn(fused, x)
@@ -292,28 +303,46 @@ class HSI_DualStream_Fusion_Base(HSI_DualStream_PI_VAE):
 
         # Overall Spectral Angle Mapper on final reconstruction
         sam = spectral_angle_mapper_loss(x, fused)
-
-        loss = total_mse + beta * total_kld
+        elbo_loss = total_mse + beta * total_kld
 
         # Mode-dependent loss construction
         if self.loss_mode == "unconstrained":
             # Exp 2: Pure ELBO without SAM penalty
-            pass
+            loss = elbo_loss
+
         elif self.loss_mode == "sam_penalty":
             # Exp 3: Standard PRISM scalar SAM penalty
-            if use_physics:
-                loss = loss + lambda_physics * sam
-        elif self.loss_mode in ("constrained", "uncertainty"):
-            # Exp 4 & 5: Trust-Region Barrier optimization (min D s.t. SAM <= eps)
-            if barrier is not None:
-                # Barrier loss drives convergence onto the physical manifold
-                loss = loss + lambda_physics * barrier
-            elif use_physics:
-                loss = loss + lambda_physics * sam
+            loss = elbo_loss + (lambda_physics * sam if use_physics else 0.0)
+
+        elif self.loss_mode == "constrained":
+            # Exp 4: Primal-Dual Constrained Optimization
+            # min L_ELBO s.t. E[SAM] <= epsilon
+            # Lagrangian: J = L_ELBO + lambda * (E[SAM] - epsilon), lambda >= 0
+            eps_target = getattr(self.fusion, "epsilon", 0.08)
+            lambda_val = F.softplus(self.log_lambda)
+            # Primal gradient pushes network to satisfy constraint via lambda.detach() * sam
+            # Dual gradient updates lambda via -lambda * (sam.detach() - eps_target)
+            primal_sam_penalty = lambda_val.detach() * sam
+            dual_ascent_loss = -lambda_val * (sam.detach() - eps_target)
+            loss = elbo_loss + primal_sam_penalty + dual_ascent_loss
+
+        elif self.loss_mode == "uncertainty":
+            # Exp 5: Uncertainty-Aware Constrained Optimization
+            # min L_ELBO s.t. E[ReLU(SAM(x_i, x_f_i) - epsilon_i)] = 0
+            epsilon_i = extra_ctx.get("epsilon_i", 0.08)
+            pixel_sam = _pixelwise_sam(fused, x)
+            violation = torch.relu(pixel_sam - epsilon_i)
+            mean_violation = torch.mean(violation)
+            lambda_val = F.softplus(self.log_lambda)
+            primal_penalty = lambda_val.detach() * torch.mean(violation ** 2)
+            dual_ascent_loss = -lambda_val * (mean_violation.detach() - 0.0)
+            loss = elbo_loss + primal_penalty + dual_ascent_loss
+
         elif self.loss_mode == "fixed":
-            # Exp 1: Fixed weight fusion with standard physics regularizer
-            if use_physics:
-                loss = loss + lambda_physics * sam
+            # Exp 1: Fixed weight blend with standard physics loss
+            loss = elbo_loss + (lambda_physics * sam if use_physics else 0.0)
+        else:
+            loss = elbo_loss
 
         return {
             "loss": loss,
@@ -338,7 +367,10 @@ class HSI_DualStream_Fusion_Base(HSI_DualStream_PI_VAE):
             z_s = torch.zeros_like(z_s)
         recon_s = self.spatial_stream.decoder(z_s)
         recon_p = self.spectral_stream.decoder(z_p)
-        fused, _, _ = self.fusion(recon_s, recon_p, target_x=None)
+        if self.loss_mode == "uncertainty":
+            fused, _, _ = self.fusion(recon_s, recon_p, logvar_s=None, training=False)
+        else:
+            fused, _ = self.fusion(recon_s, recon_p, training=False)
         return fused
 
 
@@ -347,7 +379,7 @@ class HSI_DualStream_Fusion_Base(HSI_DualStream_PI_VAE):
 # ===========================================================================
 
 class HSI_DualStream_Fusion_Fixed(HSI_DualStream_Fusion_Base):
-    """Experiment 1: Fixed-Weight Fusion (alpha = 0.5)."""
+    """Experiment 1: Fixed-Weight Fusion (alpha = 0.5 per pixel)."""
     def __init__(self):
         super().__init__(FixedWeightFusionModule(alpha=0.5), loss_mode="fixed")
 
@@ -371,18 +403,29 @@ class HSI_DualStream_Fusion_SAMPenalty(HSI_DualStream_Fusion_Base):
 
 
 class HSI_DualStream_Fusion_Constrained(HSI_DualStream_Fusion_Base):
-    """Experiment 4: Physics-Constrained Trust-Region Fusion (PCTF)."""
+    """
+    Experiment 4: Primal-Dual Constrained Optimization (PCTF).
+    min L_ELBO  s.t.  E[SAM] <= epsilon (epsilon = 0.08 rad).
+    Dynamically tunes Lagrange multiplier lambda >= 0.
+    """
     def __init__(self):
         super().__init__(
             PhysicsConstrainedTrustRegionFusionModule(settings.input_channels, settings.vae_our_fusion_hidden, epsilon=0.08),
             loss_mode="constrained",
         )
+        # Learnable Lagrange multiplier (initialized at softplus^-1(0.3) ~ -1.04)
+        self.log_lambda = nn.Parameter(torch.tensor(-1.04))
 
 
 class HSI_DualStream_Fusion_Uncertainty(HSI_DualStream_Fusion_Base):
-    """Experiment 5: Uncertainty-Aware Constrained Fusion (U-PCTF)."""
+    """
+    Experiment 5: Explicit Uncertainty-Aware Constrained Fusion (U-PCTF).
+    Tolerance epsilon_i = f(u_i, d_i, s_i) contracts in high-discrepancy/noisy regions.
+    """
     def __init__(self):
         super().__init__(
             UncertaintyAwareConstrainedFusionModule(settings.input_channels, settings.vae_our_fusion_hidden, eps_min=0.03, eps_max=0.12),
             loss_mode="uncertainty",
         )
+        # Learnable Lagrange multiplier for the adaptive violation barrier
+        self.log_lambda = nn.Parameter(torch.tensor(-1.04))
