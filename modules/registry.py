@@ -49,6 +49,13 @@ from modules.vae_our_variants import (
     HSI_DualStream_PI_VAE_SpecViT,
     HSI_DualStream_PI_VAE_NL_SpecViT,
 )
+from modules.vae_fusion_pctf import (
+    HSI_DualStream_Fusion_Fixed,
+    HSI_DualStream_Fusion_Unconstrained,
+    HSI_DualStream_Fusion_SAMPenalty,
+    HSI_DualStream_Fusion_Constrained,
+    HSI_DualStream_Fusion_Uncertainty,
+)
 
 
 # CLI name -> model class.
@@ -66,11 +73,26 @@ MODELS = {
     "vae-our-nl": HSI_DualStream_PI_VAE_NL,
     "vae-our-specvit": HSI_DualStream_PI_VAE_SpecViT,
     "vae-our-nl-specvit": HSI_DualStream_PI_VAE_NL_SpecViT,
+    # Physics-Constrained Trust-Region Fusion (PCTF) and Fusion Ablation Suite
+    "vae-fusion-fixed": HSI_DualStream_Fusion_Fixed,
+    "vae-fusion-unconstrained": HSI_DualStream_Fusion_Unconstrained,
+    "vae-fusion-sam-penalty": HSI_DualStream_Fusion_SAMPenalty,
+    "vae-fusion-constrained": HSI_DualStream_Fusion_Constrained,
+    "vae-fusion-uncertainty": HSI_DualStream_Fusion_Uncertainty,
 }
 
 # Models whose loss is intrinsically physics-informed (SAM baked in). These have
 # no separate "standard" variant — train.py rejects --loss standard for them.
-PHYSICS_ONLY = {"vae-our", "vae-our-nl", "vae-our-specvit", "vae-our-nl-specvit"}
+PHYSICS_ONLY = {
+    "vae-our",
+    "vae-our-nl",
+    "vae-our-specvit",
+    "vae-our-nl-specvit",
+    "vae-fusion-fixed",
+    "vae-fusion-sam-penalty",
+    "vae-fusion-constrained",
+    "vae-fusion-uncertainty",
+}
 
 MODEL_NAMES = tuple(MODELS.keys())
 

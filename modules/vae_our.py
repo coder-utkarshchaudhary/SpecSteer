@@ -152,9 +152,11 @@ class HSI_DualStream_PI_VAE(nn.Module):
         z = mu + eps * std
         return z, mu, logvar
 
-    def forward(self, x):
+    def forward(self, x, zero_spatial=False):
         # --- Spatial stream ---
         spatial_features = self.spatial_stream.encoder(x)     # (B, 2*d_s, G, G)
+        if zero_spatial:
+            spatial_features = torch.zeros_like(spatial_features)
         z_s, mu_s, logvar_s = self.reparameterize(spatial_features)
         recon_s = self.spatial_stream.decoder(z_s)            # (B, H, W, C)
 
@@ -221,9 +223,9 @@ class HSI_DualStream_PI_VAE(nn.Module):
                 "kld": total_kld, "sam": sam, "recon": recon_final}
 
     @torch.no_grad()
-    def reconstruct(self, x):
+    def reconstruct(self, x, zero_spatial=False):
         """Return the fused reconstruction (B, H, W, C) for inference."""
-        recon_final, *_ = self(x)
+        recon_final, *_ = self(x, zero_spatial=zero_spatial)
         return recon_final
 
     # ------------------------------------------------------------------
@@ -245,7 +247,7 @@ class HSI_DualStream_PI_VAE(nn.Module):
         return [mu_s, mu_p]
 
     @torch.no_grad()
-    def decode_latents(self, latents):
+    def decode_latents(self, latents, zero_spatial=False):
         """
         [ z_spatial, z_spectral ] -> fused reconstruction (B, H, W, C).
 
@@ -253,6 +255,8 @@ class HSI_DualStream_PI_VAE(nn.Module):
         maps back through the exact reconstruction path used in training.
         """
         z_s, z_p = latents
+        if zero_spatial:
+            z_s = torch.zeros_like(z_s)
         recon_s = self.spatial_stream.decoder(z_s)
         recon_p = self.spectral_stream.decoder(z_p)
         return self.fusion(recon_s, recon_p)

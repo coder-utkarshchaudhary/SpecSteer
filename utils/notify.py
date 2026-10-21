@@ -258,6 +258,20 @@ class _EpochRow:
     is_best: bool = False
 
 
+EXPERIMENT_TITLES = {
+    "vae-fusion-fixed": "🔬 Exp 1/5: Fixed-Weight Fusion (alpha=0.5)",
+    "vae-fusion-unconstrained": "🔬 Exp 2/5: Learned Unconstrained Fusion (No SAM Penalty)",
+    "vae-fusion-sam-penalty": "🔬 Exp 3/5: Learned + SAM Penalty (Baseline PRISM)",
+    "vae-fusion-constrained": "🔬 Exp 4/5: Constrained SAM Fusion (PCTF)",
+    "vae-fusion-uncertainty": "🔬 Exp 5/5: Uncertainty-Aware Constrained Fusion (U-PCTF)",
+    "vae-our-nl": "🔬 PRISM-NL: Dual-Stream Non-Linear Spectral Projection",
+    "vae-our": "🔬 PRISM: Dual-Stream Physics-Informed VAE",
+    "vae-standard": "🔬 Standard VAE Baseline (2D Spatial)",
+    "vae-1d-pixelwise": "🔬 1D Pixelwise VAE Baseline (Spectral)",
+    "vae-3d-spatio-spectral": "🔬 3D Spatio-Spectral VAE Baseline",
+}
+
+
 @dataclass
 class RunNotifier:
     model: str
@@ -266,6 +280,7 @@ class RunNotifier:
     log_every: int = 10
     epochs_planned: Optional[int] = None
     seed: Optional[int] = None
+    experiment_title: Optional[str] = None
     tg: TelegramNotifier = field(default_factory=TelegramNotifier)
     _rows: list[_EpochRow] = field(default_factory=list)
     _latest: Optional[_EpochRow] = None
@@ -286,8 +301,13 @@ class RunNotifier:
         tail = f"  <code>#{self.run_id}</code>"
         if self.seed is not None:
             tail = f" | seed <b>{self.seed}</b>" + tail
+
+        title = self.experiment_title or EXPERIMENT_TITLES.get(self.model)
+        exp_prefix = f"<b>{html.escape(title)}</b>\n" if title else ""
+
         return (
-            f"{badge} <b>{html.escape(self.model)}</b> | "
+            exp_prefix
+            + f"{badge} <b>{html.escape(self.model)}</b> | "
             f"<b>{html.escape(self.dataset)}</b> | <b>{html.escape(self.loss)}</b>"
             + tail
         )

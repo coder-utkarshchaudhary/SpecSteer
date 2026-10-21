@@ -73,6 +73,11 @@ _RATE_KNOB = {
     "vae-our-nl": "spectral_latent_dim",
     "vae-our-specvit": "spectral_latent_dim",
     "vae-our-nl-specvit": "spectral_latent_dim",
+    "vae-fusion-fixed": "spectral_latent_dim",
+    "vae-fusion-unconstrained": "spectral_latent_dim",
+    "vae-fusion-sam-penalty": "spectral_latent_dim",
+    "vae-fusion-constrained": "spectral_latent_dim",
+    "vae-fusion-uncertainty": "spectral_latent_dim",
 }
 
 
@@ -89,7 +94,10 @@ def latent_elements_closed_form(model_name: str, s) -> int:
         return s.vae_3d_latent_ch * (c_pad // mult) * g * g
     if model_name == "vae-1d-pixelwise":
         return H * W * s.vae_1d_latent_dim
-    if model_name in ("vae-our", "vae-our-nl", "vae-our-specvit", "vae-our-nl-specvit"):
+    if (
+        model_name in ("vae-our", "vae-our-nl", "vae-our-specvit", "vae-our-nl-specvit")
+        or model_name.startswith("vae-fusion")
+    ):
         # 8x8 spatial grid latent + full-resolution per-pixel spectral map.
         # (Iteration 1 replaced the old `latent_dim` global vector with the
         # grid — the +latent_dim residue that kept vae-our off T is gone, so
