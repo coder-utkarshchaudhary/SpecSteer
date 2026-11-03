@@ -405,35 +405,39 @@ A smooth and meaningful arrangement of the latent space is essential to the reco
   \resizebox{\textwidth}{!}{%
   \begin{tabular}{llcccccc}
     \toprule
-    \textbf{Dataset} & \textbf{Model} & \textbf{Masked bands} & \textbf{PSNR (masked)}$\uparrow$ & \textbf{Mean-fill PSNR} & \textbf{SAM-valid ($^\circ$)}$\downarrow$ & \textbf{Rel.\ gain}$\uparrow$ & \textbf{Pass-through} \\
+     & & \multicolumn{3}{c}{PSNR (dB)} & \multicolumn{3}{c}{SAM-valid ($^\circ$)} \\
+    \cmidrule(lr){3-5}\cmidrule(lr){6-8}
+    \textbf{Dataset} & \textbf{Model} & Clean$\uparrow$ & Masked$\uparrow$ & $\Delta$ & Clean$\downarrow$ & Masked$\downarrow$ & $\Delta$ \\
     \midrule
     \multirow{4}{*}{IIRS}
-      & 2D Spatial VAE         & -- & -- & -- & -- & -- & -- \\
-      & 1D Pixelwise VAE       & -- & -- & -- & -- & -- & -- \\
-      & 3D Spatio-Spectral VAE & -- & -- & -- & -- & -- & -- \\
-      & \textbf{PRISM}         & -- & -- & -- & -- & -- & -- \\
+      & 2D Spatial VAE         & 39.85 & \textbf{38.83} & 1.01 & 9.72 & 10.32 & 0.61 \\
+      & 1D Pixelwise VAE       & 33.01 & 32.61 & 0.40 & 6.70 & \textbf{7.83} & 1.13 \\
+      & 3D Spatio-Spectral VAE & 39.07 & 37.47 & 1.60 & 11.34 & 11.78 & 0.44 \\
+      & \textbf{PRISM}         & 39.86 & 38.38 & 1.48 & 6.80 & 7.86 & 1.05 \\
     \midrule
     \multirow{4}{*}{AVIRIS}
-      & 2D Spatial VAE         & -- & -- & -- & -- & -- & -- \\
-      & 1D Pixelwise VAE       & -- & -- & -- & -- & -- & -- \\
-      & 3D Spatio-Spectral VAE & -- & -- & -- & -- & -- & -- \\
-      & \textbf{PRISM}         & -- & -- & -- & -- & -- & -- \\
+      & 2D Spatial VAE         & 14.83 & 14.83 & $-$0.00 & 5.07 & 5.06 & $-$0.01 \\
+      & 1D Pixelwise VAE       & 34.21 & 15.86 & 18.35 & 1.67 & 2.27 & 0.60 \\
+      & 3D Spatio-Spectral VAE & 34.85 & \textbf{21.94} & 12.91 & 1.78 & \textbf{2.13} & 0.35 \\
+      & \textbf{PRISM}         & 35.89 & 16.05 & 19.84 & 1.64 & 2.42 & 0.78 \\
     \midrule
     \multirow{4}{*}{CRISM}
-      & 2D Spatial VAE         & -- & -- & -- & -- & -- & -- \\
-      & 1D Pixelwise VAE       & -- & -- & -- & -- & -- & -- \\
-      & 3D Spatio-Spectral VAE & -- & -- & -- & -- & -- & -- \\
-      & \textbf{PRISM}         & -- & -- & -- & -- & -- & -- \\
+      & 2D Spatial VAE         & 24.27 & 22.43 & 1.84 & 5.79 & 6.38 & 0.59 \\
+      & 1D Pixelwise VAE       & 27.91 & 17.01 & 10.90 & 3.77 & 4.63 & 0.86 \\
+      & 3D Spatio-Spectral VAE & 28.68 & \textbf{25.59} & 3.08 & 2.58 & \textbf{2.93} & 0.35 \\
+      & \textbf{PRISM}         & 33.43 & 17.99 & 15.44 & 2.42 & 3.55 & 1.13 \\
     \bottomrule
   \end{tabular}
   }
-  \caption{\emph{Mean-fill PSNR} fills the same bands with the band-wise training-set mean; \emph{Pass-through} is the model's masked-region MSE divided by that of a zero-fill null.}
+  % TODO: n_samples in missing-pixel-recovery.csv (6168 / 4130 / 738) equals
+  % valid+test patch counts, not test alone; confirm the split before submission.
+  \caption{Recovery from band masking. A contiguous block covering 10\% of each sensor's bands is zeroed at the model's input. \emph{Clean} is the reconstruction of the unmasked cube; \emph{Masked} is the reconstruction from the masked input, scored against the clean cube; $\Delta$ is the difference (positive means the masked input made it worse). Every score covers the whole cube, not only the masked bands. Best masked value per dataset in bold. Clean values are recomputed on the same patches as the masked ones, so they can differ slightly from Table~\ref{tab:recon}. Seed 67, physics-informed objective.}
   \label{tab:bandmask}
 \end{table}
 
-Finally, we test whether each model has learned spectral structure it can use to fill in missing information rather than simply copying its input. We zero a contiguous block covering 10\% of a sensor's bands at the model's input, at five positions spanning the spectrum, and score reconstruction on the masked bands alone against a baseline that fills the same bands with the band-wise training-set mean (Table~\ref{tab:bandmask}). We deliberately mask bands rather than pixels: every architecture, including the 1D Pixelwise VAE, which has no spatial context to draw on, still sees the pixel's other bands, so this is the one masking scheme on which every model in the grid can be meaningfully scored. None of the models was trained on masked input, so the test measures an implicit spectral prior under distribution shift rather than a trained inpainting capability. The pass-through ratio shows whether a model actually draws on that prior: a value near 1 means it largely reproduced the zeros it was given, while a value well below 1 means it filled the gap from what it inferred about spectral shape.
+Finally, we test whether each model has learned spectral structure that lets it tolerate missing information. We zero a contiguous block covering 10\% of a sensor's bands at the model's input and compare the reconstruction against the clean cube (Table~\ref{tab:bandmask}). We deliberately mask bands rather than pixels: every architecture, including the 1D Pixelwise VAE, which has no spatial context to draw on, still sees the pixel's other bands, so this is the one masking scheme on which every model in the grid can be meaningfully scored. None of the models was trained on masked input, so the test measures an implicit spectral prior under distribution shift rather than a trained inpainting capability. Because the score covers the whole cube, a drop mixes two effects: how badly the gap is filled, and how much the zeroed block corrupts the reconstruction of the bands the model was given intact.
 
-[Pending. The band-masking recovery run did not emit the masked-band-only quantities this table requires---PSNR and SAM-valid scored on the zeroed bands alone, the band-wise mean-fill reference, and the zero-fill pass-through ratio---and the available results record only whole-cube error before and after masking, which cannot distinguish a model that filled the gap from one that reproduced the zeros it was given. The table is reported empty rather than populated with the whole-cube proxy.]
+On IIRS the masking costs every model at most 1.6~dB, and PRISM stays within 0.45~dB of the best masked PSNR while matching the 1D Pixelwise VAE on SAM-valid ($7.86^\circ$ against $7.83^\circ$). On AVIRIS and CRISM the picture reverses: PRISM gives up 19.8 and 15.4~dB, the largest drops in the grid, and the 3D Spatio-Spectral VAE has the best masked reconstruction on both PSNR and SAM-valid (21.94~dB and $2.13^\circ$ on AVIRIS; 25.59~dB and $2.93^\circ$ on CRISM). The 1D Pixelwise VAE degrades almost as much as PRISM on AVIRIS (18.4~dB), which suggests the damage comes from the per-pixel spectral encoder treating the zeroed bands as signal, a component the two models share. The 2D Spatial VAE's near-zero drop on AVIRIS is not robustness: as in Table~\ref{tab:noise}, its clean reconstruction already sits below the trivial-predictor floor. Spectral angle is far less affected than PSNR for every model ($\le 1.13^\circ$), so the masked input mainly distorts amplitude rather than spectral shape. We read this, like latent noise, as a measured sensitivity of PRISM's spectral stream to out-of-distribution input rather than a result to obscure. Training with band dropout is the natural remedy for downstream use.
 
 Read together, the grid describes a model that is strongest exactly where fidelity is measured directly and weaker where robustness is measured as a ratio. PRISM wins clean reconstruction on every instrument and every pixel-level metric, and Table~\ref{tab:diagnostics} confirms the win is earned rather than an artefact: it is the only cell that is simultaneously uncollapsed, essentially fully active, and far above both the zero-rate floor and the much stronger mean-patch predictor, which it beats by 3.4, 5.7 and 15.6~dB. Its latent noise sensitivity is real and we state it as a design constraint rather than a defect, since the baselines that survive latent perturbation do so by not using their latent. One diagnostic limits the architectural claim and we report it plainly: PRISM's spatial-reliance index is near zero on AVIRIS and CRISM, so the spatial stream contributes materially only on IIRS. That the 3D Spatio-Spectral VAE does rely on spatial context on AVIRIS (0.463) and still loses on reconstruction suggests spatial context is not the binding constraint on these scenes. [A spatial-stream ablation on IIRS is pending.]
 
