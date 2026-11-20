@@ -1,0 +1,22 @@
+{
+ "vae-our|IIRS": 14323548160,
+ "vae-our-nl|IIRS": 16471031808,
+ "vae-standard|IIRS": 11374952448,
+ "vae-3d-spatio-spectral|IIRS": 70382518272,
+ "vae-1d-pixelwise|IIRS": 4844421120,
+ "vae-our|M3": 5475926016,
+ "vae-our-nl|M3": 6180569088,
+ "vae-standard|M3": 8053063680,
+ "vae-3d-spatio-spectral|M3": 24192368640,
+ "vae-1d-pixelwise|M3": 3392143360,
+ "vae-our|AVIRIS": 23235395584,
+ "vae-our-nl|AVIRIS": 26792165376,
+ "vae-standard|AVIRIS": 14621343744,
+ "vae-3d-spatio-spectral|AVIRIS": 116571045888,
+ "vae-1d-pixelwise|AVIRIS": 6263144448,
+ "vae-our|CRIMS": 24892145664,
+ "vae-our-nl|CRIMS": 28717350912,
+ "vae-standard|CRIMS": 15225323520,
+ "vae-3d-spatio-spectral|CRIMS": 125368860672,
+ "vae-1d-pixelwise|CRIMS": 6531579904
+}
