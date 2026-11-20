@@ -41,10 +41,13 @@ Five output CSVs (under --out-dir, default results/final/):
     reconstruction-quality.csv  MSE, SAM (rad), SAM-valid, PSNR, SSIM, SID,
                                  SCC, Q2^n on the full inference set.
     noise-recovery.csv          SAM/PSNR of the reconstruction after Gaussian
-                                 noise is added to the encoded latent, at
-                                 sigma in {0.1, 0.5, 1.0}, averaged over 2
-                                 checkpoint seeds x 3 RNG seeds (67, 69, 1234)
-                                 per sigma.
+                                 noise, at the sigmas given by --sigmas,
+                                 averaged over 2 checkpoint seeds x 3 RNG
+                                 seeds (67, 69, 1234) per sigma. The noise
+                                 space is chosen by --noise-space:
+                                   input  (default) x + sigma * per-band std
+                                   latent N(0, sigma^2) added to the encoded
+                                          latent(s), then decoded.
     chemical-interpolation.csv  Jaggedness + path length of latent-space
                                  interpolation between patch pairs, plus an
                                  eigenvalue-entropy effective-occupancy score
@@ -132,6 +135,10 @@ CHECKPOINT_SEEDS = [67, 69]
 RNG_SEEDS = [67, 69, 1234]          # noise / mask draws — unrelated to which checkpoint is loaded
 SIGMAS = [0.01, 0.05, 0.2]
 LEGACY_CACHE_SIGMAS = [0.01, 0.05, 0.2]
+# Where the Gaussian noise is injected (set from --noise-space in main()):
+#   "input"  : x + sigma * (per-band std of x)  -> reconstruct()   [original behaviour]
+#   "latent" : encode_latents(x) + N(0, sigma^2) on every latent tensor -> decode_latents()
+NOISE_SPACE = "input"
 PIXEL_MASK_FRACTION = 0.10
 N_INTERP_PAIRS = 100
 N_ALPHA = 11
@@ -714,14 +721,28 @@ def evaluate_one_checkpoint(model, loader: DataLoader, device, cfg: dict,
                 per_band_std = x.std(dim=(1, 2), keepdim=True)
                 # Compute divisors for clean un-normalised target
                 _, div_tensor = unnormalize_batch(x, loader, batch_start_idx)
-                for sigma in SIGMAS:
-                    if batch_start_idx == 0 and rng_seed == RNG_SEEDS[0]:
-                        print(f"[Interpretability Log] Adding noise σ={sigma} as explicit multiplier of per-band signal std.")
-                    noise = torch.randn(x.shape, generator=gen, device=x.device, dtype=x.dtype) * (sigma * per_band_std)
-                    x_corrupted = x + noise
-                    recon = model.reconstruct(x_corrupted)
-                    accs[sigma].update(x, recon, divisors=div_tensor)
-                    del noise, x_corrupted, recon
+                if NOISE_SPACE == "latent":
+                    # Encode ONCE per batch (deterministic mu latents), then perturb the
+                    # latent list per sigma and decode. Scored against the clean x.
+                    z_clean = model.encode_latents(x)
+                    for sigma in SIGMAS:
+                        if batch_start_idx == 0 and rng_seed == RNG_SEEDS[0]:
+                            print(f"[Interpretability Log] Adding LATENT noise sigma={sigma} "
+                                  f"(absolute N(0, sigma^2) on every latent tensor).")
+                        z_noisy = add_latent_noise(z_clean, sigma, generator=gen)
+                        recon = model.decode_latents(z_noisy)
+                        accs[sigma].update(x, recon, divisors=div_tensor)
+                        del z_noisy, recon
+                    del z_clean
+                else:
+                    for sigma in SIGMAS:
+                        if batch_start_idx == 0 and rng_seed == RNG_SEEDS[0]:
+                            print(f"[Interpretability Log] Adding noise σ={sigma} as explicit multiplier of per-band signal std.")
+                        noise = torch.randn(x.shape, generator=gen, device=x.device, dtype=x.dtype) * (sigma * per_band_std)
+                        x_corrupted = x + noise
+                        recon = model.reconstruct(x_corrupted)
+                        accs[sigma].update(x, recon, divisors=div_tensor)
+                        del noise, x_corrupted, recon
                 batch_start_idx += b
                 del x
         for sigma in SIGMAS:
@@ -1020,6 +1041,11 @@ def parse_args() -> argparse.Namespace:
                    help="Comma list of input-noise sigmas (multiples of each band's own "
                         "std). Use a separate --out-dir per sigma set: a cell cache is only "
                         "reused when its sigma list matches exactly.")
+    p.add_argument("--noise-space", choices=("input", "latent"), default="input",
+                   help="'input' (default): noise on the input cube, in multiples of each "
+                        "band's std. 'latent': absolute N(0, sigma^2) added to the encoded "
+                        "latent(s) before decoding (the paper's latent-noise table). Use a "
+                        "separate --out-dir per noise space.")
     return p.parse_args()
 
 
@@ -1060,9 +1086,10 @@ def compute_noisy_input_reference(loader: DataLoader, device, min_energy: float)
 
 
 def main() -> int:
-    global SIGMAS
+    global SIGMAS, NOISE_SPACE
     args = parse_args()
     SIGMAS = [float(s) for s in args.sigmas.split(",") if s.strip()]
+    NOISE_SPACE = args.noise_space
     CSV_COLUMNS["noise-recovery.csv"] = noise_columns(SIGMAS)
     datasets = [d.strip().upper() for d in args.datasets.split(",") if d.strip()]
     models = [m.strip() for m in args.models.split(",") if m.strip()]
@@ -1076,7 +1103,7 @@ def main() -> int:
 
     cells = cell_grid(models, datasets)
     total_cells = len(cells)
-    log.send(f"Inference final started — sigmas={SIGMAS}, {total_cells} cells "
+    log.send(f"Inference final started — noise_space={NOISE_SPACE}, sigmas={SIGMAS}, {total_cells} cells "
              f"({len(datasets)} datasets x models/losses), device={device}, "
              f"out_dir={out_dir}")
 
@@ -1116,16 +1143,19 @@ def main() -> int:
                 min_energy = cfg["p1_trivial_floors"]["sam_valid_min_energy"]
                 ext_cfg = _recon_metrics_ext_cfg()
 
-                ref_loader = _make_loader(inference_set, batch_size, num_workers)
-                ref_metrics = compute_noisy_input_reference(ref_loader, device, min_energy)
-                ref_row = {
-                    "dataset": ds,
-                    "model": "noisy_input_no_model",
-                    "loss": "none",
-                }
-                ref_row.update(ref_metrics)
-                all_rows["noise-recovery.csv"].append(ref_row)
-                log.send(f"Computed 'noisy input, no model' reference for {ds}")
+                # The "noisy input, no model" reference only exists for input-space
+                # noise; for latent noise there is no corrupted input to score.
+                if NOISE_SPACE == "input":
+                    ref_loader = _make_loader(inference_set, batch_size, num_workers)
+                    ref_metrics = compute_noisy_input_reference(ref_loader, device, min_energy)
+                    ref_row = {
+                        "dataset": ds,
+                        "model": "noisy_input_no_model",
+                        "loss": "none",
+                    }
+                    ref_row.update(ref_metrics)
+                    all_rows["noise-recovery.csv"].append(ref_row)
+                    log.send(f"Computed 'noisy input, no model' reference for {ds}")
                 
             except Exception as e:
                 tb = traceback.format_exc()
@@ -1151,6 +1181,8 @@ def main() -> int:
                                 # caches written before --sigmas existed carry no list;
                                 # they were all computed at the original [0.01, 0.05, 0.2]
                                 and cached_cell.get("sigmas", LEGACY_CACHE_SIGMAS) == SIGMAS
+                                # caches written before --noise-space existed were all input-space
+                                and cached_cell.get("noise_space", "input") == NOISE_SPACE
                                 and all(isinstance(cached_rows.get(k), list) for k in PER_CELL_CSVS)):
                             for name in PER_CELL_CSVS:
                                 all_rows[name].extend(cached_rows[name])
@@ -1212,6 +1244,7 @@ def main() -> int:
                     cell_cache = {
                         "version": CACHE_VERSION,
                         "sigmas": SIGMAS,
+                        "noise_space": NOISE_SPACE,
                         "dataset": ds,
                         "model": model_name,
                         "loss": loss,
@@ -1243,7 +1276,7 @@ def main() -> int:
         text_cols += [(f"psnr_recovery_s{sigma}", f"PSNR@{sigma}"),
                       (f"sam_recovery_s{sigma}", f"SAMv@{sigma}")]
     log.send_csv_as_text(out_dir / "noise-recovery.csv",
-                         "Noise recovery (input-space; SAMv = SAM-valid, rad)", text_cols)
+                         f"Noise recovery ({NOISE_SPACE}-space; SAMv = SAM-valid, rad)", text_cols)
 
     elapsed = time.time() - t0
     summary = "\n".join(f"{name}: {len(rows)} rows" for name, rows in all_rows.items())
