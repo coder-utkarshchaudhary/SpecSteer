@@ -107,3 +107,11 @@ vae_1d_hidden_dims: [512, 256, 128]     # Palsson 2018 / Liu 2022 (FC spectral A
 
 # vae-our capacity: natural width of the Iteration-1 spatial stream.
 reduced_dims: 64
+
+# --- PCTF / U-PCTF constraint budget (modules/vae_fusion_pctf.py) ---
+# epsilon in radians for E[SAM_valid(x, x_f)] <= epsilon. Set from the validation/test
+# SAM-valid the learned-gate + SAM-penalty arm reached on this dataset (5.90 deg),
+# so the constraint reads "be no worse in angle than the penalty arm, and spend the
+# rest on fidelity". The 2026-11-18 run used one absolute 0.08 rad everywhere:
+# slack on AVIRIS, unreachable on IIRS/CRIMS.
+pctf_epsilon: 0.103

@@ -673,3 +673,80 @@ In priority order:
 * **Correction 2: missing `[START]`.** The export holds 39 `[START]` messages for 40 cells; **IIRS Exp 1 seed 69** has none (its `[HB]` and `[OK]` messages are present). Its batch size is blank in the canonical extraction. It is taken as **32** from `hyperparam-config-IIRS.yaml`, the value every other IIRS `[START]` confirms.
 * **Reference rows** (`vae-our-nl`, `vae-our`, the three baselines) are re-exports from the earlier clean-slate grid and were not retrained in this run. The commit and exact protocol of those runs cannot be verified from this export. `ablation_table (3).csv` also holds four `select=mse` rows (M3 `vae-our` / `vae-our-nl`, from the September M3 MSE check). These are excluded from all tables here.
 * **Derived quantities:** angle conversions (rad × 180/π); implied λ = (val_loss − val_mse − 10⁻³·val_kld)/0.08; implied M3 KL from val_loss; the CRIMS validation zero-energy fraction estimate (§4.2). All other numbers are copied from the logs or CSVs.
+
+---
+
+## 6. Code and evaluation-setup audit (added 2026-11-20)
+
+Question asked: before Exp 4 and Exp 5 are written off, are the implementation, the maths and the evaluation setup correct?
+Method: read `modules/vae_fusion_pctf.py` at 76f17dc, `train/train.py` and `inference/inference.py`; checked each mechanism numerically on CPU with synthetic tensors (no training, no real data); compared validation against training metrics in the Telegram heartbeats.
+
+### 6.1 What is correct
+
+| Item | Check | Result |
+|---|---|---|
+| Dual-update sign (Exp 4) | $\partial\mathcal{L}/\partial\log\lambda$ for SAM above and below $\epsilon$ | Descent raises $\lambda$ iff SAM $>\epsilon$. Correct. |
+| Lagrangian form | $\mathcal{L}=\mathrm{ELBO}+\lambda\,(\mathrm{SAM}-\epsilon)$, with $\lambda$ detached in the primal term | Correct. The logged `val_loss` equals $\mathrm{ELBO}+\lambda\epsilon$ (the SAM terms cancel), which is why it grows with $\lambda$ (section 4.1). |
+| Trust-region geometry | $\alpha\cdot\min(1,\epsilon/d)$ keeps the fused spectrum within about $\epsilon$ rad of the spectral stream | Sound as a rule. |
+| Checkpoint/metric selection | `train.py` validates under `model.eval()`; early stopping and best-SAM checkpoint use that value | Works as designed, but see F1. |
+
+### 6.2 Findings that make the Exp 4 and Exp 5 comparison unfair
+
+| # | Finding | Evidence | Effect |
+|---|---|---|---|
+| **F1** | **Train/eval mismatch.** The contraction ran only when `training=False`. The gate was trained without it; early stopping, checkpoint selection and every reported metric used it. | Code: `forward(..., training)` branch. Numerical: with identical weights and input, mean $\alpha$ is 0.574 in train mode and 0.160 in eval mode and MSE rises 0.0072 to 0.0103 (synthetic streams, $d\approx0.29$). Logs, epoch 10, val/train SAM ratio on IIRS: Exp 4 **1.40, 1.43**; Exp 5 **1.75, 1.78**; every other arm **1.03 to 1.07**. val/train MSE ratio: Exp 4 1.75 to 1.92, Exp 5 2.30 to 3.25, others 1.00 to 1.29. On AVIRIS, where stream disagreement is below $\epsilon$ and the contraction is mostly inactive, Exp 4 matches the other arms (SAM ratio 1.04 to 1.06). | The evaluated network is not the trained network. The IIRS and part of the CRIMS deficit of Exp 4/5 is at least partly this. Correlational evidence; section 6.4 gives the test that settles it. |
+| **F2** | **One absolute $\epsilon=0.08$ rad for every dataset, on raw SAM.** | Exp 3 reaches SAM-valid 0.029 rad (AVIRIS), 0.048 (CRIMS), 0.125 (IIRS, 60-epoch seed). | AVIRIS: constraint slack, so $\lambda$ falls and SAM pressure vanishes. IIRS: unreachable, so $\lambda$ only grows. CRIMS: zero-energy pixels (about 28% of validation pixels, 50% of test pixels) are exactly $\pi/2$ with zero gradient (checked: grad norm 0), so raw SAM cannot go below about 0.44 rad on validation (the logged val SAM is 0.48) and a 0.08 rad constraint is unsatisfiable regardless of model quality. |
+| **F3** | **$\lambda$ is driven by Adam.** | Simulation: with a constant violation of 0.01 or 0.5, $\lambda$ after about 10 epochs is 1.81 in both cases. | $\lambda$ is a fixed-speed ramp that ignores how violated the constraint is; it is not dual ascent. |
+| **F4** | **U-PCTF tolerance is not detached.** | `eps_i` has gradient w.r.t. the stream outputs. | The network can lower its own violation by loosening the tolerance. Bounded by `eps_max`, but not intended. |
+| **F5** | **U-PCTF penalty is about 40x weaker than Exp 3's.** | Squared violation: $0.3\cdot0.05^2=7.5\times10^{-4}$ against $0.3\cdot0.10=0.03$ for $\lambda\cdot$SAM. | Almost no physics pressure, so Exp 5 behaves like Exp 2. |
+| **F6** | **U-PCTF tolerance is centred too low and its multiplier can only rise.** | Typical pixel gives $\tau=\sigma(-1.5)=0.18$, so tolerance is about 0.046 rad, not 0.08. The violation target is exactly 0 and the hinge is never negative. | Heavier eval-time contraction than intended; $\lambda$ cannot fall. |
+| F7 | `decode_latents` (used by the latent-noise and interpolation probes) passes `logvar_s=None` for Exp 5. | Code. | Its tolerance differs from the one used in `reconstruct`. Not fixed; the downstream tables for Exp 5 are not comparable to its reconstruction table. |
+
+Not checked or not a defect: the sign of the dual update; the bf16 autocast path (SAM, norm and acos run in float32 under autocast); the early-stopping confound (section 4.3), which affects all arms and is addressed by the rerun using matched patience.
+
+### 6.3 What was changed (hpc branch, uncommitted)
+
+| File | Change |
+|---|---|
+| `modules/vae_fusion_pctf.py` | F1: contraction in train and eval (`pctf_contract`, default True). F2: constraint on SAM-valid with per-dataset `pctf_epsilon`; reported `sam` stays raw so selection is comparable. F3: projected dual ascent, $\lambda\leftarrow\mathrm{clip}(\lambda+\eta\,(g-\epsilon),0,\lambda_{max})$ with $\eta=0.02$, $\lambda_0=0.3$, $\lambda_{max}=5$, held in a non-persistent buffer. F4: tolerance computed from detached inputs. F5: linear hinge. F6: $\tau$ offset so a typical pixel gets tolerance $\epsilon$; tolerance range $[0.5\epsilon,1.5\epsilon]$; slack $0.1\bar\epsilon$ so $\lambda$ can fall. The old `log_lambda` is kept as a frozen parameter so 2026-11-18 checkpoints still load with `strict=True` (verified). |
+| `utils/config.py`, `utils/hyperparams.py`, four `hyperparam-config-*.yaml` | New settings. `pctf_epsilon`: IIRS 0.125, AVIRIS 0.029, CRIMS 0.048, M3 0.103 rad, taken from the SAM-valid the Exp 3 arm reached on each dataset. |
+| `train/train.py`, `utils/notify.py` | $\lambda$ is logged each epoch and shown as a `lambda` row in Telegram heartbeats (never logged before). |
+| `scripts/retrain.sh` | `--models` filter. |
+
+Checks run on CPU, synthetic data: $\lambda$ rises when the constraint is violated and falls when slack; eval and `no_grad` leave $\lambda$ untouched; train and eval fusion outputs are identical (max difference 0); the U-PCTF tolerance has no gradient and averages 0.100 for a budget of 0.100; losses stay finite over 12 optimiser steps on both models; old-format state dicts load strictly. A first version of the dual step never moved $\lambda$ (a `no_grad` decorator defeated its own grad-mode guard); the checks caught it and it is fixed. **No GPU run and no real data have been used. The fix is unvalidated until the rerun below.**
+
+Choosing $\epsilon$ from Exp 3's result makes the constraint read "be no worse in angle than the penalty arm and spend the rest on fidelity". It is a defensible reading of the original idea, but it is chosen after seeing Exp 3, so say so when reporting.
+
+### 6.4 Commands (lab box)
+
+**(a) Settle F1 without retraining.** Evaluate the existing 2026-11-18 Exp 4/5 checkpoints as they were trained, with the contraction off. If their PSNR/SSIM on IIRS jump towards Exp 3's, F1 explains the deficit.
+
+```bash
+git checkout hpc && git pull
+mkdir -p results/pctf_nocontract
+for DS in IIRS AVIRIS CRIMS; do for M in vae-fusion-constrained vae-fusion-uncertainty; do for S in 67 69; do
+  PYTHONPATH=. python inference/inference.py --model $M --dataset $DS --seed $S --ckpt-dir model \
+    --set pctf_contract=False --out-json results/pctf_nocontract/${DS}__${M}_s${S}.json
+done; done; done
+```
+Do **not** evaluate the old checkpoints with the new default settings and compare to the logged numbers: the contraction threshold changed (per-dataset $\epsilon$), so those numbers differ from the old ones by construction.
+
+**(b) Rerun with the fixes**, in separate directories so the 2026-11-18 results are untouched. Exp 3 is included so all three arms share the same patience; patience 10 replaces 3 for them.
+
+```bash
+bash scripts/retrain.sh --dry-run --models vae-fusion-sam-penalty,vae-fusion-constrained,vae-fusion-uncertainty \
+  --datasets IIRS,AVIRIS,CRIMS --patience 10 --ckpt-dir model_pctf_v2 --out-dir results_pctf_v2
+# then without --dry-run:
+bash scripts/retrain.sh --models vae-fusion-sam-penalty,vae-fusion-constrained,vae-fusion-uncertainty \
+  --datasets IIRS,AVIRIS,CRIMS --patience 10 --ckpt-dir model_pctf_v2 --out-dir results_pctf_v2
+```
+That is 3 models x 3 datasets x 2 seeds = 18 cells (add `M3` to `--datasets` for 24). Longer patience lengthens every cell; the 2026-11-18 cells took 12 min to 3 h each. Watch the `lambda` row in the Telegram heartbeats: it should rise on IIRS until SAM approaches $\epsilon$, hover on AVIRIS, and stay bounded on CRIMS.
+
+**(c) Latent-noise table for the rerun checkpoints** (same flags as the paper models, different checkpoint directory):
+```bash
+PYTHONPATH=. python inference/inference_final.py --noise-space latent \
+  --sigmas 0.01,0.05,0.1,0.3,0.5,1.0 --ckpt-dir model_pctf_v2 \
+  --models vae-fusion-sam-penalty,vae-fusion-constrained,vae-fusion-uncertainty \
+  --datasets IIRS,AVIRIS,CRIMS --out-dir results/final_latent_noise_pctf_v2
+```
+(U-PCTF's latent-noise path uses the tolerance without the latent-uncertainty term; see F7.)

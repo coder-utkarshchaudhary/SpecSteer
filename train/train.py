@@ -401,11 +401,18 @@ def train_vae(
             if val_dataloader is not None else ""
         )
         epoch_wall = time.time() - epoch_t0
+        # Lagrange multiplier of the constrained fusion arms (None for every other model).
+        # It was never logged before, which made the 2026-11-18 PCTF run un-auditable.
+        _inner = getattr(model, "module", model)
+        _lam = getattr(_inner, "lambda_dual", None)
+        _lam = float(_lam) if (_lam is not None
+                               and getattr(_inner, "loss_mode", "") in ("constrained", "uncertainty")) else None
         logger.info(
             f"Epoch [{epoch}/{epochs}] | "
             f"Loss: {train_loss:.4f} | MSE: {train_mse:.4f} | "
             f"SAM: {train_sam:.4f} | KLD: {train_kld:.4f} | "
             f"LR: {current_lr:.2e} | wall {epoch_wall:.1f}s"
+            + (f" | lambda: {_lam:.3f}" if _lam is not None else "")
             + val_str
         )
 
@@ -421,6 +428,7 @@ def train_vae(
                 "val_kld": val_kld if val_dataloader is not None else None,
                 "val_psnr": val_psnr if val_dataloader is not None else None,
                 "val_ssim": val_ssim if val_dataloader is not None else None,
+                "lambda_dual": _lam,
             })
 
         if wandb_run is not None:

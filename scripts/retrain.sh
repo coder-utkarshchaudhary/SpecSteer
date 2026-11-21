@@ -66,6 +66,7 @@ OVERWRITE=0
 DRY_RUN=0
 SEND_TELEGRAM=1
 INCLUDE_BASELINES=0
+MODELS_FILTER=()
 CKPT_DIR="model"
 OUT_DIR="results"
 
@@ -105,6 +106,7 @@ Options:
   --epochs N             Number of epochs per cell (default: 60)
   --patience N           Early stopping patience (default: 3)
   --include-baselines    Include standard 2D, 1D, and 3D baseline models in grid
+  --models M1,M2...      Only run these registry models (e.g. vae-fusion-sam-penalty,vae-fusion-constrained)
   --ckpt-dir DIR         Checkpoint root directory (default: model)
   --out-dir DIR          Results directory (default: results)
   -h, --help             Show this help message
@@ -124,6 +126,7 @@ while [[ $# -gt 0 ]]; do
         --epochs)            EPOCHS="$2"; shift 2 ;;
         --patience)          PATIENCE="$2"; shift 2 ;;
         --include-baselines) INCLUDE_BASELINES=1; shift ;;
+        --models)            IFS=',' read -r -a MODELS_FILTER <<< "$2"; shift 2 ;;
         --ckpt-dir)          CKPT_DIR="$2"; shift 2 ;;
         --out-dir)           OUT_DIR="$2"; shift 2 ;;
         -h|--help)           usage; exit 0 ;;
@@ -139,6 +142,22 @@ fi
 CONFIGS=("${FUSION_CONFIGS[@]}")
 if (( INCLUDE_BASELINES == 1 )); then
     CONFIGS+=("${BASELINE_CONFIGS[@]}")
+fi
+
+# Optional --models filter: keep only configs whose model name is listed.
+if (( ${#MODELS_FILTER[@]} > 0 )); then
+    FILTERED=()
+    for cfg in "${CONFIGS[@]}"; do
+        cfg_model="${cfg%%|*}"
+        for m in "${MODELS_FILTER[@]}"; do
+            if [[ "${cfg_model}" == "${m}" ]]; then FILTERED+=("${cfg}"); break; fi
+        done
+    done
+    CONFIGS=("${FILTERED[@]}")
+    if (( ${#CONFIGS[@]} == 0 )); then
+        echo "ERROR: --models matched no configured model (got: ${MODELS_FILTER[*]})" >&2
+        exit 1
+    fi
 fi
 
 TOTAL_PLANNED=$(( ${#DATASETS[@]} * ${#CONFIGS[@]} * ${#SEEDS[@]} ))

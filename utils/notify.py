@@ -256,6 +256,8 @@ class _EpochRow:
     val_psnr: Optional[float] = None
     val_ssim: Optional[float] = None
     is_best: bool = False
+    # Lagrange multiplier of the constrained fusion arms; None for every other model.
+    lambda_dual: Optional[float] = None
 
 
 EXPERIMENT_TITLES = {
@@ -343,6 +345,7 @@ class RunNotifier:
             val_kld=_maybe_float(metrics.get("val_kld")),
             val_psnr=_maybe_float(metrics.get("val_psnr")),
             val_ssim=_maybe_float(metrics.get("val_ssim")),
+            lambda_dual=_maybe_float(metrics.get("lambda_dual")),
         )
         self._rows.append(row)
         self._latest = row
@@ -384,6 +387,8 @@ class RunNotifier:
             f"{'psnr':<8}{'-':>12}{_fmt(r.val_psnr, 12, 2):>12}",
             f"{'ssim':<8}{'-':>12}{_fmt(r.val_ssim, 12, 4):>12}",
         ]
+        if r.lambda_dual is not None:
+            rows.append(f"{'lambda':<8}{r.lambda_dual:>12.4f}{'-':>12}")
         lines.append("<pre>" + html.escape("\n".join(rows)) + "</pre>")
 
         if self._best_epoch is not None and self._best_val is not None:

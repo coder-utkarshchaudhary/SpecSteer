@@ -47,6 +47,7 @@ _SETTINGS_FIELDS: set[str] = {
     "reduced_dims",
     "vae_our_fusion_hidden",
     "vae_our_aux_mse_weight",
+    "pctf_epsilon",
     "vae_standard_base_ch",
     "vae_standard_n_down",
     "vae_standard_latent_ch",

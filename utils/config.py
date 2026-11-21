@@ -118,6 +118,22 @@ class Settings:
     # reconstruction term stays on the baselines' scale. It.3 sweeps {0.05, 0.1}.
     vae_our_aux_mse_weight: float = 0.1
 
+    # --- PCTF / U-PCTF constrained fusion (modules/vae_fusion_pctf.py) ---
+    # SAM-valid budget epsilon in RADIANS for the constraint E[SAM_valid(x, x_f)] <= eps.
+    # Per-dataset (YAML): one absolute value cannot be right for sensors whose
+    # achievable SAM differs 4x, so each YAML sets it from what the SAM-penalty arm reaches.
+    pctf_epsilon: float = 0.08
+    # True: the trust-region contraction alpha * min(1, eps/d) is applied in BOTH
+    # training and eval (what is trained is what is evaluated). False reproduces the
+    # 2026-11-18 behaviour of an eval-only contraction (train used alpha_cand) when
+    # combined with old checkpoints: `--set pctf_contract=False` evaluates the
+    # network as it was actually trained.
+    pctf_contract: bool = True
+    # Projected dual ascent: lambda <- clip(lambda + dual_lr * (violation), 0, lambda_max).
+    pctf_dual_lr: float = 0.02
+    pctf_lambda_init: float = 0.3
+    pctf_lambda_max: float = 5.0
+
     # Derived spatial (computed in __post_init__)
     conv_output_c: int = field(init=False)
     conv_output_h: int = field(init=False)
